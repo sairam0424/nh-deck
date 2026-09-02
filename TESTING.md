@@ -79,13 +79,17 @@ coding-style convention (`tests/render.test.ts` corresponds to
 `src/render.ts`, etc.), rather than being colocated next to source files.
 File naming: `*.test.ts`.
 
-## CI Scope (deferred matrix)
+## CI Scope
 
-CI for this walking skeleton runs as a **single job on `ubuntu-latest`**,
-running `npm run build && npm test`. The full 3-OS (Linux/macOS/Windows) ×
-multi-Node-version (20/22+) matrix is an explicit, deliberate deferral — not
-an oversight — and is only added once this single-OS skeleton is proven
-green. Do not add the matrix preemptively.
+CI runs the full cross-platform matrix: `ubuntu-latest` / `macos-14` /
+`windows-latest` × Node 20/22/latest (9 combinations, `fail-fast: false`),
+each running `npm run build && npm test` plus a packaging smoke test. This
+started as a single `ubuntu-latest` job for the walking skeleton and was
+deliberately deferred to a matrix only once that skeleton was proven
+green — that sequencing is preserved here as history, not as the current
+scope. `tests/pdfExport.test.ts` (a real, unmocked PDF-export test) now
+runs on every combination, genuinely exercising Chrome/Chromium detection
+on all three operating systems, not just Linux.
 
 ## Cross-references
 

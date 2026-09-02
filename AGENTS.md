@@ -32,7 +32,7 @@ Requires Node.js LTS 20 or 22+. No other setup step exists at this project's cur
 - **Test**: `npm test`
   Runs the Vitest suite, including the CLI's own snapshot-test harness for rendered HTML output (see below).
 - **Run locally without a global install**: `node dist/index.js <command>` after building, or `npm link` for a global `nh-deck` binary during development.
-- **CI**: a single GitHub Actions job (`ubuntu-latest` only) runs build + test on every PR. The full 3-OS × multi-Node-version matrix is explicitly deferred until this walking skeleton is green — see `Context.md` for the roadmap.
+- **CI**: the full cross-platform matrix (`ubuntu-latest`/`macos-14`/`windows-latest` × Node 20/22/latest, 9 combinations, `fail-fast: false`) runs build + test on every PR, including a real, unmocked PDF-export test on every combination. Started as a single `ubuntu-latest` job for the walking skeleton, expanded once that skeleton went green — see `Context.md` for the history.
 
 ## Snapshot Testing (the render-output source of truth)
 
@@ -74,7 +74,7 @@ nh-deck/
     cli.test.ts                      — Vitest integration test: spawns the real CLI, asserts on
                                         stdout with the ephemeral port normalized before comparison
   .github/workflows/
-    ci.yml                             — single-OS (ubuntu-latest) build+test+pack-smoke-test job
+    ci.yml                             — 9-combination matrix (3 OS x 3 Node versions) build+test+pack-smoke-test job
 ```
 
 ## Commit & PR Conventions
@@ -98,5 +98,5 @@ Same template as every sibling project in this suite — see this repo's own `Br
 
 - **KaTeX and Mermaid are deferred, not forgotten.** The reference project (deckrun) supports LaTeX math via KaTeX and diagrams via Mermaid. This walking skeleton explicitly defers both — they are a documented fast-follow, not a silent gap. Do not quietly work around their absence with a CDN script tag in rendered HTML; that would violate the local-first constraint. See `Context.md` for the roadmap position.
 - **No bundler means no code-splitting, no minification, no tree-shaking.** `tsc`-only output is larger and less optimized than a bundled equivalent. This is an intentional tradeoff (see `../Not-Humans-Lab/decisions.md` for the "no bundler" convention this repo follows), not an oversight — do not "fix" it by introducing esbuild/webpack/rollup without a real, demonstrated need.
-- **Single-OS CI is temporary, not a design decision.** The full 3-OS (ubuntu/macos/windows) × multi-Node-version matrix is deferred until this skeleton is green, per `Context.md`'s roadmap. Do not treat the current single-job CI as evidence that cross-platform behavior (e.g. Chrome/Chromium binary detection paths, which differ by OS) has been verified — it has not yet.
+- **The CI matrix now genuinely exercises cross-platform Chrome/Chromium detection** — `tests/pdfExport.test.ts` runs on all 9 OS/Node combinations, so PDF export's OS-specific binary-detection paths are verified, not just assumed. What's still unverified: visual *fidelity* differences between whichever browser (Chrome/Edge/Brave) `chrome-launcher` happens to detect on a given machine — the matrix proves export works everywhere, not that it looks identical everywhere.
 - **`chrome-launcher`'s binary detection is host-dependent.** If no supported browser is installed, PDF export must fail with a clear, actionable error message — not a silent hang or a cryptic Puppeteer stack trace. Any change to the export path should be tested against "no browser found" as an explicit case.

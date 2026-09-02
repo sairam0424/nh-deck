@@ -8,14 +8,14 @@ nh-deck is a local-first CLI for writing, presenting, and exporting Markdown-bas
 
 **Corrected assumption, for the record:** earlier speculative research about nh-deck guessed it might be a hosted multi-user product with "shareable decks" requiring auth. That assumption was wrong and is now superseded. nh-deck is confirmed local-first, exactly like the reference project: no user accounts, no hosting, no multi-user sharing infrastructure. All docs in this repo, especially `SOUL.md` and the eventual `SECURITY.md`, are written to reflect this reality — not the discarded speculative one. If you find older reasoning anywhere that assumes hosted/multi-user, it is stale and should be corrected on sight.
 
-nh-skills (`../nh-skills/`) is a sibling that already completed its own Phase 1+2 (pre-scaffold docs + walking skeleton, one real skill shipped through a full author→validate→PR→CI→merge loop) — useful as a precedent for house style/conventions, but its product shape (a curated Markdown-skills collection) is unrelated to nh-deck's (a rendering CLI), so its content is referenced for convention, never copied verbatim. daily-dose does not exist yet.
+nh-skills (`../nh-skills/`) and daily-dose (`../daily-dose/`) have both also shipped their own phases — nh-skills now has two skills through the loop, daily-dose ships both HN and arXiv sourcing — see their own repos/Context.md files for their state; their content is useful as house-style precedent but never copied verbatim, since each project's product shape is unrelated to nh-deck's (a rendering CLI).
 
 ## Current state (as of 2026-09-02)
 
-- **Phase 4: walking skeleton in progress** — the render → serve → PDF-export core loop is the current scope. Nothing beyond that loop (themes, templates, transitions, math/diagram rendering) is in scope yet.
-- **Tech stack: decided.** TypeScript on Node.js (LTS 20/22+), Commander.js for the CLI surface, `marked` for Markdown-to-HTML, a plain `node:http` dev server (no framework, no Express), and `puppeteer-core` + `chrome-launcher` for PDF export against a locally-detected Chrome/Chromium/Edge/Brave binary (no bundled Chromium, no Playwright). Build via plain `tsc` (no bundler), producing `dist/index.js` with a preserved shebang as the npm `bin` entry. Tests via Vitest, including a snapshot-test harness for rendered HTML.
+- **Phase 4 walking skeleton: complete.** The render → serve → PDF-export core loop works end-to-end, genuinely verified (a real local HTTP server response, a real 57KB PDF via a detected Chrome install). Themes, templates, transitions, and math/diagram rendering remain out of scope, deliberately.
+- **Tech stack: decided and shipped.** TypeScript on Node.js (LTS 20/22+), Commander.js for the CLI surface, `marked` for Markdown-to-HTML, a plain `node:http` dev server (no framework, no Express), and `puppeteer-core` + `chrome-launcher` for PDF export against a locally-detected Chrome/Chromium/Edge/Brave binary (no bundled Chromium, no Playwright). Build via plain `tsc` (no bundler), producing `dist/index.js` with a preserved shebang as the npm `bin` entry. Tests via Vitest, including a real (unmocked) end-to-end PDF-export test.
 - **KaTeX and Mermaid: explicitly deferred, not silently skipped.** Both are decided-but-not-yet-installed. This is a documented fast-follow — see Roadmap below — not a gap anyone should quietly work around (e.g. via a CDN script tag, which would violate the local-first constraint on its own).
-- **CI: single-OS for now.** One GitHub Actions job on `ubuntu-latest` runs build + test on every PR. The full 3-OS (ubuntu/macos/windows) × multi-Node-version matrix is explicitly deferred until this walking skeleton is green — not part of this phase.
+- **CI: full cross-platform matrix, live.** `ubuntu-latest` / `macos-14` / `windows-latest` × Node 20/22/latest (9 combinations, `fail-fast: false`) all genuinely pass, including the real PDF-export test on every OS — Chrome/Chromium detection is now verified cross-platform, not just on Linux.
 - **License: Apache-2.0**, decided once at the Not-Humans-Lab system level and applied identically across all three sibling projects (see `../Not-Humans-Lab/decisions.md`).
 
 ## Architecture at a glance
@@ -34,25 +34,25 @@ The CLI surface (`src/index.ts`, via Commander.js) wires the `render` and `pdf` 
 - **KaTeX/Mermaid deferred rather than stubbed or CDN-shimmed** — both are real, wanted features, but adding them properly (as local, bundled assets) is more work than this walking skeleton's scope allows, and a CDN shortcut would violate the local-first constraint just to save time now. Documented here explicitly so the gap reads as a decision, not an oversight.
 - **No bundler (`tsc` only)** — matches the reference project's own philosophy and keeps the build step legible; revisit only if a real, demonstrated need (not a hypothetical optimization) shows up.
 - **`puppeteer-core` + `chrome-launcher` over full `puppeteer` or Playwright** — avoids bundling or downloading a Chromium binary, which would be both a larger install footprint and a silent network dependency at `npm install` time — a direct conflict with the local-first constraint.
-- **Single-OS CI for this phase** — the full 3-OS matrix is real work (especially for `chrome-launcher`'s OS-specific binary detection paths) and is deliberately sequenced after this skeleton is green, not skipped.
+- **Single-OS CI first, then the full matrix once green** — the full 3-OS matrix was real work (especially for `chrome-launcher`'s OS-specific binary detection paths), sequenced after the skeleton went green rather than paying that cost upfront. It has since shipped (see Current state above).
 - **License = Apache-2.0** — decided once at the umbrella level, not re-decided per project; see `../Not-Humans-Lab/decisions.md` for the patent-grant rationale.
 
 ## Roadmap
 
 In order — do not build out of sequence:
 
-1. **Finish the Phase 4 walking skeleton.** Render → serve → PDF-export core loop, working end-to-end, with the snapshot-test harness covering rendering output, single-OS CI green.
-2. **Expand CI to the full 3-OS × multi-Node-version matrix.** Only once step 1 is genuinely green — this is explicitly the next step after the skeleton, not a "someday."
-3. **KaTeX (math rendering).** Local, bundled assets only — no CDN. Add as its own dependency decision, not folded silently into an unrelated change.
-4. **Mermaid (diagram rendering).** Same local-asset constraint as KaTeX.
-5. **Themes, templates, transitions** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — a theme system must stay opt-in, never a forced default.
+1. ~~Finish the Phase 4 walking skeleton.~~ Done — render → serve → PDF-export core loop verified end-to-end.
+2. ~~Expand CI to the full 3-OS × multi-Node-version matrix.~~ Done — 9/9 combinations green, including the real PDF-export test on every OS.
+3. Add an automated PDF-export smoke test that runs *inside* every CI job rather than relying on manual local verification alone (partially done: `tests/pdfExport.test.ts` now runs in CI as part of the standard matrix — remaining fast-follow is a dedicated visual/fidelity check across the three detected browser families).
+4. **KaTeX (math rendering).** Local, bundled assets only — no CDN. Add as its own dependency decision, not folded silently into an unrelated change.
+5. **Mermaid (diagram rendering).** Same local-asset constraint as KaTeX.
+6. **Themes, templates, transitions** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — a theme system must stay opt-in, never a forced default.
 
 ## Open risks
 
-- **The walking skeleton is not yet complete** — until render → serve → export actually runs end-to-end with passing snapshot tests, the core loop is a plan, not a proven artifact.
-- **`chrome-launcher`'s cross-platform binary detection is unverified** — single-OS CI means the Windows/macOS detection paths have not yet been exercised in CI, only (at most) locally. This is a known gap the CI-matrix-expansion roadmap step exists to close.
 - **The local-first constraint has not yet been tested against a real "convenience" pressure** (e.g. an actual KaTeX/Mermaid implementation attempt) — the stop-and-ask gate in `CLAUDE.md` is specified but not yet exercised against a real proposed CDN shortcut.
-- **No cross-platform PDF export fidelity check exists yet** — different locally-detected browsers (Chrome vs. Edge vs. Brave) could in principle render/export slightly differently; this has not yet been characterized.
+- **No cross-platform PDF export *fidelity* check exists yet** — the 9-combination CI matrix proves the export path *works* on all three OSes (a real PDF gets produced everywhere), but different locally-detected browsers (Chrome vs. Edge vs. Brave) could in principle render/export slightly differently in appearance; that visual-fidelity comparison has not yet been characterized.
+- **The PDF-export test is genuinely slow under machine contention** — locally observed 5-55s depending on concurrent load; CI runners are dedicated so this shouldn't recur there, but the test's 60s timeout is worth revisiting if it ever proves too tight or too loose in practice.
 
 ---
 *Last updated: 2026-09-02. Agents: keep this current as work progresses — do not let it go stale while `AGENTS.md`/`SOUL.md`/`CLAUDE.md` stay static.*

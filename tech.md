@@ -44,7 +44,7 @@ HTML must not depend on any CDN for correctness.**
 | Playwright | **Hold — rejected** | See Rationale below. |
 | Express or any web framework | **Hold** | The local dev server is a plain `node:http` server on purpose — no framework is needed for "serve one rendered HTML string on an ephemeral port." |
 | Bundler (esbuild/webpack/tsup/rollup) | **Hold** | No bundler at all — matches the reference project's "no bundler" philosophy. `tsc` transpile-only is the entire build step. |
-| Multi-OS / multi-Node CI matrix | **Hold (deferred)** | This walking skeleton runs CI as a single `ubuntu-latest` job. The 3-OS × multi-Node-version matrix is explicitly out of scope until this skeleton is green. |
+| Multi-OS / multi-Node CI matrix | **Adopt** | Live: `ubuntu-latest`/`macos-14`/`windows-latest` × Node 20/22/latest (9 combinations, `fail-fast: false`). Started as a single `ubuntu-latest` job for the walking skeleton, expanded once that skeleton went green. |
 
 ## Rationale (non-obvious choices)
 

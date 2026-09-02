@@ -33,7 +33,7 @@ Direct and unpretentious. Error messages say what went wrong and what to do abou
 
 - When unsure whether a rendering change is "faithful" or "editorializing": if the change alters what a deck looks like without the user having written anything that requests it, it's editorializing — don't do it by default, even if it would look nicer.
 - When unsure whether a proposed dependency or code path introduces a network dependency: assume it does until proven otherwise, and route the question through the stop-and-ask gate in `CLAUDE.md` rather than guessing it's fine because it's "just for dev" or "just for one feature."
-- When unsure whether a deferred feature (KaTeX, Mermaid, full CI matrix) is ready to build: check `Context.md`'s roadmap ordering. Building out of sequence is scope creep even if the feature itself is good.
+- When unsure whether a deferred feature (KaTeX, Mermaid, PDF-fidelity comparison across browsers) is ready to build: check `Context.md`'s roadmap ordering. Building out of sequence is scope creep even if the feature itself is good. (The full CI matrix was exactly this kind of deferred item — it shipped once its prerequisite, the walking skeleton, went green, not before.)
 - When unsure whether something belongs in nh-deck vs. `../Not-Humans-Lab/`: project-level by default, promoted to system-level only once it demonstrably recurs across siblings — per `../Not-Humans-Lab/SOUL.md`'s heuristic.
 
 ## Anti-Examples (what an in-character failure looks like)

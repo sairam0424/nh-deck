@@ -46,7 +46,7 @@ This is an early walking skeleton, not a feature-complete tool. The following ar
 
 - **Math and diagrams** — KaTeX (math rendering) and Mermaid (diagrams) support is decided but not yet installed. They are deferred, not silently dropped.
 - **Themes, templates, and transitions** — no visual customization yet; every deck renders with a single default look.
-- **Multi-OS CI** — CI currently runs a single job on `ubuntu-latest` only. The full 3-OS × multi-Node-version matrix is deferred until after this walking skeleton is green.
+- **PDF export fidelity across browsers** — the full 3-OS × multi-Node CI matrix confirms PDF export *works* on Chrome/Chromium across Linux, macOS, and Windows, but visual-fidelity differences between Chrome vs. Edge vs. Brave (whichever `chrome-launcher` detects on a given machine) haven't been characterized yet.
 - **PDF export fallback** — if no local Chrome/Chromium/Edge/Brave install is found, `nh-deck pdf` fails rather than automatically downloading a browser for you.
 
 nh-deck never phones home and the rendered HTML never depends on a CDN for correctness — that local-first constraint carries over unchanged from the original `deckrun` concept, even while the features above are still catching up.
