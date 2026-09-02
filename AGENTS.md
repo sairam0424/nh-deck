@@ -1,0 +1,102 @@
+# AGENTS.md — nh-deck
+
+This file follows the vendor-neutral [AGENTS.md](https://agents.md) open specification. It is the operational instruction manual for this repository — what to run, where things live, and what not to do.
+
+## Overview
+
+nh-deck is a local-first CLI for writing, presenting, and exporting Markdown-based slide decks — the author's own version of [arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun). You write a deck as a single Markdown file, render it to HTML, present it via a local dev server with live reload, and export it to PDF. No accounts, no hosting, no multi-user sharing infrastructure: the tool runs entirely on the machine it's invoked from.
+
+nh-deck is one of three independent sibling projects (daily-dose, nh-deck, nh-skills) under the **Not-Humans-Lab** umbrella. Not-Humans-Lab (`../Not-Humans-Lab/`) is a docs-only meta-repo holding cross-cutting system-level decisions (license, branch strategy, testing skeleton). This repo is its own standalone GitHub repository — not nested inside Not-Humans-Lab — and is the source of truth for everything specific to nh-deck. Cross-cutting conventions are linked by relative path, never duplicated:
+
+- License rationale: `../Not-Humans-Lab/decisions.md`
+- Branch/commit/PR template: `../Not-Humans-Lab/Branches.md`
+- Testing skeleton: `../Not-Humans-Lab/TESTING.md`
+- System architecture (C4 Level 1): `../Not-Humans-Lab/architecture.md`
+
+## The Local-First Constraint (read this first)
+
+nh-deck never phones home. The CLI makes no outbound network calls in its core render/serve/export path, and the HTML it renders must not depend on any CDN for correctness. This is inherited unmodified from the reference project and is treated as a hard constraint, not a preference — see `SOUL.md` for the full rationale and `CLAUDE.md` for the mechanism that protects it during agent-assisted changes.
+
+## Setup
+
+```bash
+npm install
+```
+
+Requires Node.js LTS 20 or 22+. No other setup step exists at this project's current size — no database, no external service, no API key.
+
+## Build / Test / Run Commands
+
+- **Build**: `npm run build`
+  Runs plain `tsc` (no bundler — transpile only, matching the reference project's "no bundler" philosophy). Emits `dist/index.js` (plus the rest of `dist/`) with a preserved shebang, wired as the npm `bin` entry.
+- **Test**: `npm test`
+  Runs the Vitest suite, including the CLI's own snapshot-test harness for rendered HTML output (see below).
+- **Run locally without a global install**: `node dist/index.js <command>` after building, or `npm link` for a global `nh-deck` binary during development.
+- **CI**: a single GitHub Actions job (`ubuntu-latest` only) runs build + test on every PR. The full 3-OS × multi-Node-version matrix is explicitly deferred until this walking skeleton is green — see `Context.md` for the roadmap.
+
+## Snapshot Testing (the render-output source of truth)
+
+Rendering correctness is verified with Vitest snapshot tests, not manual inspection. A fixture Markdown deck is rendered to HTML and the output is compared against a committed snapshot; a diff fails the test.
+
+- Fixtures live at repo-root `fixtures/` (not nested under `tests/`); test files live in `tests/` (`render.test.ts` for the pure `generateHtml` unit tests, `cli.test.ts` for the CLI-process integration test). This project does not use Vitest's `toMatchSnapshot()` file-based snapshot mechanism — "snapshot test" here means an assertion against the CLI's own stdout with non-deterministic fields (the OS-assigned port) normalized before comparison, not a committed `__snapshots__/` directory.
+- If a rendering change is intentional, update the plain `expect(...).toContain(...)`/`toBe(...)` assertions in `tests/render.test.ts` and `tests/cli.test.ts` directly and review the diff like any other code change — there is no separate snapshot-update command.
+- Prefer this harness over ad hoc manual verification (opening the HTML in a browser and eyeballing it) whenever checking rendering output — see `CLAUDE.md` for why this is a Claude-specific instruction, not just a suggestion.
+
+## Code Style
+
+- TypeScript on Node.js, compiled with plain `tsc` — no bundler, no build-time code generation.
+- Follow the global coding-style rules already in force for this workspace (KISS, DRY, YAGNI, immutability, descriptive naming, 200-400 lines per file typical).
+- CLI surface is built with Commander.js, wired directly in `src/index.ts` — at this project's current size (two subcommands: `render`, `pdf`) there is no `src/commands/` split; revisit only if the subcommand count grows enough to justify it.
+- Markdown-to-HTML conversion goes through the `marked` library. Do not hand-roll Markdown parsing.
+- PDF export goes through `puppeteer-core` + `chrome-launcher` against a locally-detected Chrome/Chromium/Edge/Brave binary. Never bundle a Chromium binary and never add the full `puppeteer` package (which bundles one) — see Security Notes.
+
+## Directory Map
+
+```
+nh-deck/
+  AGENTS.md              — this file
+  CLAUDE.md                — Claude Code addendum (imports this file)
+  SOUL.md                   — behavioral/identity charter (unopinionated rendering, local-first)
+  Context.md                 — living state-of-the-world doc
+  package.json                 — build/test scripts + dependencies
+  tsconfig.json                  — tsc transpile-only config
+  src/
+    index.ts                — CLI entry point (shebang preserved through build), wires the
+                               "render" and "pdf" Commander.js subcommands directly
+    render.ts                 — generateHtml(markdown, title?): markdown -> self-contained HTML
+    server.ts                  — startServer(html, port?): plain node:http dev server, no framework
+    pdfExport.ts                 — exportToPdf(html, outputPath): puppeteer-core + chrome-launcher
+  dist/                           — tsc build output (gitignored, npm bin entry lives here)
+  fixtures/
+    sample.md                      — sample deck used by both render.test.ts and cli.test.ts
+  tests/
+    render.test.ts                  — Vitest unit tests for generateHtml (pure function)
+    cli.test.ts                      — Vitest integration test: spawns the real CLI, asserts on
+                                        stdout with the ephemeral port normalized before comparison
+  .github/workflows/
+    ci.yml                             — single-OS (ubuntu-latest) build+test+pack-smoke-test job
+```
+
+## Commit & PR Conventions
+
+Same template as every sibling project in this suite — see `../Not-Humans-Lab/Branches.md` for the full canonical version (Conventional Commits, trunk-based/GitHub Flow, squash-merge only, PR required even for solo work). Summary:
+
+- Branch naming: `type/scope-slug` (e.g. `feat/deck-pdf-export`, `fix/render-frontmatter-parsing`).
+- Commits: [Conventional Commits](https://www.conventionalcommits.org) — required, drives changelog/versioning.
+- Every change goes through a PR, even solo. CI (`npm run build && npm test`) must pass before merge.
+- Squash-merge only; the squash commit message must itself be a valid Conventional Commit.
+
+## Security Notes
+
+- License: Apache-2.0 (decided once at the Not-Humans-Lab system level, applied identically across daily-dose/nh-deck/nh-skills — see `../Not-Humans-Lab/decisions.md`).
+- Never commit secrets, API keys, or credentials. This tool has no accounts and no hosted backend, so this mostly applies to CI tokens and any local `.env` used for development tooling — not to end-user data, since nh-deck never collects any.
+- **No runtime network dependency in the core render/serve/export path.** This is the single most important security property this repo has, because it is also the core product promise (local-first, never phones home). See `SOUL.md` for the full non-negotiable and `CLAUDE.md` for the required stop-and-ask gate before any diff that would introduce one.
+- **No bundled Chromium.** PDF export uses `puppeteer-core` (no bundled browser binary) plus `chrome-launcher` to detect an already-installed Chrome/Chromium/Edge/Brave on the user's machine. Do not swap in the full `puppeteer` package or add Playwright — both bundle their own browser download step, which is both a larger attack surface and a silent network dependency at `npm install` time.
+- KaTeX and Mermaid are **decided but not yet installed** (see Known Gotchas). Do not add either as a dependency without also confirming their assets ship locally rather than via a CDN `<script>` tag — a CDN dependency in rendered output would violate the local-first constraint even for a supposedly "just for math rendering" fast-follow.
+
+## Known Gotchas
+
+- **KaTeX and Mermaid are deferred, not forgotten.** The reference project (deckrun) supports LaTeX math via KaTeX and diagrams via Mermaid. This walking skeleton explicitly defers both — they are a documented fast-follow, not a silent gap. Do not quietly work around their absence with a CDN script tag in rendered HTML; that would violate the local-first constraint. See `Context.md` for the roadmap position.
+- **No bundler means no code-splitting, no minification, no tree-shaking.** `tsc`-only output is larger and less optimized than a bundled equivalent. This is an intentional tradeoff (see `../Not-Humans-Lab/decisions.md` for the "no bundler" convention this repo follows), not an oversight — do not "fix" it by introducing esbuild/webpack/rollup without a real, demonstrated need.
+- **Single-OS CI is temporary, not a design decision.** The full 3-OS (ubuntu/macos/windows) × multi-Node-version matrix is deferred until this skeleton is green, per `Context.md`'s roadmap. Do not treat the current single-job CI as evidence that cross-platform behavior (e.g. Chrome/Chromium binary detection paths, which differ by OS) has been verified — it has not yet.
+- **`chrome-launcher`'s binary detection is host-dependent.** If no supported browser is installed, PDF export must fail with a clear, actionable error message — not a silent hang or a cryptic Puppeteer stack trace. Any change to the export path should be tested against "no browser found" as an explicit case.

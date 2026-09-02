@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# NOTE: single-OS (ubuntu-latest) job only. The full 3-OS x multi-Node-version
+# matrix is intentionally deferred until after this walking skeleton is green.
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Build
+        run: npm run build
+
+      - name: Run tests
+        run: npx vitest run
+
+      - name: Pack npm tarball
+        run: npm pack
+
+      - name: Packaging smoke test
+        run: |
+          set -euo pipefail
+
+          TARBALL="$(ls ./*.tgz | head -n1)"
+          echo "Packed tarball: ${TARBALL}"
+
+          SMOKE_DIR="$(mktemp -d)"
+          echo "Installing packed tarball into fresh temp dir: ${SMOKE_DIR}"
+
+          # Install the packed tarball exactly as an end user would, so this
+          # also exercises the package.json "bin" wiring and preserved shebang.
+          cd "${SMOKE_DIR}"
+          npm install -g "${GITHUB_WORKSPACE}/${TARBALL}"
+
+          HELP_OUTPUT="$(nh-deck --help)"
+          echo "${HELP_OUTPUT}"
+
+          if ! echo "${HELP_OUTPUT}" | grep -qiE "usage|nh-deck|render|pdf"; then
+            echo "::error::'nh-deck --help' did not print recognizable help output"
+            exit 1
+          fi
