@@ -7,21 +7,19 @@
 
 ## Overall Status
 
-**Phase:** 4 — Walking Skeleton
-**Health:** 🟡 Active / Early
+**Phase:** 4 — Walking Skeleton complete (Phase 7 cross-project reconciliation also done)
+**Health:** 🟢 Stable
 
-nh-deck is an independent, standalone GitHub repository — a local-first
+nh-deck is an independent, standalone GitHub repository (github.com/sairam0424/nh-deck) — a local-first
 CLI tool for writing, presenting, and exporting Markdown-based slide
 decks, in the spirit of `arpitbbhayani/deckrun`. It is one of three
 sibling projects (`daily-dose`, `nh-deck`, `nh-skills`) under the
 "Not-Humans-Lab" umbrella; cross-cutting system-level docs for that
 umbrella live in the separate, docs-only meta-repo at `../Not-Humans-Lab/`
-(linked by relative path, not duplicated here). `nh-skills` has already
-completed its own Phase 1+2 (pre-scaffold docs + walking skeleton) and is
-usable as a completed precedent for house style/conventions — not as
-content to copy, since nh-deck's product shape (a rendering CLI) is
-completely different from a Markdown-skills collection. `daily-dose` does
-not exist yet.
+(linked by relative path for rationale/context; `Branches.md` is copied
+verbatim into this repo since a relative path alone would break for a
+standalone clone). `nh-skills` and `daily-dose` have also shipped their
+own phases — see their own repos for their state.
 
 Tech stack: TypeScript on Node.js (target LTS 20/22+), Commander.js for
 the CLI surface, `marked` for Markdown → HTML (KaTeX math and Mermaid
@@ -45,40 +43,36 @@ shapes the Known Security Considerations.
 | Spec / Plan                                                        | Phase | Status      |
 | -------------------------------------------------------------------- | ----- | ----------- |
 | Pre-scaffold docs (`SECURITY.md`, `SUPPORT.md`, `status.md`, `decisions.md`) | 4     | Complete    |
-| Core loop: render Markdown → HTML, `serve` (local preview), `export --pdf` | 4     | In progress |
-| Single-OS CI (`ubuntu-latest`) for the walking skeleton              | 4     | In progress |
+| Core loop: render Markdown → HTML, `serve` (local preview), `export --pdf` | 4     | **Complete — verified with a real server response and a real 57KB PDF** |
+| Single-OS CI (`ubuntu-latest`) for the walking skeleton              | 4     | Complete, green |
 | 3-OS × multi-Node-version CI matrix expansion                        | 5     | Planned, not started |
 | KaTeX (math) + Mermaid (diagrams) rendering support                  | 6     | Planned, not started |
 
 ## Recent Progress
 
-- Decided and documented the full tech stack: TypeScript on Node.js,
-  Commander.js, `marked`, plain `node:http` dev server, `puppeteer-core` +
-  `chrome-launcher` for PDF export, `tsc`-only build (no bundler), Vitest
-  for tests, Apache-2.0 license (applied identically across all three
-  sibling projects).
-- Corrected an earlier, now-outdated research assumption: nh-deck is
-  confirmed local-first with no hosted multi-user surface — earlier
-  speculative "auth for shareable decks" reasoning does not apply and has
-  been superseded in `SECURITY.md`.
-- Wrote the pre-scaffold governance docs: `SECURITY.md` (local-only server
-  binding, raw-HTML/XSS trust boundary, PDF-export command-injection
-  guardrail, supply-chain policy), `SUPPORT.md`, this file, `decisions.md`,
-  and ADR 0001.
+- Shipped Phase 4's exit criterion for real: `render` genuinely serves
+  HTML over a real local HTTP server (curl-verified), and `pdf` genuinely
+  produced a real, valid 57KB single-page PDF via a locally-detected
+  Chrome install — neither is stubbed.
+- Phase 7 cross-project reconciliation: added `Branches.md` (copied
+  verbatim from Not-Humans-Lab), `agent_learning.md`, and
+  `anti-patterns.md` (all three were missing from the original scaffold).
+  Separately fixed a real build bug (`tsc` picking up `tests/*.ts` under
+  its default include, conflicting with `rootDir: "src"`) and a doc/code
+  drift issue (docs described `src/commands/`, `src/render/`, `src/server/`,
+  `src/export/` subdirectories that never existed — the real code is flat).
+- Earlier: decided and documented the full tech stack; corrected the
+  outdated "auth for shareable decks" research assumption in `SECURITY.md`.
 
 ## Upcoming Milestones
 
-1. **Walking-skeleton exit criterion**: `render` → `serve` → `export --pdf`
-   core loop works end to end on a sample deck, with single-OS
-   (`ubuntu-latest`) CI green.
-2. Expand CI to the full 3-OS × multi-Node-version matrix once the
-   walking skeleton is green — explicitly deferred, not part of this
-   phase.
-3. Fast-follow: add KaTeX (math) and Mermaid (diagrams) rendering,
-   bundled locally per the no-CDN constraint in `SECURITY.md` — not
-   before the matrix expansion above.
-4. Add a top-level `README.md` once the skeleton is proven (not before —
-   avoid documenting a shape that might still change).
+1. Expand CI to the full 3-OS × multi-Node-version matrix — the walking
+   skeleton is green, so this is now unblocked.
+2. Fast-follow: add KaTeX (math) and Mermaid (diagrams) rendering, bundled
+   locally per the no-CDN constraint in `SECURITY.md`.
+3. Add a real automated PDF-export CI smoke test (currently only manually
+   verified locally, not yet in the CI pipeline).
+4. Add a top-level `README.md` refresh once KaTeX/Mermaid land.
 
 ## Risks & Blockers
 
@@ -87,12 +81,8 @@ shapes the Known Security Considerations.
   Chrome/Chromium/Edge/Brave binary `chrome-launcher` detects on a given
   machine, since nh-deck deliberately does not bundle its own Chromium
   (see `docs/adr/0001-adopt-ts-node-cli-with-puppeteer-core-export.md`).
-  Acceptable for the walking skeleton; worth revisiting if cross-machine
-  export consistency becomes a real complaint.
+  Acceptable today; worth revisiting if cross-machine export consistency
+  becomes a real complaint.
 - **Risk:** raw HTML in rendered decks is not sanitized by design (see
   `SECURITY.md`) — opening a third-party deck file executes any embedded
   HTML/script it contains. No warning mechanism exists yet for this.
-- **Risk:** because `daily-dose` doesn't exist yet, cross-project
-  conventions (license, doc structure) are only validated against this
-  repo and `nh-skills` so far — watch for drift once `daily-dose` is
-  scaffolded.
