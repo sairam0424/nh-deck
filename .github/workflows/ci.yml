@@ -5,12 +5,14 @@ on:
     branches: [main]
   pull_request:
 
-# NOTE: single-OS (ubuntu-latest) job only. The full 3-OS x multi-Node-version
-# matrix is intentionally deferred until after this walking skeleton is green.
-
 jobs:
   build-and-test:
-    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-14, windows-latest]
+        node-version: [20, 22, latest]
+    runs-on: ${{ matrix.os }}
 
     steps:
       - name: Checkout
@@ -19,7 +21,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: ${{ matrix.node-version }}
 
       - name: Install dependencies
         run: npm install
@@ -34,6 +36,7 @@ jobs:
         run: npm pack
 
       - name: Packaging smoke test
+        shell: bash
         run: |
           set -euo pipefail
 
