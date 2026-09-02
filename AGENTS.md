@@ -9,7 +9,7 @@ nh-deck is a local-first CLI for writing, presenting, and exporting Markdown-bas
 nh-deck is one of three independent sibling projects (daily-dose, nh-deck, nh-skills) under the **Not-Humans-Lab** umbrella. Not-Humans-Lab (`../Not-Humans-Lab/`) is a docs-only meta-repo holding cross-cutting system-level decisions (license, branch strategy, testing skeleton). This repo is its own standalone GitHub repository — not nested inside Not-Humans-Lab — and is the source of truth for everything specific to nh-deck. Cross-cutting conventions are linked by relative path, never duplicated:
 
 - License rationale: `../Not-Humans-Lab/decisions.md`
-- Branch/commit/PR template: `../Not-Humans-Lab/Branches.md`
+- Branch/commit/PR template: `Branches.md` (copied verbatim from Not-Humans-Lab; canonical source is `../Not-Humans-Lab/Branches.md`)
 - Testing skeleton: `../Not-Humans-Lab/TESTING.md`
 - System architecture (C4 Level 1): `../Not-Humans-Lab/architecture.md`
 
@@ -79,7 +79,7 @@ nh-deck/
 
 ## Commit & PR Conventions
 
-Same template as every sibling project in this suite — see `../Not-Humans-Lab/Branches.md` for the full canonical version (Conventional Commits, trunk-based/GitHub Flow, squash-merge only, PR required even for solo work). Summary:
+Same template as every sibling project in this suite — see this repo's own `Branches.md` (Conventional Commits, trunk-based/GitHub Flow, squash-merge only, PR required even for solo work), copied verbatim from `../Not-Humans-Lab/Branches.md` since each repo is independent and cannot rely on a cross-repo relative path surviving a standalone clone. Summary:
 
 - Branch naming: `type/scope-slug` (e.g. `feat/deck-pdf-export`, `fix/render-frontmatter-parsing`).
 - Commits: [Conventional Commits](https://www.conventionalcommits.org) — required, drives changelog/versioning.
