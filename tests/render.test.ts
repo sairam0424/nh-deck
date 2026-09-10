@@ -49,3 +49,54 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
 });
+
+describe("generateHtml — KaTeX math", () => {
+	it("renders inline math via KaTeX", () => {
+		const html = generateHtml("Einstein: $E = mc^2$.");
+
+		expect(html).toContain('class="katex"');
+	});
+
+	it("renders block/display math via KaTeX", () => {
+		const html = generateHtml("$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$");
+
+		expect(html).toContain('class="katex-display"');
+	});
+
+	it("does not treat $ inside inline code as math", () => {
+		const html = generateHtml("Price: `$5` today.");
+
+		expect(html).toContain("<code>$5</code>");
+		expect(html).not.toContain('class="katex"');
+	});
+
+	it("does not treat $ inside a fenced code block as math", () => {
+		const html = generateHtml("```\necho $HOME costs $5\n```");
+
+		expect(html).toContain("echo $HOME costs $5");
+		expect(html).not.toContain('class="katex"');
+	});
+
+	it("gracefully degrades invalid LaTeX instead of throwing", () => {
+		expect(() => generateHtml("Broken: $\\frac{1$.")).not.toThrow();
+		const html = generateHtml("Broken: $\\frac{1$.");
+
+		expect(html).toContain('class="katex-error"');
+	});
+
+	it("does not embed KaTeX CSS/fonts when no math is present", () => {
+		const html = generateHtml("# Just a heading\n\nNo math here.");
+
+		expect(html).not.toContain("KaTeX_Main");
+	});
+
+	it("embeds KaTeX fonts locally with no CDN reference when math is present", () => {
+		const html = generateHtml("Math: $x^2$.");
+
+		expect(html).toContain("KaTeX_Main");
+		expect(html).not.toMatch(/https?:\/\/cdn\./i);
+		expect(html).not.toContain("unpkg.com");
+		expect(html).not.toContain("jsdelivr.net");
+		expect(html).not.toContain("cdnjs.cloudflare.com");
+	});
+});
