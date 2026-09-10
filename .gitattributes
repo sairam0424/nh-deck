@@ -1,0 +1,13 @@
+# Force LF line endings for all text files, regardless of the checkout
+# platform's own core.autocrlf setting. Without this, Windows runners
+# (core.autocrlf=true by default) check out these already-LF-committed
+# files as CRLF, which fails Biome's format check (biome ci .) — every
+# text file in this repo, verified directly against a failing Windows CI
+# run on 2026-09-10.
+* text=auto eol=lf
+
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
