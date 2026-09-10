@@ -197,4 +197,38 @@ describe("CLI: nh-deck render — error handling", () => {
     },
     STARTUP_TIMEOUT_MS,
   );
+
+  it(
+    "rejects a non-numeric --port with a clear error before starting the server",
+    async () => {
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "src/index.ts",
+          "render",
+          "fixtures/sample.md",
+          "--no-open",
+          "--port",
+          "abc",
+        ],
+        { cwd: repoRoot },
+      );
+      activeChild = child;
+
+      let stderr = "";
+      child.stderr?.on("data", (chunk: Buffer) => {
+        stderr += chunk.toString();
+      });
+
+      const exitCode = await new Promise<number | null>((resolve) => {
+        child.once("exit", (code) => resolve(code));
+      });
+
+      expect(stderr).toMatch(/port must be an integer between 0 and 65535/);
+      expect(exitCode).not.toBe(0);
+    },
+    STARTUP_TIMEOUT_MS,
+  );
 });
