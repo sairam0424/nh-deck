@@ -24,15 +24,24 @@ export async function exportToPdf(
     );
   }
 
+  // installations[0] is intentional, not a missing-selection-logic bug:
+  // chrome-launcher's own README documents that "the first installation
+  // returned from this method is used instead" when no explicit chromePath
+  // is given, and getInstallations() returns paths in decreasing priority
+  // order per platform. Do not add custom selection logic here.
   const executablePath = installations[0];
-  const browser = await puppeteer.launch({ executablePath, headless: true });
 
+  let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
   try {
+    browser = await puppeteer.launch({ executablePath, headless: true });
     const page = await browser.newPage();
     await page.setContent(html, { waitUntil: "networkidle0" });
     await page.pdf({ path: outputPath, format: "A4", printBackground: true });
     await page.close();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`Failed to export PDF using ${executablePath}: ${message}`);
   } finally {
-    await browser.close();
+    await browser?.close();
   }
 }
