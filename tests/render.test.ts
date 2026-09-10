@@ -15,95 +15,95 @@ const fixturePath = path.join(repoRoot, "fixtures", "sample.md");
 const fixtureMarkdown = readFileSync(fixturePath, "utf8");
 
 describe("generateHtml", () => {
-  it("renders a complete, self-contained HTML document", () => {
-    const html = generateHtml(fixtureMarkdown, "sample");
+	it("renders a complete, self-contained HTML document", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
 
-    expect(html).toContain("<!DOCTYPE");
-    expect(html).toContain("<html");
-    expect(html).toContain("</html>");
-  });
+		expect(html).toContain("<!DOCTYPE");
+		expect(html).toContain("<html");
+		expect(html).toContain("</html>");
+	});
 
-  it("renders the fixture's heading and code block content", () => {
-    const html = generateHtml(fixtureMarkdown, "sample");
+	it("renders the fixture's heading and code block content", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
 
-    expect(html).toContain("<h1>Getting Started with nh-deck</h1>");
-    expect(html).toContain("nh-deck render fixtures/sample.md --port 4000");
-    expect(html).toContain("<pre><code");
-  });
+		expect(html).toContain("<h1>Getting Started with nh-deck</h1>");
+		expect(html).toContain("nh-deck render fixtures/sample.md --port 4000");
+		expect(html).toContain("<pre><code");
+	});
 
-  it("renders the fixture's bullet list", () => {
-    const html = generateHtml(fixtureMarkdown, "sample");
+	it("renders the fixture's bullet list", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
 
-    expect(html).toContain("<ul>");
-    expect(html).toContain(
-      "<li>Render Markdown to a self-contained HTML document</li>",
-    );
-  });
+		expect(html).toContain("<ul>");
+		expect(html).toContain(
+			"<li>Render Markdown to a self-contained HTML document</li>",
+		);
+	});
 
-  it("renders the fixture's fourth slide with KaTeX math", () => {
-    const html = generateHtml(fixtureMarkdown, "sample");
+	it("renders the fixture's fourth slide with KaTeX math", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
 
-    expect(html).toContain("<h1>A Quick Formula</h1>");
-    expect(html).toContain('class="katex"');
-  });
+		expect(html).toContain("<h1>A Quick Formula</h1>");
+		expect(html).toContain('class="katex"');
+	});
 
-  it("never references an external CDN (local-first constraint)", () => {
-    const html = generateHtml(fixtureMarkdown, "sample");
+	it("never references an external CDN (local-first constraint)", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
 
-    expect(html).not.toMatch(/https?:\/\/cdn\./i);
-    expect(html).not.toContain("unpkg.com");
-    expect(html).not.toContain("jsdelivr.net");
-    expect(html).not.toContain("cdnjs.cloudflare.com");
-  });
+		expect(html).not.toMatch(/https?:\/\/cdn\./i);
+		expect(html).not.toContain("unpkg.com");
+		expect(html).not.toContain("jsdelivr.net");
+		expect(html).not.toContain("cdnjs.cloudflare.com");
+	});
 });
 
 describe("generateHtml — KaTeX math", () => {
-  it("renders inline math via KaTeX", () => {
-    const html = generateHtml("Einstein: $E = mc^2$.");
+	it("renders inline math via KaTeX", () => {
+		const html = generateHtml("Einstein: $E = mc^2$.");
 
-    expect(html).toContain('class="katex"');
-  });
+		expect(html).toContain('class="katex"');
+	});
 
-  it("renders block/display math via KaTeX", () => {
-    const html = generateHtml("$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$");
+	it("renders block/display math via KaTeX", () => {
+		const html = generateHtml("$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$");
 
-    expect(html).toContain('class="katex-display"');
-  });
+		expect(html).toContain('class="katex-display"');
+	});
 
-  it("does not treat $ inside inline code as math", () => {
-    const html = generateHtml("Price: `$5` today.");
+	it("does not treat $ inside inline code as math", () => {
+		const html = generateHtml("Price: `$5` today.");
 
-    expect(html).toContain("<code>$5</code>");
-    expect(html).not.toContain('class="katex"');
-  });
+		expect(html).toContain("<code>$5</code>");
+		expect(html).not.toContain('class="katex"');
+	});
 
-  it("does not treat $ inside a fenced code block as math", () => {
-    const html = generateHtml("```\necho $HOME costs $5\n```");
+	it("does not treat $ inside a fenced code block as math", () => {
+		const html = generateHtml("```\necho $HOME costs $5\n```");
 
-    expect(html).toContain("echo $HOME costs $5");
-    expect(html).not.toContain('class="katex"');
-  });
+		expect(html).toContain("echo $HOME costs $5");
+		expect(html).not.toContain('class="katex"');
+	});
 
-  it("gracefully degrades invalid LaTeX instead of throwing", () => {
-    expect(() => generateHtml("Broken: $\\frac{1$.")).not.toThrow();
-    const html = generateHtml("Broken: $\\frac{1$.");
+	it("gracefully degrades invalid LaTeX instead of throwing", () => {
+		expect(() => generateHtml("Broken: $\\frac{1$.")).not.toThrow();
+		const html = generateHtml("Broken: $\\frac{1$.");
 
-    expect(html).toContain('class="katex-error"');
-  });
+		expect(html).toContain('class="katex-error"');
+	});
 
-  it("does not embed KaTeX CSS/fonts when no math is present", () => {
-    const html = generateHtml("# Just a heading\n\nNo math here.");
+	it("does not embed KaTeX CSS/fonts when no math is present", () => {
+		const html = generateHtml("# Just a heading\n\nNo math here.");
 
-    expect(html).not.toContain("KaTeX_Main");
-  });
+		expect(html).not.toContain("KaTeX_Main");
+	});
 
-  it("embeds KaTeX fonts locally with no CDN reference when math is present", () => {
-    const html = generateHtml("Math: $x^2$.");
+	it("embeds KaTeX fonts locally with no CDN reference when math is present", () => {
+		const html = generateHtml("Math: $x^2$.");
 
-    expect(html).toContain("KaTeX_Main");
-    expect(html).not.toMatch(/https?:\/\/cdn\./i);
-    expect(html).not.toContain("unpkg.com");
-    expect(html).not.toContain("jsdelivr.net");
-    expect(html).not.toContain("cdnjs.cloudflare.com");
-  });
+		expect(html).toContain("KaTeX_Main");
+		expect(html).not.toMatch(/https?:\/\/cdn\./i);
+		expect(html).not.toContain("unpkg.com");
+		expect(html).not.toContain("jsdelivr.net");
+		expect(html).not.toContain("cdnjs.cloudflare.com");
+	});
 });
