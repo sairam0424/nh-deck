@@ -16,3 +16,13 @@ nh-deck render fixtures/sample.md --port 4000
 ```
 
 No accounts, no hosting, no CDN dependencies — just your Markdown file.
+
+---
+
+# A Quick Formula
+
+nh-deck can render inline math like $E = mc^2$, and block equations too:
+
+$$
+\int_0^1 x^2\,dx = \frac{1}{3}
+$$
