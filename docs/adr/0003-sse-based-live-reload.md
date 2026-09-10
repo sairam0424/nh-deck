@@ -83,6 +83,18 @@ Chosen option: **Option 1 — Server-Sent Events.**
   `server.closeAllConnections()` in tests and would need the same
   handling in any future caller that needs a clean, immediate shutdown
   with a watch-mode server still holding an open tab.
+- File-watching itself (not the SSE mechanism, but the trigger feeding
+  it) has its own real caveat: `fs.watch(file, ...)` ties the watch to
+  the file's current inode, so the first "atomic save" (write-temp-then-
+  rename, used by Vim/Neovim and many editors' safe-write mode) silently
+  and permanently stops it from firing again — confirmed live. Fixed by
+  watching the containing directory and filtering by basename
+  (`watchFileForChanges` in `cliHelpers.ts`) instead of the file path
+  directly, which survives renames since the directory itself is never
+  replaced. The watcher's lifetime is now also explicitly tied to the
+  server's close event (`closeWatcherOnServerClose`), closing the gap
+  between this ADR's original draft and the spec's stated requirement
+  that "the watcher must be torn down when the server closes."
 
 ## Confirmation
 
@@ -94,6 +106,12 @@ This decision is confirmed as implemented when:
    (verified: all pre-existing tests pass unmodified).
 3. The reload script and endpoint are same-origin and inline — no
    `http://`/`https://` reference appears anywhere in watch-mode output.
+4. `render --watch` keeps firing reload events across multiple
+   consecutive atomic-save renames, not just the first one (verified
+   directly, both against a standalone repro and the real CLI).
+5. The file watcher is closed when the server closes (verified directly:
+   `closeWatcherOnServerClose` calls `watcher.close()` from the server's
+   `"close"` event listener).
 
 ## More Information
 
