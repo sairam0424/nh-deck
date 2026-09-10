@@ -33,3 +33,6 @@ Thumbs.db
 # Generated PDF exports (convenience ignore) - fixtures/ stays tracked
 *.pdf
 !fixtures/**/*.pdf
+
+# Local git worktrees used for isolated agent-driven implementation work
+.worktrees/

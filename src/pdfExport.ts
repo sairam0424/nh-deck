@@ -11,28 +11,44 @@ import puppeteer from "puppeteer-core";
  * not-yet-implemented feature.
  */
 export async function exportToPdf(
-  html: string,
-  outputPath: string,
+	html: string,
+	outputPath: string,
 ): Promise<void> {
-  const installations = Launcher.getInstallations();
+	const installations = Launcher.getInstallations();
 
-  if (!installations || installations.length === 0) {
-    throw new Error(
-      "No local Chrome, Chromium, Edge, or Brave installation was found. " +
-        "nh-deck requires one of these browsers to be installed on this machine to export PDFs. " +
-        "An automatic download fallback is a planned but not-yet-implemented feature.",
-    );
-  }
+	if (!installations || installations.length === 0) {
+		throw new Error(
+			"No local Chrome, Chromium, Edge, or Brave installation was found. " +
+				"nh-deck requires one of these browsers to be installed on this machine to export PDFs. " +
+				"An automatic download fallback is a planned but not-yet-implemented feature.",
+		);
+	}
 
-  const executablePath = installations[0];
-  const browser = await puppeteer.launch({ executablePath, headless: true });
+	// installations[0] is intentional, not a missing-selection-logic bug:
+	// chrome-launcher's own README documents that "the first installation
+	// returned from this method is used instead" when no explicit chromePath
+	// is given, and getInstallations() returns paths in decreasing priority
+	// order per platform. Do not add custom selection logic here.
+	const executablePath = installations[0];
 
-  try {
-    const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
-    await page.pdf({ path: outputPath, format: "A4", printBackground: true });
-    await page.close();
-  } finally {
-    await browser.close();
-  }
+	let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+	try {
+		browser = await puppeteer.launch({ executablePath, headless: true });
+		const page = await browser.newPage();
+		// "networkidle0"/"networkidle2" are not valid waitUntil values for
+		// setContent() (only for real navigation via goto()) as of
+		// puppeteer-core 25.x's types — setContent() injects HTML directly
+		// rather than navigating, so "load" (fired once that injected content
+		// has finished loading) is the correct and sufficient wait condition
+		// here, especially given nh-deck's local-first constraint: rendered
+		// decks never depend on a network fetch to finish loading.
+		await page.setContent(html, { waitUntil: "load" });
+		await page.pdf({ path: outputPath, format: "A4", printBackground: true });
+		await page.close();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		throw new Error(`Failed to export PDF using ${executablePath}: ${message}`);
+	} finally {
+		await browser?.close();
+	}
 }
