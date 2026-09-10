@@ -29,7 +29,7 @@ export async function exportToPdf(
 
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "load" });
+    await page.setContent(html, { waitUntil: "networkidle0" });
     await page.pdf({ path: outputPath, format: "A4", printBackground: true });
     await page.close();
   } finally {
