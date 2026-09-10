@@ -21,15 +21,22 @@ program
   .option("--no-open", "do not open the deck in the default browser")
   .option("--port <n>", "port to listen on (default: OS-assigned)")
   .action(async (file: string, options: { open: boolean; port?: string }) => {
-    const markdown = readFileSync(file, "utf8");
-    const html = generateHtml(markdown, file);
-    const port = options.port !== undefined ? Number(options.port) : undefined;
-    const { url } = await startServer(html, port);
+    try {
+      const markdown = readFileSync(file, "utf8");
+      const html = generateHtml(markdown, file);
+      const port =
+        options.port !== undefined ? Number(options.port) : undefined;
+      const { url } = await startServer(html, port);
 
-    process.stdout.write(`nh-deck serving ${file} at ${url}\n`);
+      process.stdout.write(`nh-deck serving ${file} at ${url}\n`);
 
-    if (options.open) {
-      await open(url);
+      if (options.open) {
+        await open(url);
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      process.stderr.write(`nh-deck: ${message}\n`);
+      process.exitCode = 1;
     }
   });
 
