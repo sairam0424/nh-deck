@@ -30,6 +30,12 @@ jobs:
       - name: Audit dependencies (production only — see Context.md's Open Risks for the tracked dev-only exception)
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
       - name: Build
         run: npm run build
 

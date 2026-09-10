@@ -1,10 +1,10 @@
-import { spawn, type ChildProcess } from "node:child_process";
-import { fileURLToPath } from "node:url";
-import path from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
 
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 
@@ -20,14 +20,14 @@ let activeChild: ChildProcess | undefined;
 // kill()+wait below, this still guarantees no server process is left running
 // after the test finishes (pass or fail).
 afterEach(() => {
-  if (
-    activeChild &&
-    activeChild.exitCode === null &&
-    activeChild.signalCode === null
-  ) {
-    activeChild.kill("SIGKILL");
-  }
-  activeChild = undefined;
+	if (
+		activeChild &&
+		activeChild.exitCode === null &&
+		activeChild.signalCode === null
+	) {
+		activeChild.kill("SIGKILL");
+	}
+	activeChild = undefined;
 });
 
 /**
@@ -42,239 +42,239 @@ afterEach(() => {
  * can kill directly and deterministically.
  */
 function waitForServingLine(
-  child: ChildProcess,
-  timeoutMs: number,
+	child: ChildProcess,
+	timeoutMs: number,
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    let stdout = "";
-    let stderr = "";
+	return new Promise((resolve, reject) => {
+		let stdout = "";
+		let stderr = "";
 
-    const cleanup = () => {
-      clearTimeout(timer);
-      child.stdout?.off("data", onStdout);
-      child.stderr?.off("data", onStderr);
-      child.off("exit", onExit);
-      child.off("error", onError);
-    };
+		const cleanup = () => {
+			clearTimeout(timer);
+			child.stdout?.off("data", onStdout);
+			child.stderr?.off("data", onStderr);
+			child.off("exit", onExit);
+			child.off("error", onError);
+		};
 
-    const onStdout = (chunk: Buffer) => {
-      stdout += chunk.toString();
-      const match = stdout.match(SERVING_LINE_PATTERN);
-      if (match) {
-        cleanup();
-        resolve(match[0]);
-      }
-    };
+		const onStdout = (chunk: Buffer) => {
+			stdout += chunk.toString();
+			const match = stdout.match(SERVING_LINE_PATTERN);
+			if (match) {
+				cleanup();
+				resolve(match[0]);
+			}
+		};
 
-    const onStderr = (chunk: Buffer) => {
-      stderr += chunk.toString();
-    };
+		const onStderr = (chunk: Buffer) => {
+			stderr += chunk.toString();
+		};
 
-    const onExit = (code: number | null, signal: string | null) => {
-      cleanup();
-      reject(
-        new Error(
-          `nh-deck CLI exited early (code=${code}, signal=${signal}) before announcing its serving URL.\n` +
-            `stdout: ${JSON.stringify(stdout)}\nstderr: ${JSON.stringify(stderr)}`,
-        ),
-      );
-    };
+		const onExit = (code: number | null, signal: string | null) => {
+			cleanup();
+			reject(
+				new Error(
+					`nh-deck CLI exited early (code=${code}, signal=${signal}) before announcing its serving URL.\n` +
+						`stdout: ${JSON.stringify(stdout)}\nstderr: ${JSON.stringify(stderr)}`,
+				),
+			);
+		};
 
-    const onError = (err: Error) => {
-      cleanup();
-      reject(err);
-    };
+		const onError = (err: Error) => {
+			cleanup();
+			reject(err);
+		};
 
-    const timer = setTimeout(() => {
-      cleanup();
-      child.kill("SIGKILL");
-      reject(
-        new Error(
-          `Timed out after ${timeoutMs}ms waiting for the nh-deck CLI to announce its serving URL.\n` +
-            `stdout so far: ${JSON.stringify(stdout)}\nstderr so far: ${JSON.stringify(stderr)}`,
-        ),
-      );
-    }, timeoutMs);
+		const timer = setTimeout(() => {
+			cleanup();
+			child.kill("SIGKILL");
+			reject(
+				new Error(
+					`Timed out after ${timeoutMs}ms waiting for the nh-deck CLI to announce its serving URL.\n` +
+						`stdout so far: ${JSON.stringify(stdout)}\nstderr so far: ${JSON.stringify(stderr)}`,
+				),
+			);
+		}, timeoutMs);
 
-    child.stdout?.on("data", onStdout);
-    child.stderr?.on("data", onStderr);
-    child.on("exit", onExit);
-    child.on("error", onError);
-  });
+		child.stdout?.on("data", onStdout);
+		child.stderr?.on("data", onStderr);
+		child.on("exit", onExit);
+		child.on("error", onError);
+	});
 }
 
 /** Resolves once the child has actually exited, force-killing on timeout. */
 function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) {
-    return Promise.resolve();
-  }
+	if (child.exitCode !== null || child.signalCode !== null) {
+		return Promise.resolve();
+	}
 
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(
-        new Error(
-          `nh-deck CLI process did not exit within ${timeoutMs}ms after being killed.`,
-        ),
-      );
-    }, timeoutMs);
+	return new Promise((resolve, reject) => {
+		const timer = setTimeout(() => {
+			child.kill("SIGKILL");
+			reject(
+				new Error(
+					`nh-deck CLI process did not exit within ${timeoutMs}ms after being killed.`,
+				),
+			);
+		}, timeoutMs);
 
-    child.once("exit", () => {
-      clearTimeout(timer);
-      resolve();
-    });
-  });
+		child.once("exit", () => {
+			clearTimeout(timer);
+			resolve();
+		});
+	});
 }
 
 describe("CLI: nh-deck render", () => {
-  it(
-    "prints the serving URL to stdout and shuts down cleanly on kill",
-    async () => {
-      const child = spawn(
-        process.execPath,
-        [
-          "--import",
-          "tsx",
-          "src/index.ts",
-          "render",
-          "fixtures/sample.md",
-          "--no-open",
-          "--port",
-          "0",
-        ],
-        { cwd: repoRoot },
-      );
-      activeChild = child;
+	it(
+		"prints the serving URL to stdout and shuts down cleanly on kill",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
 
-      const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
 
-      expect(matchedLine).toMatch(SERVING_LINE_PATTERN);
+			expect(matchedLine).toMatch(SERVING_LINE_PATTERN);
 
-      // Strip the OS-assigned port before comparing, since --port 0 means the
-      // actual port differs on every run and a raw equality check would be flaky.
-      const normalized = matchedLine.replace(/:\d+$/, ":<PORT>");
-      expect(normalized).toBe(
-        "nh-deck serving fixtures/sample.md at http://127.0.0.1:<PORT>",
-      );
+			// Strip the OS-assigned port before comparing, since --port 0 means the
+			// actual port differs on every run and a raw equality check would be flaky.
+			const normalized = matchedLine.replace(/:\d+$/, ":<PORT>");
+			expect(normalized).toBe(
+				"nh-deck serving fixtures/sample.md at http://127.0.0.1:<PORT>",
+			);
 
-      child.kill();
-      await waitForExit(child, EXIT_TIMEOUT_MS);
-    },
-    TEST_TIMEOUT_MS,
-  );
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck render — error handling", () => {
-  it(
-    "prints a friendly error and exits non-zero when the file does not exist, instead of an unhandled-rejection stack trace",
-    async () => {
-      const child = spawn(
-        process.execPath,
-        [
-          "--import",
-          "tsx",
-          "src/index.ts",
-          "render",
-          "does-not-exist.md",
-          "--no-open",
-          "--port",
-          "0",
-        ],
-        { cwd: repoRoot },
-      );
-      activeChild = child;
+	it(
+		"prints a friendly error and exits non-zero when the file does not exist, instead of an unhandled-rejection stack trace",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"does-not-exist.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
 
-      let stderr = "";
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
 
-      const exitCode = await new Promise<number | null>((resolve) => {
-        child.once("exit", (code) => resolve(code));
-      });
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
 
-      expect(stderr).toMatch(/^nh-deck: /);
-      expect(stderr).not.toMatch(
-        /UnhandledPromiseRejection|at Object\.<anonymous>/,
-      );
-      expect(exitCode).toBe(1);
-    },
-    STARTUP_TIMEOUT_MS,
-  );
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).not.toMatch(
+				/UnhandledPromiseRejection|at Object\.<anonymous>/,
+			);
+			expect(exitCode).toBe(1);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
 
-  it(
-    "rejects a non-numeric --port with a clear error before starting the server",
-    async () => {
-      const child = spawn(
-        process.execPath,
-        [
-          "--import",
-          "tsx",
-          "src/index.ts",
-          "render",
-          "fixtures/sample.md",
-          "--no-open",
-          "--port",
-          "abc",
-        ],
-        { cwd: repoRoot },
-      );
-      activeChild = child;
+	it(
+		"rejects a non-numeric --port with a clear error before starting the server",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"abc",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
 
-      let stderr = "";
-      child.stderr?.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString();
-      });
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
 
-      const exitCode = await new Promise<number | null>((resolve) => {
-        child.once("exit", (code) => resolve(code));
-      });
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
 
-      expect(stderr).toMatch(/port must be an integer between 0 and 65535/);
-      expect(exitCode).not.toBe(0);
-    },
-    STARTUP_TIMEOUT_MS,
-  );
+			expect(stderr).toMatch(/port must be an integer between 0 and 65535/);
+			expect(exitCode).not.toBe(0);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck pdf", () => {
-  it(
-    "exports a real PDF file and reports the output path on stdout",
-    async () => {
-      const outputPath = path.join(
-        tmpdir(),
-        `nh-deck-cli-pdf-test-${randomUUID()}.pdf`,
-      );
+	it(
+		"exports a real PDF file and reports the output path on stdout",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-test-${randomUUID()}.pdf`,
+			);
 
-      const child = spawn(
-        process.execPath,
-        [
-          "--import",
-          "tsx",
-          "src/index.ts",
-          "pdf",
-          "fixtures/sample.md",
-          outputPath,
-        ],
-        { cwd: repoRoot },
-      );
-      activeChild = child;
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
 
-      let stdout = "";
-      child.stdout?.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString();
-      });
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
 
-      await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
 
-      expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
-      expect(existsSync(outputPath)).toBe(true);
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
 
-      const fileContents = readFileSync(outputPath);
-      expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
 
-      rmSync(outputPath, { force: true });
-    },
-    PDF_EXPORT_TIMEOUT_MS,
-  );
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
 });

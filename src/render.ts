@@ -11,12 +11,12 @@ import { marked } from "marked";
  * fast-follow feature and are NOT wired up here yet.
  */
 export function generateHtml(markdown: string, title?: string): string {
-  const fragment = marked.parse(markdown, { async: false }) as string;
-  const pageTitle = escapeHtml(
-    title && title.trim().length > 0 ? title : "nh-deck",
-  );
+	const fragment = marked.parse(markdown, { async: false }) as string;
+	const pageTitle = escapeHtml(
+		title && title.trim().length > 0 ? title : "nh-deck",
+	);
 
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -100,10 +100,10 @@ ${fragment}
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
 }
