@@ -1,8 +1,14 @@
 #!/usr/bin/env node
-import { readFileSync, watch as watchFile } from "node:fs";
+import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import open from "open";
-import { debounce, parsePort, resolveOutputPath } from "./cliHelpers.js";
+import {
+	closeWatcherOnServerClose,
+	debounce,
+	parsePort,
+	resolveOutputPath,
+	watchFileForChanges,
+} from "./cliHelpers.js";
 import { exportToPdf } from "./pdfExport.js";
 import { generateHtml } from "./render.js";
 import { startServer } from "./server.js";
@@ -33,9 +39,13 @@ program
 			try {
 				const markdown = readFileSync(file, "utf8");
 				const html = generateHtml(markdown, file);
-				const { url, updateHtml } = await startServer(html, options.port, {
-					watch: options.watch,
-				});
+				const { url, updateHtml, server } = await startServer(
+					html,
+					options.port,
+					{
+						watch: options.watch,
+					},
+				);
 
 				process.stdout.write(`nh-deck serving ${file} at ${url}\n`);
 
@@ -49,7 +59,8 @@ program
 							// next file-change event retries.
 						}
 					}, 100);
-					watchFile(file, rerender);
+					const watcher = watchFileForChanges(file, rerender);
+					closeWatcherOnServerClose(watcher, server);
 				}
 
 				if (options.open) {
