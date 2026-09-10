@@ -48,6 +48,20 @@ describe("generateHtml", () => {
     expect(html).not.toContain("jsdelivr.net");
     expect(html).not.toContain("cdnjs.cloudflare.com");
   });
+
+  it('splits the fixture into three <section class="slide"> blocks on its --- delimiters', () => {
+    const html = generateHtml(fixtureMarkdown, "sample");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(3);
+  });
+
+  it("renders each of the fixture's three slide headings inside its own section", () => {
+    const html = generateHtml(fixtureMarkdown, "sample");
+
+    expect(html).toContain("<h1>Getting Started with nh-deck</h1>");
+    expect(html).toContain("<h1>Presenting Your Deck</h1>");
+    expect(html).toContain("<h1>Exporting to PDF</h1>");
+  });
 });
 
 describe("generateHtml — slide segmentation", () => {
