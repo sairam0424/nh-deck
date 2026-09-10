@@ -39,14 +39,20 @@ The CLI surface (`src/index.ts`, via Commander.js) wires the `render` and `pdf` 
 
 ## Roadmap
 
-In order — do not build out of sequence:
+In order — do not build out of sequence. Reconciled 2026-09-10 against a full codebase index (`CODEBASE_INDEX.md`) and three primary-source research docs (`docs/research/*.md`); full rationale in `docs/specs/feature-implementation-roadmap-design.md`.
 
 1. ~~Finish the Phase 4 walking skeleton.~~ Done — render → serve → PDF-export core loop verified end-to-end.
 2. ~~Expand CI to the full 3-OS × multi-Node-version matrix.~~ Done — 9/9 combinations green, including the real PDF-export test on every OS.
-3. Add an automated PDF-export smoke test that runs *inside* every CI job rather than relying on manual local verification alone (partially done: `tests/pdfExport.test.ts` now runs in CI as part of the standard matrix — remaining fast-follow is a dedicated visual/fidelity check across the three detected browser families).
-4. **KaTeX (math rendering).** Local, bundled assets only — no CDN. Add as its own dependency decision, not folded silently into an unrelated change.
-5. **Mermaid (diagram rendering).** Same local-asset constraint as KaTeX.
-6. **Themes, templates, transitions** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — a theme system must stay opt-in, never a forced default.
+3. Quick wins: 5 code-robustness fixes (render try/catch, --port validation, pdf output-path derivation, puppeteer launch/finally) + CI/tooling hardening (npm cache, npm audit, Biome + typecheck gate, PR-checklist doc-drift item).
+4. Real per-slide segmentation (`---` → `<section>` boundaries) — foundational; item 6 below depends on this.
+5. Genuine live-reload for `render` (fixes this doc's own previously-false "live reload" claim in `AGENTS.md`'s Overview).
+6. Presenter notes (HTML-comment convention) + per-slide PDF pagination — both depend on item 4.
+7. Automated cross-browser PDF-export visual-fidelity check (unchanged from the prior roadmap's item 3 fast-follow — independent of items 3–6 and 8–11 below).
+8. **KaTeX (math rendering).** Local, bundled assets only (fonts inlined as base64, no CDN fallback path at all) — add as its own dependency decision, not folded silently into an unrelated change.
+9. **Mermaid (diagram rendering).** DOM-free, Puppeteer-free renderer only — explicitly not `@mermaid-js/mermaid-cli`, which requires full `puppeteer` as a peer dependency.
+10. `--css <path>` opt-out flag for the baseline stylesheet — a smaller, immediately-actionable slice of item 11.
+11. **Full theme, template, and transition system** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — must stay opt-in, never a forced default. Needs its own brainstorming pass when reached.
+12. PNG (and, further out, PPTX) export via the already-detected browser — depends on item 4.
 
 ## Open risks
 
