@@ -2,6 +2,9 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { existsSync, readFileSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { tmpdir } from "node:os";
 
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 
@@ -9,6 +12,7 @@ const SERVING_LINE_PATTERN = /nh-deck serving .* at http:\/\/127\.0\.0\.1:\d+/;
 const STARTUP_TIMEOUT_MS = 8_000;
 const EXIT_TIMEOUT_MS = 3_000;
 const TEST_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXIT_TIMEOUT_MS + 5_000;
+const PDF_EXPORT_TIMEOUT_MS = 60_000;
 
 let activeChild: ChildProcess | undefined;
 
@@ -230,5 +234,47 @@ describe("CLI: nh-deck render — error handling", () => {
       expect(exitCode).not.toBe(0);
     },
     STARTUP_TIMEOUT_MS,
+  );
+});
+
+describe("CLI: nh-deck pdf", () => {
+  it(
+    "exports a real PDF file and reports the output path on stdout",
+    async () => {
+      const outputPath = path.join(
+        tmpdir(),
+        `nh-deck-cli-pdf-test-${randomUUID()}.pdf`,
+      );
+
+      const child = spawn(
+        process.execPath,
+        [
+          "--import",
+          "tsx",
+          "src/index.ts",
+          "pdf",
+          "fixtures/sample.md",
+          outputPath,
+        ],
+        { cwd: repoRoot },
+      );
+      activeChild = child;
+
+      let stdout = "";
+      child.stdout?.on("data", (chunk: Buffer) => {
+        stdout += chunk.toString();
+      });
+
+      await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+      expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+      expect(existsSync(outputPath)).toBe(true);
+
+      const fileContents = readFileSync(outputPath);
+      expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+      rmSync(outputPath, { force: true });
+    },
+    PDF_EXPORT_TIMEOUT_MS,
   );
 });
