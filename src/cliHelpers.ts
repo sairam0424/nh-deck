@@ -6,13 +6,13 @@ import { InvalidArgumentError } from "commander";
  * handler runs at all, so an invalid port never reaches http.Server.listen().
  */
 export function parsePort(value: string): number {
-  const port = Number(value);
-  if (!Number.isInteger(port) || port < 0 || port > 65535) {
-    throw new InvalidArgumentError(
-      "port must be an integer between 0 and 65535.",
-    );
-  }
-  return port;
+	const port = Number(value);
+	if (!Number.isInteger(port) || port < 0 || port > 65535) {
+		throw new InvalidArgumentError(
+			"port must be an integer between 0 and 65535.",
+		);
+	}
+	return port;
 }
 
 /**
@@ -22,17 +22,17 @@ export function parsePort(value: string): number {
  * Always guards against the resolved output equalling the resolved input.
  */
 export function resolveOutputPath(file: string, output?: string): string {
-  const outputPath =
-    output ??
-    (extname(file) === ".md" ? file.replace(/\.md$/, ".pdf") : `${file}.pdf`);
+	const outputPath =
+		output ??
+		(extname(file) === ".md" ? file.replace(/\.md$/, ".pdf") : `${file}.pdf`);
 
-  if (resolve(outputPath) === resolve(file)) {
-    throw new Error(
-      `Refusing to overwrite the source file (${file}). Pass a different output path.`,
-    );
-  }
+	if (resolve(outputPath) === resolve(file)) {
+		throw new Error(
+			`Refusing to overwrite the source file (${file}). Pass a different output path.`,
+		);
+	}
 
-  return outputPath;
+	return outputPath;
 }
 
 /**
@@ -41,14 +41,14 @@ export function resolveOutputPath(file: string, output?: string): string {
  * multiple change events for a single logical file save.
  */
 export function debounce<Args extends unknown[]>(
-  fn: (...args: Args) => void,
-  delayMs: number,
+	fn: (...args: Args) => void,
+	delayMs: number,
 ): (...args: Args) => void {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  return (...args: Args) => {
-    if (timer !== undefined) {
-      clearTimeout(timer);
-    }
-    timer = setTimeout(() => fn(...args), delayMs);
-  };
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	return (...args: Args) => {
+		if (timer !== undefined) {
+			clearTimeout(timer);
+		}
+		timer = setTimeout(() => fn(...args), delayMs);
+	};
 }
