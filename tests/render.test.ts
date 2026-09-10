@@ -49,3 +49,45 @@ describe("generateHtml", () => {
     expect(html).not.toContain("cdnjs.cloudflare.com");
   });
 });
+
+describe("generateHtml — slide segmentation", () => {
+  it("wraps single-slide content in exactly one <section> when there is no delimiter", () => {
+    const html = generateHtml("# Only slide\n\nSome text.");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+  });
+
+  it("splits into multiple sections on a --- preceded by a blank line", () => {
+    const html = generateHtml(
+      "# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.",
+    );
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(2);
+    expect(html).toContain("<h1>Slide 1</h1>");
+    expect(html).toContain("<h1>Slide 2</h1>");
+  });
+
+  it("does not split on a --- immediately after a paragraph (setext H2 heading)", () => {
+    const html = generateHtml("Some Text\n---\nMore text.");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+    expect(html).toContain("<h2>Some Text</h2>");
+  });
+
+  it("does not split on a --- inside a fenced code block", () => {
+    const html = generateHtml(
+      "Before.\n\n```\ncode\n---\nmore code\n```\n\nAfter.",
+    );
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+    expect(html).toContain("---\nmore code");
+  });
+
+  it("filters out an empty slide produced by two consecutive delimiters", () => {
+    const html = generateHtml(
+      "# Slide 1\n\nFirst.\n\n---\n\n---\n\n# Slide 2\n\nSecond.",
+    );
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(2);
+  });
+});
