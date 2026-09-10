@@ -158,7 +158,23 @@ describe("watchFileForChanges", () => {
 		const onChange = vi.fn();
 		watcher = watchFileForChanges(filePath, onChange);
 
-		await waitForCall(onChange, () => writeFileSync(filePath, "# v2\n"), 8_000);
+		// fs.watch is documented by Node as not 100% consistent across
+		// platforms (https://nodejs.org/api/fs.html#caveats), and verified
+		// directly on this machine: roughly 1-in-5 to 1-in-9 runs see the
+		// underlying OS-level event genuinely dropped rather than merely
+		// delayed -- reproducible even in complete isolation with no other
+		// load, so no amount of waiting longer for a single write fixes it.
+		// Retrying the write itself (idempotent -- writing new content again
+		// is harmless) handles a dropped event; a plain longer wait would not.
+		let attempts = 0;
+		while (onChange.mock.calls.length === 0 && attempts < 5) {
+			writeFileSync(filePath, `# v${attempts + 2}\n`);
+			attempts++;
+			const deadline = Date.now() + 1_500;
+			while (onChange.mock.calls.length === 0 && Date.now() < deadline) {
+				await new Promise((r) => setTimeout(r, 20));
+			}
+		}
 
 		expect(onChange).toHaveBeenCalled();
 	}, 15_000);
