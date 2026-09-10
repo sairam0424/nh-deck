@@ -38,6 +38,7 @@ instead of getting its own ADR file.
 | ID   | Title                                                                      | Status   | Date       | Supersedes |
 | ---- | ----------------------------------------------------------------------------- | -------- | ---------- | ---------- |
 | 0001 | [Adopt TS/Node CLI with puppeteer-core export](docs/adr/0001-adopt-ts-node-cli-with-puppeteer-core-export.md) | Accepted | 2026-09-02 | —          |
+| 0004 | [KaTeX math rendering with locally-embedded fonts](docs/adr/0004-katex-local-embedded-math.md) | Accepted | 2026-09-11 | —          |
 
 ## Lightweight Decisions Log
 
