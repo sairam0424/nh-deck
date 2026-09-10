@@ -13,24 +13,39 @@ import {
 import { startServer } from "../src/server.js";
 
 /**
- * Triggers `action`, then polls `mock` until it has been called at least
- * once, or throws on timeout. Real fs.watch events are genuinely
- * asynchronous, so this avoids both a flaky fixed sleep and fake timers
- * (which don't drive real OS-level file-watch callbacks).
+ * Calls `action(attempt)`, then polls `mock` until it has been called at
+ * least once. If no call arrives within `windowMs`, retries with a fresh
+ * `action(attempt + 1)` rather than just waiting longer.
+ *
+ * fs.watch is documented by Node as not 100% consistent across platforms
+ * (https://nodejs.org/api/fs.html#caveats), and verified directly on this
+ * machine: roughly 1-in-5 to 1-in-9 runs see the underlying OS-level event
+ * genuinely dropped rather than merely delayed — reproducible even in
+ * complete isolation with no other load. A longer single wait does not
+ * help a dropped event; retrying the trigger does. `action` must be
+ * idempotent-safe to call multiple times (e.g. write new content, or
+ * rename a freshly-created temp file each attempt) since a prior attempt
+ * may have already succeeded at the filesystem level even though its
+ * watch event never fired.
  */
-async function waitForCall(
+async function waitForCallWithRetry(
 	mock: ReturnType<typeof vi.fn>,
-	action: () => void,
-	timeoutMs = 4_000,
+	action: (attempt: number) => void,
+	{ windowMs = 1_500, maxAttempts = 5 } = {},
 ): Promise<void> {
-	action();
-	const start = Date.now();
-	while (mock.mock.calls.length === 0) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error("Timed out waiting for the watcher callback to fire.");
+	for (let attempt = 0; attempt < maxAttempts; attempt++) {
+		action(attempt);
+		const deadline = Date.now() + windowMs;
+		while (mock.mock.calls.length === 0 && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 20));
 		}
-		await new Promise((r) => setTimeout(r, 20));
+		if (mock.mock.calls.length > 0) {
+			return;
+		}
 	}
+	throw new Error(
+		`Timed out waiting for the watcher callback to fire after ${maxAttempts} attempts.`,
+	);
 }
 
 describe("parsePort", () => {
@@ -158,23 +173,9 @@ describe("watchFileForChanges", () => {
 		const onChange = vi.fn();
 		watcher = watchFileForChanges(filePath, onChange);
 
-		// fs.watch is documented by Node as not 100% consistent across
-		// platforms (https://nodejs.org/api/fs.html#caveats), and verified
-		// directly on this machine: roughly 1-in-5 to 1-in-9 runs see the
-		// underlying OS-level event genuinely dropped rather than merely
-		// delayed -- reproducible even in complete isolation with no other
-		// load, so no amount of waiting longer for a single write fixes it.
-		// Retrying the write itself (idempotent -- writing new content again
-		// is harmless) handles a dropped event; a plain longer wait would not.
-		let attempts = 0;
-		while (onChange.mock.calls.length === 0 && attempts < 5) {
-			writeFileSync(filePath, `# v${attempts + 2}\n`);
-			attempts++;
-			const deadline = Date.now() + 1_500;
-			while (onChange.mock.calls.length === 0 && Date.now() < deadline) {
-				await new Promise((r) => setTimeout(r, 20));
-			}
-		}
+		await waitForCallWithRetry(onChange, (attempt) =>
+			writeFileSync(filePath, `# v${attempt + 2}\n`),
+		);
 
 		expect(onChange).toHaveBeenCalled();
 	}, 15_000);
@@ -192,14 +193,16 @@ describe("watchFileForChanges", () => {
 
 		for (let i = 0; i < 3; i++) {
 			onChange.mockClear();
-			const tempPath = `${filePath}.tmp-${i}`;
-			writeFileSync(tempPath, `# atomic save ${i}\n`);
 
-			await waitForCall(onChange, () => renameSync(tempPath, filePath));
+			await waitForCallWithRetry(onChange, (attempt) => {
+				const tempPath = `${filePath}.tmp-${i}-${attempt}`;
+				writeFileSync(tempPath, `# atomic save ${i} attempt ${attempt}\n`);
+				renameSync(tempPath, filePath);
+			});
 
 			expect(onChange).toHaveBeenCalled();
 		}
-	}, 15_000);
+	}, 30_000);
 
 	it("ignores changes to unrelated files in the same directory", async () => {
 		const onChange = vi.fn();
