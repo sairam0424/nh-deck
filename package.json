@@ -33,7 +33,7 @@
     "commander": "^12.1.0",
     "marked": "^13.0.3",
     "open": "^10.1.0",
-    "puppeteer-core": "^23.6.0"
+    "puppeteer-core": "^25.10.0"
   },
   "devDependencies": {
     "@types/node": "^20.14.0",

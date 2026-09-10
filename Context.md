@@ -53,6 +53,7 @@ In order — do not build out of sequence:
 - **The local-first constraint has not yet been tested against a real "convenience" pressure** (e.g. an actual KaTeX/Mermaid implementation attempt) — the stop-and-ask gate in `CLAUDE.md` is specified but not yet exercised against a real proposed CDN shortcut.
 - **No cross-platform PDF export *fidelity* check exists yet** — the 9-combination CI matrix proves the export path *works* on all three OSes (a real PDF gets produced everywhere), but different locally-detected browsers (Chrome vs. Edge vs. Brave) could in principle render/export slightly differently in appearance; that visual-fidelity comparison has not yet been characterized.
 - **The PDF-export test is genuinely slow under machine contention** — locally observed 5-55s depending on concurrent load; CI runners are dedicated so this shouldn't recur there, but the test's 60s timeout is worth revisiting if it ever proves too tight or too loose in practice.
+- **`vitest`/`vite`/`esbuild` dev-only dependency chain has known moderate/critical advisories** (as of 2026-09-10) that would require a `vitest` 2→5 major-version bump to resolve — deferred, not silently ignored. Zero production exposure (dev/test-tooling only, never shipped in `dist/`). CI's `npm audit` gate is deliberately scoped to `--omit=dev` to reflect this; re-evaluate when a `vitest` major-version upgrade is otherwise on the roadmap.
 
 ---
 *Last updated: 2026-09-02. Agents: keep this current as work progresses — do not let it go stale while `AGENTS.md`/`SOUL.md`/`CLAUDE.md` stay static.*
