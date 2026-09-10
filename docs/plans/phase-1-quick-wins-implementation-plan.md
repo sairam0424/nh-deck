@@ -834,14 +834,32 @@ git commit -m "test(server): add direct unit tests for startServer"
 
 ---
 
-### Task 8: CI — add npm dependency caching and an audit step
+### Task 8: CI — add npm dependency caching and an audit step (plus a pre-existing dependency-security fix this task's own audit step would otherwise immediately fail on)
+
+**Ruling (made during setup, before any task was dispatched — recorded here so the implementer does not need to re-discover it):** running `npm audit --audit-level=high` against this repo's current lockfile fails today with 8 pre-existing findings (verified directly in the worktree): a HIGH severity `extract-zip` symlink-traversal issue reached via `puppeteer-core`'s `@puppeteer/browsers` dependency (a **production** dependency), and a CRITICAL+moderate `vitest`/`vite`/`esbuild` chain (all **dev-only**). Verified fix: bumping `puppeteer-core` to `^25.10.0` resolves the production-side HIGH finding with zero test breakage (confirmed: full suite, including the real E2E `tests/pdfExport.test.ts`, passes unchanged against the new version — no code changes needed). The remaining dev-only findings require a `vitest` major-version bump (2→5), which is out of scope for this phase (a bigger, riskier change than "quick wins" covers) — they are deferred and explicitly tracked, not silently ignored. `npm audit --omit=dev --audit-level=high` was verified empirically: after the `puppeteer-core` bump, this command exits 0 (the dev-only findings are excluded from the omit-scoped check), so it is the correct CI gate command, not plain `npm audit --audit-level=high`.
 
 **Files:**
+- Modify: `package.json`, `package-lock.json` (dependency bump)
 - Modify: `.github/workflows/ci.yml`
+- Modify: `Context.md` (log the deferred dev-only finding as an open risk)
 
-**Interfaces:** N/A (CI configuration only)
+**Interfaces:** N/A (dependency version + CI configuration only)
 
-- [ ] **Step 1: Modify the "Set up Node.js" step**
+- [ ] **Step 1: Bump `puppeteer-core` to resolve the production-side HIGH vulnerability**
+
+Run: `npm install puppeteer-core@^25.10.0`
+
+- [ ] **Step 2: Run the full test suite to confirm compatibility**
+
+Run: `npm test`
+Expected: PASS (6/6 tests, including the real E2E `tests/pdfExport.test.ts` — this proves the major-version bump doesn't break the `puppeteer.launch()`/`newPage()`/`setContent()`/`pdf()`/`close()` calls this project uses)
+
+- [ ] **Step 3: Verify the audit gate is now clean at the scoped threshold**
+
+Run: `npm audit --omit=dev --audit-level=high`
+Expected: exit code 0, "found 0 vulnerabilities"
+
+- [ ] **Step 4: Modify the "Set up Node.js" step**
 
 In `.github/workflows/ci.yml`, change:
 
@@ -862,25 +880,33 @@ to:
           cache: 'npm'
 ```
 
-- [ ] **Step 2: Add an audit step after "Install dependencies"**
+- [ ] **Step 5: Add an audit step after "Install dependencies"**
 
 Insert immediately after the existing `- name: Install dependencies` step and before `- name: Build`:
 
 ```yaml
-      - name: Audit dependencies
-        run: npm audit --audit-level=high
+      - name: Audit dependencies (production only — see Context.md's Open Risks for the tracked dev-only exception)
+        run: npm audit --omit=dev --audit-level=high
 ```
 
-- [ ] **Step 3: Verify the workflow file is valid YAML**
+- [ ] **Step 6: Log the deferred dev-only finding in `Context.md`'s "Open risks" section**
+
+Add this bullet to the existing "## Open risks" list in `Context.md`:
+
+```markdown
+- **`vitest`/`vite`/`esbuild` dev-only dependency chain has known moderate/critical advisories** (as of 2026-09-10) that would require a `vitest` 2→5 major-version bump to resolve — deferred, not silently ignored. Zero production exposure (dev/test-tooling only, never shipped in `dist/`). CI's `npm audit` gate is deliberately scoped to `--omit=dev` to reflect this; re-evaluate when a `vitest` major-version upgrade is otherwise on the roadmap.
+```
+
+- [ ] **Step 7: Verify the workflow file is valid YAML**
 
 Run: `node -e "require('node:fs').readFileSync('.github/workflows/ci.yml', 'utf8')" && npx -y yaml-lint .github/workflows/ci.yml 2>/dev/null || python3 -c "import yaml, sys; yaml.safe_load(open('.github/workflows/ci.yml'))" 2>/dev/null || echo "no local YAML linter available — will be validated by GitHub Actions on push"`
-Expected: no parse error (if no local YAML linter is available, this is validated by the actual CI run after push, per Step 4 below)
+Expected: no parse error (if no local YAML linter is available, this is validated by the actual CI run after push, per Step 8 below)
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add .github/workflows/ci.yml
-git commit -m "ci: cache npm dependencies and add npm audit --audit-level=high"
+git add package.json package-lock.json .github/workflows/ci.yml Context.md
+git commit -m "fix(deps): bump puppeteer-core to ^25.10.0, cache npm in CI, add scoped npm audit gate"
 ```
 
 ---
@@ -937,7 +963,7 @@ Expected: both PASS. If `lint` reports findings on existing code, fix them now (
 
 - [ ] **Step 5: Add CI steps for both, ahead of the existing Build step**
 
-In `.github/workflows/ci.yml`, insert after the "Audit dependencies" step added in Task 8 and before "Build":
+In `.github/workflows/ci.yml`, insert after the "Audit dependencies (production only — see Context.md's Open Risks for the tracked dev-only exception)" step added in Task 8 and before "Build":
 
 ```yaml
       - name: Typecheck
