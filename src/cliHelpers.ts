@@ -1,4 +1,5 @@
 import { InvalidArgumentError } from "commander";
+import { extname, resolve } from "node:path";
 
 /**
  * Commander custom option-parser for --port. Validates before the action
@@ -12,4 +13,24 @@ export function parsePort(value: string): number {
     );
   }
   return port;
+}
+
+/**
+ * Derives the PDF output path for the `pdf` command. If no explicit output
+ * is given, replaces a trailing .md with .pdf, or appends .pdf if the input
+ * has no .md suffix (never silently returns the unchanged input path).
+ * Always guards against the resolved output equalling the resolved input.
+ */
+export function resolveOutputPath(file: string, output?: string): string {
+  const outputPath =
+    output ??
+    (extname(file) === ".md" ? file.replace(/\.md$/, ".pdf") : `${file}.pdf`);
+
+  if (resolve(outputPath) === resolve(file)) {
+    throw new Error(
+      `Refusing to overwrite the source file (${file}). Pass a different output path.`,
+    );
+  }
+
+  return outputPath;
 }

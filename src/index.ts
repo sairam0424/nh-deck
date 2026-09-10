@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { Command } from "commander";
 import open from "open";
-import { parsePort } from "./cliHelpers.js";
+import { parsePort, resolveOutputPath } from "./cliHelpers.js";
 import { generateHtml } from "./render.js";
 import { startServer } from "./server.js";
 import { exportToPdf } from "./pdfExport.js";
@@ -43,11 +43,11 @@ program
   .command("pdf <file> [output]")
   .description("Export a Markdown deck to PDF.")
   .action(async (file: string, output?: string) => {
-    const markdown = readFileSync(file, "utf8");
-    const html = generateHtml(markdown, file);
-    const outputPath = output ?? file.replace(/\.md$/, ".pdf");
-
     try {
+      const markdown = readFileSync(file, "utf8");
+      const html = generateHtml(markdown, file);
+      const outputPath = resolveOutputPath(file, output);
+
       await exportToPdf(html, outputPath);
       process.stdout.write(`Wrote PDF to ${outputPath}\n`);
     } catch (error) {
