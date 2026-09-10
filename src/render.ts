@@ -137,15 +137,21 @@ ${slidesHtml}
  * slide. A stream with no "hr" tokens at all produces exactly one group
  * (the required backward-compatibility case for a deck with no delimiter).
  *
- * That backward-compatibility case must hold even when the sole group is
- * itself empty or whitespace-only: `marked.lexer("")` returns `[]` and
- * `marked.lexer("   \n\n   ")` returns a single "space" token, so without
- * this guard the general empty-group filter below would discard the only
- * group and produce zero slides for an empty/whitespace-only deck — a
- * silent violation of the "zero delimiters -> exactly one section"
- * invariant. `groups.length === 1` is only true when no "hr" token was
- * found at all (each "hr" causes one extra push), so this carve-out never
- * affects the multi-delimiter case tested above.
+ * If every group turns out empty (or whitespace-only), the general filter
+ * below would discard all of them and return zero slides — a silent blank
+ * page with no error. This happens not only for an empty/whitespace-only
+ * deck with no "hr" token (`marked.lexer("")` -> `[]`,
+ * `marked.lexer("   \n\n   ")` -> a single "space" token, so `groups` has
+ * exactly one, already-empty entry), but also for a deck consisting solely
+ * of one or more `---` delimiters plus whitespace (e.g. "---", or
+ * "---\n\n---"): every "hr" token pushes an additional empty group, so
+ * `groups` ends up with two or more empty entries instead of one. Rescuing
+ * only when `groups.length === 1` catches the former case but misses the
+ * latter, so the rescue fires whenever *every* group is empty, regardless
+ * of how many "hr"-caused splits produced them — and collapses back down to
+ * exactly one (empty) group, preserving the "never render zero sections"
+ * invariant without rendering a pile of redundant blank slides for a
+ * document that has no visible content anywhere.
  */
 function splitIntoSlides(tokens: Token[]): Token[][] {
   const groups: Token[][] = [];
@@ -163,8 +169,8 @@ function splitIntoSlides(tokens: Token[]): Token[][] {
   const nonEmptyGroups = groups.filter((group) =>
     group.some((token) => token.type !== "space"),
   );
-  if (nonEmptyGroups.length === 0 && groups.length === 1) {
-    return groups;
+  if (nonEmptyGroups.length === 0) {
+    return [groups[0]];
   }
   return nonEmptyGroups;
 }

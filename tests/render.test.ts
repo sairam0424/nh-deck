@@ -116,4 +116,22 @@ describe("generateHtml — slide segmentation", () => {
     const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
     expect(sectionCount).toBe(1);
   });
+
+  it("wraps a deck consisting solely of a single --- delimiter in exactly one <section>", () => {
+    const html = generateHtml("---");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+  });
+
+  it("wraps a deck consisting solely of two --- delimiters in exactly one <section>", () => {
+    const html = generateHtml("---\n\n---");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+  });
+
+  it("wraps a leading --- typed before any slide content in exactly one <section>", () => {
+    const html = generateHtml("---\n\n   ");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+  });
 });
