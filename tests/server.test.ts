@@ -66,15 +66,17 @@ describe("startServer — watch mode", () => {
 
 		const messagePromise = new Promise<string>((resolve, reject) => {
 			const req = http.get(`${url}/__nh-deck-reload`, (res) => {
+				// The response headers only arrive once the server has already
+				// registered this client in its SSE client list (registration
+				// happens synchronously, before the headers are flushed), so
+				// triggering the update here — instead of after a fixed sleep —
+				// removes the race with no arbitrary delay needed.
 				res.on("data", (chunk: Buffer) => resolve(chunk.toString()));
 				res.on("error", reject);
+				updateHtml("<p>v2</p>");
 			});
 			req.on("error", reject);
 		});
-
-		// Give the request a moment to actually connect before triggering the update.
-		await new Promise((r) => setTimeout(r, 50));
-		updateHtml("<p>v2</p>");
 
 		const message = await messagePromise;
 		expect(message).toContain("data: reload");

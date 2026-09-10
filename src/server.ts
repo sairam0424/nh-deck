@@ -58,6 +58,12 @@ export function startServer(
 					Connection: "keep-alive",
 				});
 				sseClients.push(res);
+				// Flush headers immediately rather than waiting for the first
+				// SSE message. Without this, Node buffers the header block
+				// until the first res.write(), so a connected browser's
+				// EventSource would not report the connection as open until
+				// the first reload event — long after it actually connected.
+				res.flushHeaders();
 				req.on("close", () => {
 					const index = sseClients.indexOf(res);
 					if (index !== -1) sseClients.splice(index, 1);
