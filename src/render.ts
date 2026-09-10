@@ -136,6 +136,16 @@ ${slidesHtml}
  * empty group; those are filtered out rather than rendered as a blank
  * slide. A stream with no "hr" tokens at all produces exactly one group
  * (the required backward-compatibility case for a deck with no delimiter).
+ *
+ * That backward-compatibility case must hold even when the sole group is
+ * itself empty or whitespace-only: `marked.lexer("")` returns `[]` and
+ * `marked.lexer("   \n\n   ")` returns a single "space" token, so without
+ * this guard the general empty-group filter below would discard the only
+ * group and produce zero slides for an empty/whitespace-only deck — a
+ * silent violation of the "zero delimiters -> exactly one section"
+ * invariant. `groups.length === 1` is only true when no "hr" token was
+ * found at all (each "hr" causes one extra push), so this carve-out never
+ * affects the multi-delimiter case tested above.
  */
 function splitIntoSlides(tokens: Token[]): Token[][] {
   const groups: Token[][] = [];
@@ -149,9 +159,14 @@ function splitIntoSlides(tokens: Token[]): Token[][] {
     }
   }
   groups.push(current);
-  return groups.filter((group) =>
+
+  const nonEmptyGroups = groups.filter((group) =>
     group.some((token) => token.type !== "space"),
   );
+  if (nonEmptyGroups.length === 0 && groups.length === 1) {
+    return groups;
+  }
+  return nonEmptyGroups;
 }
 
 function escapeHtml(value: string): string {

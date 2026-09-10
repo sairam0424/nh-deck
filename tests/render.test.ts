@@ -90,4 +90,16 @@ describe("generateHtml — slide segmentation", () => {
     const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
     expect(sectionCount).toBe(2);
   });
+
+  it("wraps an empty deck in exactly one <section> (zero-delimiter backward-compatibility invariant)", () => {
+    const html = generateHtml("");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+  });
+
+  it("wraps a whitespace-only deck in exactly one <section> (zero-delimiter backward-compatibility invariant)", () => {
+    const html = generateHtml("   \n\n   ");
+    const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+    expect(sectionCount).toBe(1);
+  });
 });
