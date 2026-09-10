@@ -44,7 +44,7 @@ In order — do not build out of sequence:
 1. ~~Finish the Phase 4 walking skeleton.~~ Done — render → serve → PDF-export core loop verified end-to-end.
 2. ~~Expand CI to the full 3-OS × multi-Node-version matrix.~~ Done — 9/9 combinations green, including the real PDF-export test on every OS.
 3. Add an automated PDF-export smoke test that runs *inside* every CI job rather than relying on manual local verification alone (partially done: `tests/pdfExport.test.ts` now runs in CI as part of the standard matrix — remaining fast-follow is a dedicated visual/fidelity check across the three detected browser families).
-4. ~~Real per-slide segmentation (`---` → `<section>` boundaries).~~ Done — `generateHtml()` now splits on `---` via `marked`'s lexer/parser token-group split (see `docs/adr/0002-per-slide-segmentation.md`); item 6 below (presenter notes + PDF pagination) can now build on this.
+4. ~~Real per-slide segmentation (`---` → `<section>` boundaries).~~ Done — `generateHtml()` now splits on `---` via `marked`'s lexer/parser token-group split (see `docs/adr/0002-per-slide-segmentation.md`). This is foundational for future live-reload and presenter-notes features.
 5. **KaTeX (math rendering).** Local, bundled assets only — no CDN. Add as its own dependency decision, not folded silently into an unrelated change.
 6. **Mermaid (diagram rendering).** Same local-asset constraint as KaTeX.
 7. **Themes, templates, transitions** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — a theme system must stay opt-in, never a forced default.
