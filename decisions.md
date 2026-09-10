@@ -38,6 +38,7 @@ instead of getting its own ADR file.
 | ID   | Title                                                                      | Status   | Date       | Supersedes |
 | ---- | ----------------------------------------------------------------------------- | -------- | ---------- | ---------- |
 | 0001 | [Adopt TS/Node CLI with puppeteer-core export](docs/adr/0001-adopt-ts-node-cli-with-puppeteer-core-export.md) | Accepted | 2026-09-02 | —          |
+| 0002 | [Adopt per-slide segmentation via marked's lexer/parser split](docs/adr/0002-per-slide-segmentation.md) | Accepted | 2026-09-10 | —          |
 
 ## Lightweight Decisions Log
 

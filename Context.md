@@ -39,14 +39,20 @@ The CLI surface (`src/index.ts`, via Commander.js) wires the `render` and `pdf` 
 
 ## Roadmap
 
-In order — do not build out of sequence:
+Reconciled per `docs/specs/feature-implementation-roadmap-design.md` (2026-09-10), integrating Phase 1–5 implementation plans. In order — do not build out of sequence:
 
 1. ~~Finish the Phase 4 walking skeleton.~~ Done — render → serve → PDF-export core loop verified end-to-end.
 2. ~~Expand CI to the full 3-OS × multi-Node-version matrix.~~ Done — 9/9 combinations green, including the real PDF-export test on every OS.
-3. Add an automated PDF-export smoke test that runs *inside* every CI job rather than relying on manual local verification alone (partially done: `tests/pdfExport.test.ts` now runs in CI as part of the standard matrix — remaining fast-follow is a dedicated visual/fidelity check across the three detected browser families).
-4. **KaTeX (math rendering).** Local, bundled assets only — no CDN. Add as its own dependency decision, not folded silently into an unrelated change.
-5. **Mermaid (diagram rendering).** Same local-asset constraint as KaTeX.
-6. **Themes, templates, transitions** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — a theme system must stay opt-in, never a forced default.
+3. Quick wins: 5 code-robustness fixes + CI/tooling hardening. (Phase 1 — implementation plan in `docs/specs/feature-implementation-roadmap-design.md` §3)
+4. ~~Real per-slide segmentation (`---` → `<section>` boundaries).~~ Done — `generateHtml()` now splits on `---` via `marked`'s lexer/parser token-group split (see `docs/adr/0002-per-slide-segmentation.md`); items 6–7 below (presenter notes + PDF pagination) can now build on this. (Phase 2 — spec §4)
+5. Genuine live-reload for `render`. (Phase 3 — spec §5)
+6. Presenter notes + per-slide PDF pagination. (Phase 5a — spec §6)
+7. Automated cross-browser PDF-export visual-fidelity check. (Existing item 3 — independent, tracked separately)
+8. **KaTeX (math rendering).** Local, bundled assets only — no CDN. Add as its own dependency decision, not folded silently into an unrelated change. (Phase 4a — spec §7; requires explicit scope re-approval per `CLAUDE.md`)
+9. **Mermaid (diagram rendering).** Same local-asset constraint as KaTeX. (Phase 4b — spec §8; requires explicit scope re-approval per `CLAUDE.md`)
+10. **`--css`/`--theme` opt-out flag.** Lighter slice of the full theming system, shipped ahead of it. (Phase 5b — spec §9)
+11. **Full theme/template/transition system** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — a theme system must stay opt-in, never a forced default. (Deferred scope — spec §7)
+12. **PNG (and future PPTX) export.** (Phase 5c — spec §10)
 
 ## Open risks
 
@@ -55,4 +61,4 @@ In order — do not build out of sequence:
 - **The PDF-export test is genuinely slow under machine contention** — locally observed 5-55s depending on concurrent load; CI runners are dedicated so this shouldn't recur there, but the test's 60s timeout is worth revisiting if it ever proves too tight or too loose in practice.
 
 ---
-*Last updated: 2026-09-02. Agents: keep this current as work progresses — do not let it go stale while `AGENTS.md`/`SOUL.md`/`CLAUDE.md` stay static.*
+*Last updated: 2026-09-10. Agents: keep this current as work progresses — do not let it go stale while `AGENTS.md`/`SOUL.md`/`CLAUDE.md` stay static.*
