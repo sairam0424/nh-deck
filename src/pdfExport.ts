@@ -35,7 +35,7 @@ export async function exportToPdf(
   try {
     browser = await puppeteer.launch({ executablePath, headless: true });
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    await page.setContent(html, { waitUntil: "domcontentloaded" });
     await page.pdf({ path: outputPath, format: "A4", printBackground: true });
     await page.close();
   } catch (error) {
