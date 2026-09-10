@@ -19,7 +19,7 @@
 		"start": "node dist/index.js",
 		"test": "vitest run",
 		"test:watch": "vitest",
-		"typecheck": "tsc --noEmit",
+		"typecheck": "tsc --noEmit && node scripts/typecheck-tests.mjs",
 		"lint": "biome ci ."
 	},
 	"repository": {
