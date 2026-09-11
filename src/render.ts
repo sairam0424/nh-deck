@@ -5,6 +5,7 @@ import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
 import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
+import type { ThemeColors } from "./themes.js";
 
 const NOTES_STYLE = `
     .notes {
@@ -34,6 +35,29 @@ const PRINT_PAGINATION_STYLE = `
         break-after: page;
       }
     }`;
+
+/**
+ * Maps a theme's {bg, fg, line, accent, muted} onto nh-deck's own CSS
+ * custom-property names, with fallback chains for themes that omit some
+ * fields (all 4 shipped themes define every field today, but the registry
+ * in themes.ts is designed to allow a future theme with fewer fields --
+ * see docs/specs/theme-system-design.md §7).
+ */
+function themeToCssVarBlock(colors: ThemeColors): string {
+	const border = colors.line ?? colors.muted ?? colors.fg;
+	const muted = colors.muted ?? colors.line ?? colors.fg;
+	const codeBg = colors.muted ?? colors.line ?? colors.bg;
+	const accent = colors.accent ?? colors.fg;
+	return `
+    :root {
+      --nh-bg: ${colors.bg};
+      --nh-fg: ${colors.fg};
+      --nh-border: ${border};
+      --nh-muted: ${muted};
+      --nh-code-bg: ${codeBg};
+      --nh-accent: ${accent};
+    }`;
+}
 
 marked.use(markedKatex({ throwOnError: false }));
 
@@ -96,6 +120,7 @@ export function generateHtml(
 	markdown: string,
 	title?: string,
 	customCss?: string,
+	themeColors?: ThemeColors,
 ): string {
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
@@ -118,6 +143,8 @@ export function generateHtml(
 	const katexStyle = slidesHtml.includes('class="katex"')
 		? getEmbeddedKatexCss()
 		: "";
+	const themeOverride =
+		!customCss && themeColors ? themeToCssVarBlock(themeColors) : "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -130,33 +157,50 @@ ${
 	customCss ??
 	`    :root {
       color-scheme: light dark;
+      --nh-bg: #ffffff;
+      --nh-fg: #1a1a1a;
+      --nh-border: #e0e0e0;
+      --nh-muted: #555555;
+      --nh-code-bg: #f2f2f2;
+      --nh-accent: #0b5fff;
     }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --nh-bg: #121212;
+        --nh-fg: #e6e6e6;
+        --nh-border: #333333;
+        --nh-muted: #b0b0b0;
+        --nh-code-bg: #1e1e1e;
+        --nh-accent: #6ea8ff;
+      }
+    }
+    ${themeOverride}
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       line-height: 1.6;
       max-width: 860px;
       margin: 0 auto;
       padding: 2rem 1.5rem 4rem;
-      color: #1a1a1a;
-      background: #ffffff;
+      color: var(--nh-fg);
+      background: var(--nh-bg);
     }
     h1, h2, h3, h4, h5, h6 {
       line-height: 1.25;
       margin-top: 2rem;
       margin-bottom: 0.75rem;
     }
-    h1 { font-size: 2rem; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.5rem; }
+    h1 { font-size: 2rem; border-bottom: 1px solid var(--nh-border); padding-bottom: 0.5rem; }
     h2 { font-size: 1.5rem; }
     p { margin: 0.75rem 0; }
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      background: #f2f2f2;
+      background: var(--nh-code-bg);
       padding: 0.15em 0.35em;
       border-radius: 4px;
       font-size: 0.9em;
     }
     pre {
-      background: #f2f2f2;
+      background: var(--nh-code-bg);
       padding: 1rem;
       border-radius: 6px;
       overflow-x: auto;
@@ -166,10 +210,10 @@ ${
       padding: 0;
     }
     blockquote {
-      border-left: 4px solid #d0d0d0;
+      border-left: 4px solid var(--nh-border);
       margin: 1rem 0;
       padding: 0.25rem 1rem;
-      color: #555555;
+      color: var(--nh-muted);
     }
     table {
       border-collapse: collapse;
@@ -177,7 +221,7 @@ ${
       margin: 1rem 0;
     }
     th, td {
-      border: 1px solid #d0d0d0;
+      border: 1px solid var(--nh-border);
       padding: 0.5rem 0.75rem;
       text-align: left;
     }
@@ -185,26 +229,20 @@ ${
       max-width: 100%;
     }
     a {
-      color: #0b5fff;
+      color: var(--nh-accent);
+    }
+    .katex {
+      color: var(--nh-fg);
     }
     .slide {
       margin-bottom: 3rem;
       padding-bottom: 2rem;
-      border-bottom: 1px solid #e0e0e0;
+      border-bottom: 1px solid var(--nh-border);
     }
     .slide:last-of-type {
       margin-bottom: 0;
       padding-bottom: 0;
       border-bottom: none;
-    }
-    @media (prefers-color-scheme: dark) {
-      body { color: #e6e6e6; background: #121212; }
-      h1 { border-bottom-color: #333333; }
-      code, pre { background: #1e1e1e; }
-      blockquote { border-left-color: #444444; color: #b0b0b0; }
-      th, td { border-color: #333333; }
-      a { color: #6ea8ff; }
-      .slide { border-bottom-color: #333333; }
     }`
 }
     ${katexStyle}
