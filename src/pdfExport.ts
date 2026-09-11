@@ -1,5 +1,5 @@
-import { Launcher } from "chrome-launcher";
 import puppeteer from "puppeteer-core";
+import { detectBrowserExecutable } from "./browserLaunch.js";
 
 /**
  * Renders the given HTML to a PDF at outputPath using a locally-installed
@@ -14,22 +14,7 @@ export async function exportToPdf(
 	html: string,
 	outputPath: string,
 ): Promise<void> {
-	const installations = Launcher.getInstallations();
-
-	if (!installations || installations.length === 0) {
-		throw new Error(
-			"No local Chrome, Chromium, Edge, or Brave installation was found. " +
-				"nh-deck requires one of these browsers to be installed on this machine to export PDFs. " +
-				"An automatic download fallback is a planned but not-yet-implemented feature.",
-		);
-	}
-
-	// installations[0] is intentional, not a missing-selection-logic bug:
-	// chrome-launcher's own README documents that "the first installation
-	// returned from this method is used instead" when no explicit chromePath
-	// is given, and getInstallations() returns paths in decreasing priority
-	// order per platform. Do not add custom selection logic here.
-	const executablePath = installations[0];
+	const executablePath = detectBrowserExecutable();
 
 	let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 	try {
