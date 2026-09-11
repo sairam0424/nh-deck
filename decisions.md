@@ -39,6 +39,7 @@ instead of getting its own ADR file.
 | ---- | ----------------------------------------------------------------------------- | -------- | ---------- | ---------- |
 | 0001 | [Adopt TS/Node CLI with puppeteer-core export](docs/adr/0001-adopt-ts-node-cli-with-puppeteer-core-export.md) | Accepted | 2026-09-02 | —          |
 | 0002 | [Adopt per-slide segmentation via marked's lexer/parser split](docs/adr/0002-per-slide-segmentation.md) | Accepted | 2026-09-10 | —          |
+| 0003 | [SSE-based live-reload for render --watch](docs/adr/0003-sse-based-live-reload.md) | Accepted | 2026-09-11 | —          |
 
 ## Lightweight Decisions Log
 

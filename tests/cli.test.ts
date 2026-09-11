@@ -1,6 +1,7 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import * as http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +14,7 @@ const STARTUP_TIMEOUT_MS = 8_000;
 const EXIT_TIMEOUT_MS = 3_000;
 const TEST_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXIT_TIMEOUT_MS + 5_000;
 const PDF_EXPORT_TIMEOUT_MS = 60_000;
+const WATCH_TEST_TIMEOUT_MS = 10_000;
 
 let activeChild: ChildProcess | undefined;
 
@@ -276,5 +278,67 @@ describe("CLI: nh-deck pdf", () => {
 			rmSync(outputPath, { force: true });
 		},
 		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck render --watch", () => {
+	it(
+		"pushes a reload event over SSE when the watched file changes",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-watch-test-${randomUUID()}.md`,
+			);
+			writeFileSync(tempFile, "# Original\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+					"--watch",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const reloadPromise = new Promise<string>((resolve, reject) => {
+				const req = http.get(`${url}/__nh-deck-reload`, (res) => {
+					res.on("data", (chunk: Buffer) => {
+						const text = chunk.toString();
+						if (text.includes("data:")) {
+							req.destroy();
+							resolve(text);
+						}
+					});
+					res.on("error", reject);
+				});
+				req.on("error", reject);
+			});
+
+			// Give the SSE connection a moment to establish before triggering a change.
+			await new Promise((r) => setTimeout(r, 300));
+			writeFileSync(tempFile, "# Changed\n");
+
+			const message = await reloadPromise;
+			expect(message).toContain("data: reload");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempFile, { force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
 	);
 });
