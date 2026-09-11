@@ -52,6 +52,16 @@ const PIXEL_DIFF_TOLERANCE_PERCENT = 2;
 // difference. Alpha is deliberately not compared.
 const CHANNEL_DIFF_THRESHOLD = 30;
 
+// This script (dev/CI-only tooling, never shipped) is the only caller that
+// needs this: a freshly-downloaded CI-only Chromium build (installed via
+// browser-actions/setup-chrome specifically so this check has a second,
+// distinct browser to compare against) lacks the setuid-sandbox-helper
+// permissions GitHub Actions containers grant, and crashes with SIGABRT in
+// ZygoteHostImpl::Init() without --no-sandbox. A real end user's own,
+// normally-installed browser never needs this -- the actual CLI export
+// path (src/index.ts) never passes extra launch args.
+const SANDBOX_WORKAROUND_ARGS = ["--no-sandbox", "--disable-setuid-sandbox"];
+
 /**
  * Decodes two same-slide PNG buffers and counts pixels that differ by more
  * than CHANNEL_DIFF_THRESHOLD on any of R, G, or B.
@@ -96,8 +106,18 @@ async function comparePngExports(html, tmpDir, browserA, browserB) {
 	mkdirSync(dirA);
 	mkdirSync(dirB);
 
-	const pathsA = await exportToPng(html, path.join(dirA, "deck.png"), browserA);
-	const pathsB = await exportToPng(html, path.join(dirB, "deck.png"), browserB);
+	const pathsA = await exportToPng(
+		html,
+		path.join(dirA, "deck.png"),
+		browserA,
+		SANDBOX_WORKAROUND_ARGS,
+	);
+	const pathsB = await exportToPng(
+		html,
+		path.join(dirB, "deck.png"),
+		browserB,
+		SANDBOX_WORKAROUND_ARGS,
+	);
 
 	if (pathsA.length !== pathsB.length) {
 		return {
@@ -171,8 +191,8 @@ async function comparePdfExports(html, tmpDir, browserA, browserB) {
 	const pathA = path.join(tmpDir, "a.pdf");
 	const pathB = path.join(tmpDir, "b.pdf");
 
-	await exportToPdf(html, pathA, browserA);
-	await exportToPdf(html, pathB, browserB);
+	await exportToPdf(html, pathA, browserA, SANDBOX_WORKAROUND_ARGS);
+	await exportToPdf(html, pathB, browserB, SANDBOX_WORKAROUND_ARGS);
 
 	const pagesA = countPdfPages(pathA);
 	const pagesB = countPdfPages(pathB);

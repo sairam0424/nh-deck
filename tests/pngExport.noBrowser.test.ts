@@ -54,6 +54,7 @@ describe("exportToPng — no browser installed", () => {
 		expect(launch).toHaveBeenCalledWith({
 			executablePath: "/fake/override/chrome",
 			headless: true,
+			args: [],
 		});
 	});
 });
