@@ -31,14 +31,21 @@ program
 		"--watch",
 		"re-render and auto-refresh the browser when the file changes",
 	)
+	.option(
+		"--css <path>",
+		"path to a custom CSS file that fully replaces the default stylesheet",
+	)
 	.action(
 		async (
 			file: string,
-			options: { open: boolean; port?: number; watch?: boolean },
+			options: { open: boolean; port?: number; watch?: boolean; css?: string },
 		) => {
 			try {
+				const customCss = options.css
+					? readFileSync(options.css, "utf8")
+					: undefined;
 				const markdown = readFileSync(file, "utf8");
-				const html = generateHtml(markdown, file);
+				const html = generateHtml(markdown, file, customCss);
 				const { url, updateHtml, server } = await startServer(
 					html,
 					options.port,
@@ -53,7 +60,7 @@ program
 					const rerender = debounce(() => {
 						try {
 							const updatedMarkdown = readFileSync(file, "utf8");
-							updateHtml(generateHtml(updatedMarkdown, file));
+							updateHtml(generateHtml(updatedMarkdown, file, customCss));
 						} catch {
 							// A transient read failure (e.g. mid-save) is not fatal — the
 							// next file-change event retries.
@@ -77,10 +84,17 @@ program
 program
 	.command("pdf <file> [output]")
 	.description("Export a Markdown deck to PDF.")
-	.action(async (file: string, output?: string) => {
+	.option(
+		"--css <path>",
+		"path to a custom CSS file that fully replaces the default stylesheet",
+	)
+	.action(async (file: string, output?: string, options?: { css?: string }) => {
 		try {
+			const customCss = options?.css
+				? readFileSync(options.css, "utf8")
+				: undefined;
 			const markdown = readFileSync(file, "utf8");
-			const html = generateHtml(markdown, file);
+			const html = generateHtml(markdown, file, customCss);
 			const outputPath = resolveOutputPath(file, output);
 
 			await exportToPdf(html, outputPath);

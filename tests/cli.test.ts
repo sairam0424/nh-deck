@@ -164,6 +164,62 @@ describe("CLI: nh-deck render", () => {
 		},
 		TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"renders with a custom --css file, fully replacing the default stylesheet",
+		async () => {
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-custom-css-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css",
+					cssPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await new Promise<string>((resolve, reject) => {
+				http
+					.get(url, (res) => {
+						let data = "";
+						res.on("data", (chunk: Buffer) => {
+							data += chunk.toString();
+						});
+						res.on("end", () => resolve(data));
+						res.on("error", reject);
+					})
+					.on("error", reject);
+			});
+
+			expect(body).toContain(".slide { color: hotpink; }");
+			expect(body).not.toContain("font-family: -apple-system");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(cssPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck render — error handling", () => {

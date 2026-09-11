@@ -62,7 +62,11 @@ marked.use({
  * `renderMermaidDiagram`, while every other language renders exactly as
  * marked's own default code renderer would.
  */
-export function generateHtml(markdown: string, title?: string): string {
+export function generateHtml(
+	markdown: string,
+	title?: string,
+	customCss?: string,
+): string {
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
 		.map(
@@ -88,7 +92,9 @@ export function generateHtml(markdown: string, title?: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${pageTitle}</title>
   <style>
-    :root {
+${
+	customCss ??
+	`    :root {
       color-scheme: light dark;
     }
     body {
@@ -165,7 +171,8 @@ export function generateHtml(markdown: string, title?: string): string {
       th, td { border-color: #333333; }
       a { color: #6ea8ff; }
       .slide { border-bottom-color: #333333; }
-    }
+    }`
+}
     ${katexStyle}
   </style>
 </head>

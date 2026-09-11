@@ -244,3 +244,33 @@ describe("generateHtml — Mermaid diagrams", () => {
 		expect(html).toContain("<pre><code>plain text\n</code></pre>");
 	});
 });
+
+describe("generateHtml — custom CSS opt-out", () => {
+	it("uses the default baseline stylesheet when no custom CSS is given", () => {
+		const html = generateHtml("# Slide");
+
+		expect(html).toContain("font-family: -apple-system");
+	});
+
+	it("fully replaces the baseline stylesheet when custom CSS is given", () => {
+		const html = generateHtml(
+			"# Slide",
+			undefined,
+			".slide { color: hotpink; }",
+		);
+
+		expect(html).toContain(".slide { color: hotpink; }");
+		expect(html).not.toContain("font-family: -apple-system");
+	});
+
+	it("still embeds KaTeX CSS/fonts alongside custom CSS when math is present", () => {
+		const html = generateHtml(
+			"Math: $x^2$.",
+			undefined,
+			".slide { color: hotpink; }",
+		);
+
+		expect(html).toContain(".slide { color: hotpink; }");
+		expect(html).toContain("KaTeX_Main");
+	});
+});
