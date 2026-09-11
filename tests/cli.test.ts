@@ -226,7 +226,7 @@ describe("CLI: nh-deck render", () => {
 
 describe("CLI: nh-deck render — error handling", () => {
 	it(
-		"prints a friendly error and exits non-zero when the file does not exist, instead of an unhandled-rejection stack trace",
+		"prints a clean 'could not find file' error and exits non-zero when the file does not exist, instead of a raw ENOENT/unhandled-rejection stack trace",
 		async () => {
 			const child = spawn(
 				process.execPath,
@@ -253,7 +253,8 @@ describe("CLI: nh-deck render — error handling", () => {
 				child.once("exit", (code) => resolve(code));
 			});
 
-			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toBe("nh-deck: could not find file 'does-not-exist.md'\n");
+			expect(stderr).not.toMatch(/ENOENT/);
 			expect(stderr).not.toMatch(
 				/UnhandledPromiseRejection|at Object\.<anonymous>/,
 			);
@@ -295,9 +296,75 @@ describe("CLI: nh-deck render — error handling", () => {
 		},
 		STARTUP_TIMEOUT_MS,
 	);
+
+	it(
+		"surfaces the raw ENOENT error and exits non-zero when --css points to a nonexistent file",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css",
+					"/path/to/does-not-exist.css",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			// Current behavior: the top-level try/catch in src/index.ts surfaces
+			// readFileSync's own ENOENT error message verbatim, prefixed with
+			// "nh-deck: " -- there is no custom "--css file not found" message.
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck pdf", () => {
+	it(
+		"prints a clean 'could not find file' error and exits non-zero when the file does not exist",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "pdf", "does-not-exist.md"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(stderr).toBe("nh-deck: could not find file 'does-not-exist.md'\n");
+			expect(stderr).not.toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
 	it(
 		"exports a real PDF file and reports the output path on stdout",
 		async () => {
@@ -406,9 +473,195 @@ describe("CLI: nh-deck pdf", () => {
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);
+
+	it(
+		"exports a paginated PDF with a custom --css file and presenter notes combined",
+		async () => {
+			// Inline fixture deliberately exercising all three features shipped in
+			// the same PR together: three slides (multi-slide pagination), a
+			// standalone HTML-comment presenter note on two of them, and a
+			// --css file that fully replaces the default stylesheet.
+			const combinedMarkdown = [
+				"# Slide One",
+				"",
+				"First slide body.",
+				"",
+				"<!-- remember to smile -->",
+				"",
+				"---",
+				"",
+				"# Slide Two",
+				"",
+				"Second slide body.",
+				"",
+				"<!-- pause for questions -->",
+				"",
+				"---",
+				"",
+				"# Slide Three",
+				"",
+				"Third slide body.",
+				"",
+			].join("\n");
+
+			const mdPath = path.join(
+				tmpdir(),
+				`nh-deck-combined-features-test-${randomUUID()}.md`,
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-combined-test-${randomUUID()}.pdf`,
+			);
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-custom-css-combined-test-${randomUUID()}.css`,
+			);
+			const customCss = ".slide { color: hotpink; }";
+			writeFileSync(mdPath, combinedMarkdown);
+			writeFileSync(cssPath, customCss);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					mdPath,
+					outputPath,
+					"--css",
+					cssPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			// Pagination: three "---"-delimited slides must still produce three
+			// PDF pages even with a custom stylesheet in play -- the print
+			// pagination rule is appended unconditionally after customCss in
+			// src/render.ts, independent of which stylesheet block is used. Same
+			// byte-level page-count technique as tests/pdfExport.test.ts's own
+			// "one PDF page per slide" test.
+			const pageCount = (
+				fileContents.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+			).length;
+			expect(pageCount).toBe(3);
+
+			// CSS + notes: as in the "custom --css file" pdf test above, a
+			// rendered PDF's bytes are the wrong place to look for verbatim CSS
+			// or note text (Chromium's print-to-PDF renders glyphs, not source
+			// text). Call generateHtml directly with the same markdown+CSS --
+			// the exact function pdf's action calls -- to confirm both the
+			// custom stylesheet and both presenter notes are present in the HTML
+			// that was actually fed to the PDF exporter.
+			const html = generateHtml(combinedMarkdown, mdPath, customCss);
+			expect(html).toContain(customCss);
+			expect(html).not.toContain("font-family: -apple-system");
+			expect(html).toContain(
+				'<aside class="notes" hidden>remember to smile</aside>',
+			);
+			expect(html).toContain(
+				'<aside class="notes" hidden>pause for questions</aside>',
+			);
+
+			rmSync(mdPath, { force: true });
+			rmSync(outputPath, { force: true });
+			rmSync(cssPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck pdf — error handling", () => {
+	// The "input file does not exist" case for pdf is covered by the "prints
+	// a clean 'could not find file' error..." test above, in the main "CLI:
+	// nh-deck pdf" describe block.
+
+	it(
+		"surfaces the raw ENOENT error and exits non-zero when --css points to a nonexistent file",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-css-enoent-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					"/path/to/does-not-exist.css",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			// Current behavior: same as render's --css ENOENT test -- the
+			// top-level try/catch surfaces readFileSync's own ENOENT message
+			// verbatim, prefixed with "nh-deck: ".
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+			expect(existsSync(outputPath)).toBe(false);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck png", () => {
+	it(
+		"prints a clean 'could not find file' error and exits non-zero when the file does not exist",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "png", "does-not-exist.md"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(stderr).toBe("nh-deck: could not find file 'does-not-exist.md'\n");
+			expect(stderr).not.toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
 	it(
 		"exports one PNG per slide and reports the first output path on stdout",
 		async () => {
@@ -519,6 +772,56 @@ describe("CLI: nh-deck png", () => {
 			rmSync(cssPath, { force: true });
 		},
 		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck png — error handling", () => {
+	// The "input file does not exist" case for png is covered by the "prints
+	// a clean 'could not find file' error..." test above, in the main "CLI:
+	// nh-deck png" describe block.
+
+	it(
+		"surfaces the raw ENOENT error and exits non-zero when --css points to a nonexistent file",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-css-enoent-test-${randomUUID()}.png`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					"/path/to/does-not-exist.css",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			// Current behavior: same as render's --css ENOENT test -- the
+			// top-level try/catch surfaces readFileSync's own ENOENT message
+			// verbatim, prefixed with "nh-deck: ".
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+			expect(existsSync(outputPath.replace(/\.png$/, "-1.png"))).toBe(false);
+		},
+		STARTUP_TIMEOUT_MS,
 	);
 });
 
