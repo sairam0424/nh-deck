@@ -1,5 +1,9 @@
 import type { Token } from "marked";
 import { marked } from "marked";
+import markedKatex from "marked-katex-extension";
+import { getEmbeddedKatexCss } from "./katexAssets.js";
+
+marked.use(markedKatex({ throwOnError: false }));
 
 /**
  * Converts Markdown source into a complete, self-contained HTML document,
@@ -20,8 +24,15 @@ import { marked } from "marked";
  * external CDN (no <script src="https://...">, no <link href="https://...">).
  * Everything needed to render correctly is inlined.
  *
- * KaTeX (math) and Mermaid (diagrams) rendering are explicitly deferred as a
- * fast-follow feature and are NOT wired up here yet.
+ * KaTeX math (inline `$...$` and block `$$...$$`) renders via
+ * `marked-katex-extension`, which hooks into `marked`'s own tokenizer
+ * extension API -- so `$` inside inline code or a fenced code block is
+ * never mistaken for math (marked's own code tokenization runs first).
+ * Invalid LaTeX degrades to a visible `class="katex-error"` span instead of
+ * throwing (`throwOnError: false`).
+ *
+ * Mermaid (diagrams) rendering is explicitly deferred as a fast-follow
+ * feature and is NOT wired up here yet.
  */
 export function generateHtml(markdown: string, title?: string): string {
 	const tokens = marked.lexer(markdown);
@@ -34,6 +45,13 @@ export function generateHtml(markdown: string, title?: string): string {
 	const pageTitle = escapeHtml(
 		title && title.trim().length > 0 ? title : "nh-deck",
 	);
+	// Only pay the ~360KB embedded-font cost when the deck actually uses
+	// math -- checked against the rendered output itself (KaTeX always
+	// wraps its markup in class="katex"), not against the raw source, so a
+	// deck with zero math incurs zero size cost.
+	const katexStyle = slidesHtml.includes('class="katex"')
+		? getEmbeddedKatexCss()
+		: "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -120,6 +138,7 @@ export function generateHtml(markdown: string, title?: string): string {
       a { color: #6ea8ff; }
       .slide { border-bottom-color: #333333; }
     }
+    ${katexStyle}
   </style>
 </head>
 <body>
