@@ -1,5 +1,30 @@
 import { marked } from "marked";
 import { escapeHtml } from "./htmlEscape.js";
+import { renderMermaidDiagram } from "./mermaidRenderer.js";
+
+marked.use({
+	renderer: {
+		// @ts-expect-error marked.use() expects destructured parameters in types,
+		// but at runtime passes positional arguments for backwards compatibility
+		code(text: string, lang?: string, escaped?: boolean): string {
+			const langString = (lang ?? "").match(/^\S*/)?.[0];
+
+			if (langString === "mermaid") {
+				return renderMermaidDiagram(text);
+			}
+
+			// Everything below exactly replicates marked@13.0.3's own default
+			// code() renderer (verified directly against its source) for every
+			// language other than "mermaid" -- this override must not change how
+			// any other fenced code block renders.
+			const code = `${text.replace(/\n$/, "")}\n`;
+			if (!langString) {
+				return `<pre><code>${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+			}
+			return `<pre><code class="language-${escapeHtml(langString)}">${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+		},
+	},
+});
 
 /**
  * Converts Markdown source into a complete, self-contained HTML document.

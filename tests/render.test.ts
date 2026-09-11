@@ -49,3 +49,45 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
 });
+
+describe("generateHtml — Mermaid diagrams", () => {
+	it("renders a mermaid fenced code block as an SVG diagram", () => {
+		const html = generateHtml("```mermaid\nflowchart TD\n  A --> B\n```");
+
+		expect(html).toContain("<svg");
+		expect(html).not.toContain("```mermaid");
+	});
+
+	it("renders a visible error box for invalid mermaid syntax instead of throwing", () => {
+		expect(() =>
+			generateHtml("```mermaid\nnot a real diagram\n```"),
+		).not.toThrow();
+
+		const html = generateHtml("```mermaid\nnot a real diagram\n```");
+		expect(html).toContain("mermaid-error");
+	});
+
+	it("never references an external CDN when a diagram is present", () => {
+		const html = generateHtml("```mermaid\nflowchart TD\n  A --> B\n```");
+
+		expect(html).not.toMatch(/https?:\/\/cdn\./i);
+		expect(html).not.toContain("unpkg.com");
+		expect(html).not.toContain("jsdelivr.net");
+		expect(html).not.toContain("cdnjs.cloudflare.com");
+		expect(html).not.toContain("fonts.googleapis.com");
+	});
+
+	it("renders a non-mermaid fenced code block exactly as before this phase", () => {
+		const html = generateHtml("```bash\necho hi\n```");
+
+		expect(html).toContain(
+			'<pre><code class="language-bash">echo hi\n</code></pre>',
+		);
+	});
+
+	it("renders a fenced code block with no language tag exactly as before this phase", () => {
+		const html = generateHtml("```\nplain text\n```");
+
+		expect(html).toContain("<pre><code>plain text\n</code></pre>");
+	});
+});
