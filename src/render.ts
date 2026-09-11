@@ -1,12 +1,12 @@
+import type { Tokens } from "marked";
 import { marked } from "marked";
 import { escapeHtml } from "./htmlEscape.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
 
 marked.use({
+	useNewRenderer: true,
 	renderer: {
-		// @ts-expect-error marked.use() expects destructured parameters in types,
-		// but at runtime passes positional arguments for backwards compatibility
-		code(text: string, lang?: string, escaped?: boolean): string {
+		code({ text, lang, escaped }: Tokens.Code): string {
 			const langString = (lang ?? "").match(/^\S*/)?.[0];
 
 			if (langString === "mermaid") {
@@ -33,8 +33,8 @@ marked.use({
  * external CDN (no <script src="https://...">, no <link href="https://...">).
  * Everything needed to render correctly is inlined.
  *
- * KaTeX (math) and Mermaid (diagrams) rendering are explicitly deferred as a
- * fast-follow feature and are NOT wired up here yet.
+ * Mermaid (diagrams) rendering is wired up above via marked renderer override.
+ * KaTeX (math) rendering remains explicitly deferred as a fast-follow feature.
  */
 export function generateHtml(markdown: string, title?: string): string {
 	const fragment = marked.parse(markdown, { async: false }) as string;
