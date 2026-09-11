@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Command } from "commander";
 import open from "open";
 import {
@@ -21,12 +22,19 @@ import { startServer } from "./server.js";
  * (e.g. "ENOENT: no such file or directory, open '...'"). Every other error
  * — including an ENOENT from a missing --css file — falls through to the
  * generic message unchanged.
+ *
+ * The path comparison resolves both sides to absolute paths: on Windows,
+ * Node's fs errors report an absolute `.path` (e.g. `D:\...\file.md`) even
+ * when a relative path was passed in, while POSIX keeps the relative string
+ * as-passed -- a raw `===` comparison only matches on POSIX.
  */
 function formatActionError(error: unknown, file: string): string {
+	const errnoPath = (error as NodeJS.ErrnoException)?.path;
 	if (
 		error instanceof Error &&
 		(error as NodeJS.ErrnoException).code === "ENOENT" &&
-		(error as NodeJS.ErrnoException).path === file
+		typeof errnoPath === "string" &&
+		resolve(errnoPath) === resolve(file)
 	) {
 		return `nh-deck: could not find file '${file}'`;
 	}
