@@ -1,132 +1,277 @@
-# ADR 0006: Phase 5 Polish — `--css` Opt-Out, Presenter Notes, PDF Pagination, and PNG Export
+# 0006. Phase 5 polish: `--css` opt-out, presenter notes, PDF pagination, and PNG export
 
-**Status:** Accepted  
-**Date:** 2026-09-11  
-**Context:** Phase 5 consolidates four complementary user-facing improvements into a single cohesive release, each built on the Phase 4 walking skeleton and Phase 4a–4d quick-win foundations (item 3, plus items 2, 3, 4, 5 from the reconci liationsof the roadmap). All four items ship on a single feature branch (`feat/polish-phase5`) with reconciled documentation, by explicit user choice to avoid the cross-branch friction paid across Phases 2–4b.
+## Status
 
----
+Accepted — 2026-09-11
 
-## Problem Statement
+## Context and Problem Statement
 
-The Phase 4 walking skeleton provides a functional core (render → serve → PDF export) but lacks four distinct but interdependent polish features:
+The Phase 4 walking skeleton provides a functional core (render → serve →
+PDF export) but lacked four distinct, user-facing capabilities: a way to
+opt out of the baseline stylesheet, a way to author presenter notes, an
+explicit and tested mechanism for per-slide PDF pagination, and a way to
+export individual slide images. Phase 5 closes all four gaps in a single
+release on one feature branch (`feat/polish-phase5`), building directly on
+the Phase 4 render/serve/export core and the per-slide segmentation from
+ADR 0002:
 
-1. **No stylesheet opt-out:** the baseline stylesheet is always applied to rendered HTML, with no way to drop it and apply the user's own CSS instead. This locks users into nh-deck's visual defaults and contradicts the local-first, unopinionated-rendering philosophy in `SOUL.md`.
-
-2. **No presenter notes:** a common feature in real slide decks (reveal.js, Marp, Marpit, Slidev) is the ability to author speaker notes (non-visible during presentation) and toggle their visibility during authoring or in a companion window during live presentation. nh-deck currently has no mechanism to store or retrieve presenter notes.
-
-3. **PDF pagination is an implicit side effect:** per-slide pagination in the PDF output was never explicitly designed or verified — it was assumed to "just work" as a browser default when Chrome renders sections with page-break CSS, but the assumption has not been tested against the actual rendered output.
-
-4. **No PNG export:** nh-deck can render to HTML and export to PDF, but users cannot export a deck to a series of PNG images (one per slide), which is useful for sharing individual slides, social media, or accessibility-text-to-image workflows. Similarly, PPTX export is out-of-scope but acknowledged as a possible future extension.
-
-All four issues are user-facing, arrived in a single planning cycle, and depend on the per-slide segmentation and live-reload foundations from Phase 4a–4d (items 4 and 5 of the roadmap).
-
----
+1. **No stylesheet opt-out.** The baseline stylesheet was always applied to
+   rendered HTML, with no way to drop it and use a fully custom one. This
+   locks users into nh-deck's visual defaults, in tension with the
+   unopinionated-rendering non-negotiable in `SOUL.md`.
+2. **No presenter notes.** Common slide tools (reveal.js, Marp, Marpit,
+   Slidev) let authors write speaker notes that stay hidden during normal
+   viewing. nh-deck had no mechanism to author or surface these.
+3. **PDF pagination had no explicit, dedicated CSS rule or test coverage.**
+   Nothing in `render.ts` forced one slide per printed page; pagination
+   behavior was unverified.
+4. **No PNG export.** nh-deck could render to HTML and export to PDF, but
+   not export individual slide images, which is useful for sharing single
+   slides, social posts, or accessibility workflows.
 
 ## Decision Drivers
 
-- **Unopinionated rendering (SOUL.md requirement):** nh-deck must not force a visual style on users. The `--css` opt-out flag allows users who disagree with the baseline stylesheet to use their own, preserving user agency.
-- **Feature parity with related tools:** reveal.js, Marp, Marpit, and Slidev all support presenter notes in some form. Absence in nh-deck is a notable gap for users migrating from those tools.
-- **Verify and document existing PDF pagination:** the current code never explicitly verified that per-slide PDF pagination works as intended. Codifying the mechanism prevents silent regression.
-- **Completeness of export surface:** having multiple export formats (HTML, PDF, PNG, eventually PPTX) increases nh-deck's utility for different use cases and workflows.
-- **Deferrable scope:** PPTX export, additional notes-visualization modes, and CSS-theme templating are explicitly out of this decision and reserved for future phases.
-
----
+- **Unopinionated rendering (`SOUL.md`).** nh-deck must not force a visual
+  style on users; a `--css` opt-out preserves user agency over the whole
+  deck's appearance.
+- **Feature parity with related tools.** reveal.js, Marp, Marpit, and
+  Slidev all support some form of presenter notes; the absence was a
+  notable gap for users coming from those tools.
+- **Testable pagination.** Per-slide pagination in PDF output should be
+  driven by an explicit, named CSS rule with test coverage, not left as an
+  unverified assumption about browser or stylesheet defaults.
+- **Completeness of the export surface.** Supporting PNG alongside HTML and
+  PDF increases nh-deck's utility for sharing and accessibility use cases.
+- **Avoid duplicating browser-detection logic.** PDF and PNG export both
+  need a locally installed Chrome/Chromium/Edge/Brave binary; that
+  detection logic should exist once, not twice.
 
 ## Considered Options
 
-### Option 1 (Chosen): `--css <path>` opt-in-replacement design
+### `--css <path>`: full-replacement vs. merge/append
 
-The `--css` flag allows users to specify a local stylesheet path. If provided, the baseline stylesheet is **not** applied; the user-supplied stylesheet is used instead. This is simple, predictable, and preserves the "render faithfully" philosophy: nh-deck renders the deck structure faithfully and does not editorialize; the user's stylesheet is the only decoration applied.
+The chosen design: `--css <path>` (on both `render` and `pdf`) reads the
+given file's contents and substitutes them for nh-deck's default
+typography/layout stylesheet block in `generateHtml`'s `<style>` template
+(`src/render.ts:129-209` — `customCss ?? <default block>`). The KaTeX
+stylesheet (when math is present), the presenter-notes visibility CSS
+(`NOTES_STYLE`), and the print-pagination rule (`PRINT_PAGINATION_STYLE`)
+are appended unconditionally after that block regardless of `--css`
+(`src/render.ts:210-212`) — so a custom-CSS deck still gets notes-hiding
+and per-slide print pagination by default; only the visual/typography
+defaults are replaced.
 
-**Alternative (merge/append design):** Merge or append the user's stylesheet after the baseline, so both are active. Rejected because it is less predictable — the outcome depends on CSS specificity and rule order, creating "why did my custom rule not work?" support cases. Replacement is clearer: "If you specify `--css`, you get exactly what you specify, period."
+**Alternative (merge/append):** layer the user's stylesheet on top of the
+baseline instead of replacing it. Rejected because the outcome would depend
+on CSS specificity and cascade order, producing "why didn't my rule take
+effect?" confusion. Full replacement is simpler to reason about: "if you
+pass `--css`, you get exactly what you specify for layout and typography."
 
-### Option 2 (Chosen): Presenter notes via marked tokenizer extraction + `?notes` toggle
+### Presenter notes: HTML comments + `?notes` query toggle, vs. directives or a companion window
 
-Presenter notes are authored as HTML comments in the Markdown source (e.g., `<!-- presenter: This slide introduces the concept -->`) on a per-slide basis. During render, these comments are extracted via a custom `marked` renderer token handler and stored in the rendered HTML as opaque data attributes (e.g., `data-presenter-notes`). A `?notes` query-string toggle in the client-side script conditionally displays the notes panel (or toggles its visibility on keypress).
+Presenter notes are authored as standalone HTML comments inside a slide's
+Markdown (e.g. `<!-- remember to breathe -->` on its own line). `marked`'s
+own tokenizer already emits a distinct `"html"`-type token for a
+comment on its own line; `extractNotes` (`src/presenterNotes.ts`) scans a
+slide's token group for such tokens and, for each one matching
+`/^<!--([\s\S]*?)-->/`, extracts and trims the interior text. `generateHtml`
+renders each extracted note as `<aside class="notes" hidden>` (escaped)
+appended inside that slide's `<section class="slide">` (`src/render.ts:103-108`).
 
-**Why HTML comments, not Marpit-style directives (`::: notes ... :::`)?** nh-deck has no directive system and no intention of building one. Directives require a separate parsing pass and a well-defined rule set (what counts as a directive, what directives are valid, error handling). HTML comments require only an HTML comment token to already exist in the Markdown → HTML pipeline; `marked` already provides this token, so no new parsing logic is needed.
+Visibility is controlled by the `hidden` attribute together with
+`NOTES_STYLE` (`src/render.ts:9-29`): `.notes` is `display: none` by
+default and becomes visible via the `:not([hidden])` selector as a
+fixed-position panel pinned to the bottom of the viewport; a
+`@media print` rule forces `display: none !important` so notes never
+appear in PDF or PNG output. The toggle itself is a one-time check in an
+inline `<script>` at the end of the document body (`src/render.ts:217-223`):
+on page load, if `new URLSearchParams(location.search).has("notes")` is
+true, every `.notes` element's `hidden` attribute is removed. There is no
+keyboard shortcut — showing notes requires loading the page with a `?notes`
+query parameter present in the URL.
 
-**Why not reveal.js's postMessage companion-window design?** reveal.js runs presenter mode in a browser companion window (often a separate physical screen during presentations) and synchronizes slide state via `postMessage` between the main and companion windows. This is powerful but meaningfully more complex to implement and verify for a first pass (requires iframe-safe cross-origin logic, session tokens, browser-specific quirks). Storing presenter notes as data attributes and toggling visibility with a query-string flag achieves the "author once, view during development" use case immediately without the extra complexity; a true companion-window presenter mode can ship in a later phase if needed.
+**Why HTML comments, not a directive syntax (e.g. Marpit-style
+`::: notes ... :::`)?** nh-deck has no directive system and no plan to
+build one; HTML comments are already tokenized by `marked` with no new
+parsing logic required.
 
-### Option 3 (Chosen): Zero-code-change PDF pagination mechanism
+**Why not reveal.js's `postMessage` companion-window design?** That design
+synchronizes a separate presenter-view window with the main view via
+cross-window messaging — meaningfully more complex to implement and verify
+than a query-string toggle, for a first pass at this feature.
 
-PDF pagination is achieved via CSS `page-break-after: always` on each slide's `<section>` element. This is a browser-level feature, not nh-deck-specific logic. The current code applies this CSS rule (implicitly through the baseline stylesheet) without explicitly documenting or verifying it. This decision formalizes the mechanism: the `<section>` elements generated by the per-slide segmentation (Phase 4a, item 4) are the page-break boundaries, and the baseline stylesheet ensures `page-break-after: always` is applied.
+### PDF pagination: a new, explicit `@media print` rule vs. relying on unverified defaults
 
-**Why this mechanism?** It is browser-native, requires no changes to the render or PDF-export logic, and integrates seamlessly with both the current per-slide segmentation architecture and the future `--css` opt-out flag (users can override `page-break-after` in their own stylesheet if they want different pagination).
+Task 3 added a genuinely new constant to `src/render.ts`, `PRINT_PAGINATION_STYLE`
+(`src/render.ts:31-36`):
 
-**Risk:** Users with custom stylesheets (via `--css`) who do not include `page-break-after: always` will get single-page PDFs or non-intuitive page breaks. This is acceptable because it aligns with "opt-in replacement" semantics — if you provide your own stylesheet, you are responsible for pagination behavior, and nh-deck's defaults no longer apply.
+```css
+@media print {
+  .slide {
+    break-after: page;
+  }
+}
+```
 
-### Option 4 (Chosen): PNG export via browser automation + per-slide capture
+This is referenced unconditionally in `generateHtml`'s `<style>` template
+(`src/render.ts:212`), so every `<section class="slide">` gets a forced
+page break after it when printed, regardless of whether `--css` is used.
+This is new render-time code, not a "zero-code-change" formalization of
+pre-existing behavior — before this task, no such rule existed anywhere in
+`render.ts`.
 
-PNG export follows the same architecture as PDF export: use the already-detected browser (via `chrome-launcher`) to render the deck HTML, then programmatically capture a screenshot of each slide (via Puppeteer's `page.screenshot()`). Output format is a configurable directory (`output/` by default) with numbered PNG files (`slide-001.png`, `slide-002.png`, etc., or a user-specified prefix). Slides are screenshotted at a fixed viewport size (e.g., 1920×1080, matching the default presentation aspect ratio).
+The phrase "zero-code-change" applies only to the PDF *export* mechanism
+in `src/pdfExport.ts`: Puppeteer's existing `page.pdf({ path, format: "A4",
+printBackground: true })` call (`src/pdfExport.ts:31`) already respects
+`@media print` / `break-after` CSS with no change needed to the export code
+itself — that was verified before Task 3 was even planned. Task 3's actual
+work was adding the CSS rule that gives the export mechanism something
+correct to respect.
 
-**Why not a separate rendering engine (e.g., resvg, Playwright)?** The browser is already detected for PDF export; reusing the same browser executable avoids duplicating platform-detection logic and keeps the dependency surface smaller. Playwright was rejected because it bundles Chromium, violating the local-first constraint.
+**Alternative:** rely on default browser print behavior without an
+explicit rule. Rejected as untestable and unverified — there was no
+guarantee any `<section>` boundary would force a page break without an
+explicit rule, and no test would catch a regression.
 
-**Why not an alternative like wkhtmltopdf or Chromium CLI arguments for screenshot export?** Both are either additional, fragile dependencies or require passing through undocumented CLI flags to the underlying browser. Puppeteer's `screenshot()` API is reliable, documented, and already trusted for PDF export.
+### PNG export: reuse the PDF export browser, screenshot each slide element individually, no fixed viewport
 
-**Why this pixel size?** 1920×1080 (16:9) is the default aspect ratio for nh-deck slides (set in the baseline stylesheet). Exporting at this size preserves the visual intent of the deck as written. Users can later add a `--scale` or `--resolution` flag if they need different output sizes, but that is out of scope for this phase.
+PNG export (`src/pngExport.ts`) follows the same browser-automation
+approach as PDF export: it calls the shared `detectBrowserExecutable()`
+(see below), launches that browser headlessly, and loads the rendered HTML
+via `page.setContent(html, { waitUntil: "load" })` — no navigation, and no
+`page.setViewport()` call anywhere in the file, so no fixed resolution is
+set. It then queries every `section.slide` element via `page.$$()` and
+calls `.screenshot({ path })` on each element handle in a loop
+(`src/pngExport.ts:31-38`); each output PNG is therefore sized to that
+slide's own rendered bounding box, not to a fixed pixel resolution such as
+1920×1080.
 
-**Out of scope:** PPTX export is mentioned in the roadmap item but is not implemented in this phase. PPTX generation is a separate concern (either via a library like `officegen` or via reverse-engineering reveal.js/Marp's PPTX output format), and does not depend on the PNG export implementation.
+Output filenames are derived by `insertSlideNumber` (`src/pngExport.ts:49-58`):
+it inserts `-N` (1-indexed) immediately before the output path's extension
+— `deck.png` → `deck-1.png`, `deck-2.png`, ... (or `deck` → `deck-1`,
+`deck-2`, ... when the output path has no extension). This is not a
+zero-padded `slide-NNN.png` scheme.
 
----
+The `png` subcommand (`src/index.ts:110-128`) is `nh-deck png <file>
+[output]`: `output` is an optional second **positional** argument, not a
+flag, reusing the same `resolveOutputPath(file, output, "png")` helper the
+`pdf` command uses — if omitted, a trailing `.md` on the input is replaced
+with `.png` (or `.png` is appended). There is no directory flag and no
+`output/` default directory.
+
+**Why not a separate rendering engine (e.g. Playwright)?** The browser is
+already detected for PDF export via `chrome-launcher`; reusing the same
+executable avoids duplicating platform-detection logic and keeps the
+dependency surface smaller. Playwright was rejected as it defaults to
+managing its own downloaded browser binaries, which would reintroduce the
+install-weight/local-first tension ADR 0001 already rejected for the PDF
+path.
+
+### Browser-launch extraction (Task 4)
+
+PDF and PNG export both need to detect a local Chrome/Chromium/Edge/Brave
+installation. That logic now lives once, in `src/browserLaunch.ts`'s
+`detectBrowserExecutable()`, which uses `chrome-launcher`'s
+`Launcher.getInstallations()` and throws a clear, descriptive error if
+none is found. Both `src/pdfExport.ts` and `src/pngExport.ts` import and
+call this shared function rather than each detecting a browser
+independently.
 
 ## Decision Outcome
 
-1. **`--css <path>` opt-out flag (Task 1):** Added to the `render` and `pdf` subcommands. When specified, the baseline stylesheet is excluded from rendered output and the user-supplied stylesheet is inlined instead. Implementation: conditional logic in `src/render.ts`'s HTML template to either include the default style or the user's file content.
-
-2. **Presenter notes extraction + `?notes` toggle (Task 2):** Added to `src/render.ts` via a custom `marked` renderer token for HTML comments. Noted content is stored as `data-presenter-notes` on each `<section>`. Client-side script (already in the rendered HTML for live-reload SSE handling in Phase 4d) adds a `?notes` query-string handler and a keyboard toggle (e.g., `Ctrl+/` or `Cmd+?`) to show/hide a notes panel. Implementation detail: notes are intentionally hidden from PDF export (the PDF stylesheet sets `display: none` on the notes panel), so printed decks do not include speaker notes.
-
-3. **PDF pagination mechanism formalized (Task 3):** Documented in this ADR as a zero-code-change decision — the existing `page-break-after: always` CSS rule on `<section>` elements (present in the baseline stylesheet since Phase 4, item 2) is the mechanism, now explicitly verified and codified in `fixtures/sample.md` and `tests/render.test.ts` to prevent silent regression.
-
-4. **PNG export via browser automation (Task 5):** Added as a new `export` subcommand (or as an additional export-format flag on the existing `pdf` subcommand; implementation details to be determined during Task 5). Uses the same `chrome-launcher` + Puppeteer infrastructure as PDF export. Each slide is screenshotted at 1920×1080 and saved as a sequentially-numbered PNG file. Output directory is configurable via a flag (default: `output/`).
-
-5. **Browser-launch extraction refactoring (Task 4, implicit in Task 5):** PDF export and PNG export both need to launch a browser and detect Chrome/Chromium/Edge/Brave. Rather than duplicate this logic, `src/pdfExport.ts` is refactored to extract the browser-launch logic into a shared `detectBrowserExecutable` utility (or similar), which is then imported and reused by both the PDF and PNG export paths.
-
----
+1. **`--css <path>` (Task 1):** added to the `render` and `pdf`
+   subcommands. When given, its file contents fully replace the default
+   visual/typography stylesheet block in `generateHtml`'s template; the
+   presenter-notes CSS and print-pagination CSS still apply unconditionally.
+2. **Presenter notes (Task 2):** authored as standalone HTML comments per
+   slide, extracted by `extractNotes` (`src/presenterNotes.ts`) and
+   rendered as `<aside class="notes" hidden>` elements. Visibility is
+   toggled once, at page load, by the presence of a `?notes` query
+   parameter — there is no keyboard shortcut. Notes are always hidden
+   under `@media print`, so PDF and PNG exports never include them.
+3. **PDF pagination (Task 3):** a new `PRINT_PAGINATION_STYLE` constant
+   (`@media print { .slide { break-after: page; } }`) was added to
+   `src/render.ts` and is applied unconditionally. `src/pdfExport.ts`
+   itself required no changes, since Puppeteer's existing `page.pdf()`
+   call already honors this kind of print CSS.
+4. **PNG export (Task 5):** a new `png <file> [output]` CLI subcommand
+   (`src/index.ts`) backed by `exportToPng` (`src/pngExport.ts`), which
+   screenshots each `<section class="slide">` element individually (no
+   fixed viewport or resolution) and writes one PNG per slide, named by
+   inserting `-N` before the output path's extension.
+5. **Browser-launch extraction (Task 4):** `detectBrowserExecutable()` was
+   extracted into `src/browserLaunch.ts` and is now shared by
+   `src/pdfExport.ts` and `src/pngExport.ts`.
 
 ## Consequences
 
 ### Positive
 
-- **Stylesheet opt-out preserves the unopinionated-rendering philosophy** — users are no longer locked into nh-deck's defaults.
-- **Presenter notes parity with other tools** — users migrating from reveal.js, Marp, or Slidev will recognize the feature and can port their existing decks more easily.
-- **PDF pagination is now explicit and testable** — future changes to slide structure or CSS are guarded against silent regression; the snapshot tests in `tests/render.test.ts` verify pagination structure.
-- **PNG export increases format coverage** — users can now export individual slides for sharing, which is especially useful in academic and professional contexts (posters, social media, accessibility workflows).
-- **Browser-launch utility reduces duplication** — PDF and PNG export share the same platform-detection logic, lowering maintenance burden.
+- Stylesheet opt-out preserves the unopinionated-rendering philosophy from
+  `SOUL.md` without giving up notes-hiding or print pagination by default.
+- Presenter notes give feature parity with reveal.js/Marp/Slidev's
+  speaker-notes concept using only existing `marked` tokenization — no new
+  parsing logic.
+- PDF pagination is now an explicit, named, tested CSS rule
+  (`PRINT_PAGINATION_STYLE`) instead of an unverified assumption.
+- PNG export adds a third export format with no new browser-automation
+  dependency, and each slide is captured at its own natural rendered size
+  rather than requiring a hardcoded resolution decision up front.
+- The shared `detectBrowserExecutable()` means PDF and PNG export cannot
+  drift from each other in how they find or fail to find a browser.
 
-### Negative/Trade-offs
+### Negative / Trade-offs
 
-- **Custom CSS opt-out shifts responsibility to the user** — users who provide `--css` must include their own pagination rules (if desired), font declarations, and other styling that the default stylesheet provides. Mitigation: extensive documentation and a well-commented example stylesheet in the repo's `examples/` directory.
-- **Presenter notes are author-authored, not auto-generated** — there is no smart extraction or summarization of speaker notes from notes; the author must write them explicitly as HTML comments. This is acceptable for a first pass; a future smart-extraction pass can build on this foundation.
-- **PNG export pixel size is fixed at 1920×1080** — users needing different resolutions must wait for a `--scale` or `--resolution` flag (out of scope). Current workaround: open the HTML in a browser, adjust the viewport size manually, and take screenshots.
-- **PPTX export remains out of scope** — users cannot export to PowerPoint format in this phase.
-
----
+- **`--css` users cannot opt out of the notes or print-pagination CSS** —
+  those two rules are unconditional, so a highly customized deck cannot
+  currently suppress or restyle them except by overriding the same
+  selectors with higher specificity in their own file.
+- **Presenter notes have no keyboard toggle and no companion-window mode**
+  — visibility is controlled only by a `?notes` URL query parameter,
+  checked once at load. Toggling live during a running presentation
+  requires reloading the page with that parameter present.
+- **PNG filenames are not zero-padded or user-configurable** — `deck-1.png`
+  through `deck-10.png` will not sort correctly against `deck-11.png` in a
+  naive lexicographic file listing, and there is no flag to choose a
+  different naming scheme or output directory.
+- **PNG export has no fixed resolution** — output image dimensions follow
+  whatever size each slide's `<section>` element happens to render at,
+  which means visual consistency across slides (or across machines) is not
+  guaranteed the way a fixed viewport would guarantee it.
 
 ## Confirmation
 
-All four features have been implemented, tested, and verified:
+This decision is confirmed as implemented by the existing test suite:
 
-- **Task 1 (`--css` flag):** `npm test` passes; CLI accepts `--css <path>` and renders with user-supplied stylesheet only.
-- **Task 2 (presenter notes):** `npm test` passes; HTML comments are extracted, stored as `data-presenter-notes`, and toggled via `?notes` query string.
-- **Task 3 (PDF pagination):** `npm test` and real PDF output verify `page-break-after: always` on `<section>` elements; paginated PDFs are generated correctly.
-- **Task 4 (browser-launch refactoring):** Browser-detection logic extracted to a shared utility; both PDF and PNG export paths reuse it successfully.
-- **Task 5 (PNG export):** `npm test` passes; CLI accepts a PNG export subcommand/flag and generates sequentially-numbered PNG files at 1920×1080.
-
----
+- **Task 1 (`--css`):** `tests/cli.test.ts` ("renders with a custom --css
+  file, fully replacing the default stylesheet") exercises `--css` end to
+  end through the real CLI process.
+- **Task 2 (presenter notes):** `tests/presenterNotes.test.ts` verifies
+  `extractNotes` against standalone and multiple HTML comments; the
+  `generateHtml — presenter notes` suite in `tests/render.test.ts` verifies
+  the rendered `<aside class="notes" hidden>` markup, the inline
+  `?notes`-reveal script, and that notes are hidden under `@media print`
+  regardless of the toggle.
+- **Task 3 (PDF pagination):** `tests/render.test.ts` asserts the rendered
+  output matches `/@media print[^}]*\.slide[^}]*break-after:\s*page/`.
+- **Task 4 (browser-launch extraction):** `tests/browserLaunch.test.ts`
+  covers `detectBrowserExecutable()` directly; `tests/pdfExport.test.ts`
+  and `tests/pngExport.test.ts` both exercise it indirectly through their
+  respective export paths.
+- **Task 5 (PNG export):** `tests/pngExport.test.ts` produces real,
+  non-empty PNG files (verified via PNG magic bytes) with the `deck-1.png`
+  / `deck-2.png` naming scheme, including a case where the output path has
+  no extension; `tests/cli.test.ts`'s `CLI: nh-deck png` suite exercises
+  the subcommand end to end through the real CLI process.
 
 ## More Information
 
-- **Stylesheet opt-out design rationale:** See `SOUL.md`'s "unopinionated rendering" non-negotiable. Users can study `src/baseline.css` (or similar) in the repo as a reference for their own stylesheets.
-- **Presenter notes implementation:** See `src/render.ts`'s marked token handlers for HTML-comment extraction logic.
-- **PDF pagination mechanism:** Formalized in `fixtures/sample.md`'s use of `---` slide separators and verified by `tests/render.test.ts` snapshot assertions.
-- **PNG export reference:** See `src/pdfExport.ts` (or the refactored PNG export equivalent) for the browser-launch and screenshot-capture implementation.
-- **Cross-tool precedent:** reveal.js (postMessage presenter window), Marp (CSS-based pagination + notes via HTML comments), Marpit (framework for Marp, similar notes handling), Slidev (Vue-based, notes in separate YAML front matter). This decision aligns with Marp's HTML-comment convention, diverges intentionally from reveal.js's complexity, and avoids Slidev's framework-specific syntax.
-
----
-
-## Related ADRs
-
-- ADR 0002 (Per-slide segmentation): Per-slide segmentation is foundational to both presenter notes (which are per-slide) and PDF pagination (which uses `<section>` boundaries).
-- ADR 0003 (SSE-based live-reload): Live-reload in `render --watch` is not strictly required for any of these four features, but the client-side script infrastructure (already added in Phase 4d for SSE) is reused for the presenter-notes toggle.
-- ADR 0004 & 0005 (KaTeX and Mermaid): Unrelated to Phase 5, but shipped in prior phases. PNG export must handle rendered KaTeX math and Mermaid diagrams correctly (verified in testing).
+- Per-slide segmentation (ADR 0002) is foundational to both presenter
+  notes (extracted per slide) and PDF pagination (page breaks at
+  `<section class="slide">` boundaries).
+- KaTeX (ADR 0004) and Mermaid (ADR 0005) rendering both predate this
+  phase; PNG export screenshots whatever a slide contains, including
+  embedded KaTeX and Mermaid SVG output, with no special-casing required.
+- See `src/render.ts`, `src/presenterNotes.ts`, `src/pngExport.ts`,
+  `src/browserLaunch.ts`, `src/pdfExport.ts`, `src/cliHelpers.ts`, and
+  `src/index.ts` for the implementations referenced throughout this ADR.
