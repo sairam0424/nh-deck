@@ -4,6 +4,29 @@ import markedKatex from "marked-katex-extension";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
+import { extractNotes } from "./presenterNotes.js";
+
+const NOTES_STYLE = `
+    .notes {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #fffbe6;
+      border-top: 2px solid #e0c46c;
+      padding: 1rem 1.5rem;
+      max-height: 30vh;
+      overflow-y: auto;
+    }
+    .notes:not([hidden]) {
+      display: block;
+    }
+    @media print {
+      .notes {
+        display: none !important;
+      }
+    }`;
 
 marked.use(markedKatex({ throwOnError: false }));
 
@@ -69,10 +92,14 @@ export function generateHtml(
 ): string {
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
-		.map(
-			(slideTokens) =>
-				`<section class="slide">\n${marked.parser(slideTokens)}</section>`,
-		)
+		.map((slideTokens) => {
+			const notesHtml = extractNotes(slideTokens)
+				.map(
+					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
+				)
+				.join("\n");
+			return `<section class="slide">\n${marked.parser(slideTokens)}${notesHtml}</section>`;
+		})
 		.join("\n");
 	const pageTitle = escapeHtml(
 		title && title.trim().length > 0 ? title : "nh-deck",
@@ -174,10 +201,18 @@ ${
     }`
 }
     ${katexStyle}
+    ${NOTES_STYLE}
   </style>
 </head>
 <body>
 ${slidesHtml}
+  <script>
+    if (new URLSearchParams(location.search).has("notes")) {
+      document.querySelectorAll(".notes").forEach((el) => {
+        el.hidden = false;
+      });
+    }
+  </script>
 </body>
 </html>
 `;

@@ -274,3 +274,32 @@ describe("generateHtml — custom CSS opt-out", () => {
 		expect(html).toContain("KaTeX_Main");
 	});
 });
+
+describe("generateHtml — presenter notes", () => {
+	it("renders a slide's HTML comment as a hidden aside with class notes", () => {
+		const html = generateHtml("# Slide\n\n<!-- speaker note here -->\n");
+
+		expect(html).toContain(
+			'<aside class="notes" hidden>speaker note here</aside>',
+		);
+	});
+
+	it("renders no aside when a slide has no comments", () => {
+		const html = generateHtml("# Slide\n\nNo notes here.");
+
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("includes an inline script that reveals notes when ?notes is present", () => {
+		const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+
+		expect(html).toContain("URLSearchParams");
+		expect(html).toContain(".notes");
+	});
+
+	it("always hides notes in print media, regardless of the ?notes toggle", () => {
+		const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+
+		expect(html).toMatch(/@media print[^}]*\.notes[^}]*display:\s*none/);
+	});
+});
