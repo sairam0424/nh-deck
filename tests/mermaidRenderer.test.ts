@@ -46,4 +46,18 @@ describe("renderMermaidDiagram", () => {
 		expect(result).toContain("&lt;script&gt;");
 		expect(result).toContain("&lt;/script&gt;");
 	});
+
+	it("threads custom colors through to beautiful-mermaid's rendering", () => {
+		const withoutColors = renderMermaidDiagram("flowchart TD\n  A --> B");
+		const withColors = renderMermaidDiagram("flowchart TD\n  A --> B", {
+			bg: "#2e3440",
+			fg: "#d8dee9",
+			line: "#4c566a",
+			accent: "#88c0d0",
+			muted: "#616e88",
+		});
+
+		expect(withColors).not.toBe(withoutColors);
+		expect(withColors).toContain("#2e3440");
+	});
 });
