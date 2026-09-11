@@ -1,5 +1,5 @@
-import { existsSync, readFileSync, rmSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,34 +24,34 @@ const PDF_EXPORT_TIMEOUT_MS = 60_000;
 let activeOutputPath: string | undefined;
 
 afterEach(() => {
-  if (activeOutputPath && existsSync(activeOutputPath)) {
-    rmSync(activeOutputPath, { force: true });
-  }
-  activeOutputPath = undefined;
+	if (activeOutputPath && existsSync(activeOutputPath)) {
+		rmSync(activeOutputPath, { force: true });
+	}
+	activeOutputPath = undefined;
 });
 
 describe("exportToPdf", () => {
-  it(
-    "produces a real PDF file from rendered deck HTML",
-    async () => {
-      const html = generateHtml(fixtureMarkdown, "sample");
+	it(
+		"produces a real PDF file from rendered deck HTML",
+		async () => {
+			const html = generateHtml(fixtureMarkdown, "sample");
 
-      // Unique filename per run so parallel test runs never collide on the
-      // same path in the shared OS temp directory.
-      const outputPath = path.join(
-        tmpdir(),
-        `nh-deck-pdf-export-test-${randomUUID()}.pdf`,
-      );
-      activeOutputPath = outputPath;
+			// Unique filename per run so parallel test runs never collide on the
+			// same path in the shared OS temp directory.
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-export-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
 
-      await exportToPdf(html, outputPath);
+			await exportToPdf(html, outputPath);
 
-      expect(existsSync(outputPath)).toBe(true);
+			expect(existsSync(outputPath)).toBe(true);
 
-      const fileContents = readFileSync(outputPath);
-      const magicNumber = fileContents.subarray(0, 4).toString("utf8");
-      expect(magicNumber).toBe("%PDF");
-    },
-    PDF_EXPORT_TIMEOUT_MS,
-  );
+			const fileContents = readFileSync(outputPath);
+			const magicNumber = fileContents.subarray(0, 4).toString("utf8");
+			expect(magicNumber).toBe("%PDF");
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
 });

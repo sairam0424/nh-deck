@@ -48,3 +48,7 @@ Days, not weeks. Auto-delete on merge. Periodic sweep of abandoned agent branche
 ## Hotfix Path
 
 Same flow as any other fix — no separate release/hotfix branch hierarchy, because trunk-based means `main` is already always deployable.
+
+## nh-deck-Specific Deviation
+
+- **PR checklist for doc-drift**: this repo's `.github/PULL_REQUEST_TEMPLATE.md` adds a checklist item to re-check `status.md`/`codebase_map.md`/`AGENTS.md` on any PR touching CI, `src/`, or shipped-feature status. Added 2026-09-10 after `CODEBASE_INDEX.md` found `status.md` and `codebase_map.md` describing already-shipped features as "planned." No first-party tool solves doc/code consistency-checking (verified via primary-source research — see `docs/research/security-performance-tooling-research.md`), so this is a process fix, not a canonical-template change — not upstreamed to `../Not-Humans-Lab/Branches.md`.

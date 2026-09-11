@@ -25,6 +25,8 @@ npm install
 
 Requires Node.js LTS 20 or 22+. No other setup step exists at this project's current size — no database, no external service, no API key.
 
+> On Node 20, `npm install` prints non-fatal `npm warn EBADENGINE` warnings for `puppeteer-core`/`@puppeteer/browsers` (they declare `>=22.12.0`) — this is expected and does not affect functionality; see the Known Gotchas below.
+
 ## Build / Test / Run Commands
 
 - **Build**: `npm run build`
@@ -100,3 +102,4 @@ Same template as every sibling project in this suite — see this repo's own `Br
 - **No bundler means no code-splitting, no minification, no tree-shaking.** `tsc`-only output is larger and less optimized than a bundled equivalent. This is an intentional tradeoff (see `../Not-Humans-Lab/decisions.md` for the "no bundler" convention this repo follows), not an oversight — do not "fix" it by introducing esbuild/webpack/rollup without a real, demonstrated need.
 - **The CI matrix now genuinely exercises cross-platform Chrome/Chromium detection** — `tests/pdfExport.test.ts` runs on all 9 OS/Node combinations, so PDF export's OS-specific binary-detection paths are verified, not just assumed. What's still unverified: visual *fidelity* differences between whichever browser (Chrome/Edge/Brave) `chrome-launcher` happens to detect on a given machine — the matrix proves export works everywhere, not that it looks identical everywhere.
 - **`chrome-launcher`'s binary detection is host-dependent.** If no supported browser is installed, PDF export must fail with a clear, actionable error message — not a silent hang or a cryptic Puppeteer stack trace. Any change to the export path should be tested against "no browser found" as an explicit case.
+- **`puppeteer-core`'s declared `engines.node` (`>=22.12.0` as of `^25.10.0`) is stricter than this project's own Node 20 support commitment.** `npm install` under Node 20 prints `npm warn EBADENGINE` for `puppeteer-core` and `@puppeteer/browsers` — this repo has no `.npmrc` and `engine-strict` defaults to `false`, so the warning is non-fatal and does not fail `npm install` or CI. Verified live on Node 20.20.2: the full test suite (including the unmocked `tests/pdfExport.test.ts` E2E test) passes unchanged. Tracked as a known, non-blocking drift in `Context.md`'s Open risks rather than silently ignored — do not "fix" it reflexively by bumping `engines.node` to `>=22.12.0` or dropping Node 20 from the CI matrix; both are real functional-support decisions, not warranted by a warning-only, empirically-non-breaking mismatch.

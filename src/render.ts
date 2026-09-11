@@ -1,5 +1,5 @@
-import { marked } from "marked";
 import type { Token } from "marked";
+import { marked } from "marked";
 
 /**
  * Converts Markdown source into a complete, self-contained HTML document,
@@ -24,18 +24,18 @@ import type { Token } from "marked";
  * fast-follow feature and are NOT wired up here yet.
  */
 export function generateHtml(markdown: string, title?: string): string {
-  const tokens = marked.lexer(markdown);
-  const slidesHtml = splitIntoSlides(tokens)
-    .map(
-      (slideTokens) =>
-        `<section class="slide">\n${marked.parser(slideTokens)}</section>`,
-    )
-    .join("\n");
-  const pageTitle = escapeHtml(
-    title && title.trim().length > 0 ? title : "nh-deck",
-  );
+	const tokens = marked.lexer(markdown);
+	const slidesHtml = splitIntoSlides(tokens)
+		.map(
+			(slideTokens) =>
+				`<section class="slide">\n${marked.parser(slideTokens)}</section>`,
+		)
+		.join("\n");
+	const pageTitle = escapeHtml(
+		title && title.trim().length > 0 ? title : "nh-deck",
+	);
 
-  return `<!DOCTYPE html>
+	return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
@@ -154,32 +154,32 @@ ${slidesHtml}
  * document that has no visible content anywhere.
  */
 function splitIntoSlides(tokens: Token[]): Token[][] {
-  const groups: Token[][] = [];
-  let current: Token[] = [];
-  for (const token of tokens) {
-    if (token.type === "hr") {
-      groups.push(current);
-      current = [];
-    } else {
-      current.push(token);
-    }
-  }
-  groups.push(current);
+	const groups: Token[][] = [];
+	let current: Token[] = [];
+	for (const token of tokens) {
+		if (token.type === "hr") {
+			groups.push(current);
+			current = [];
+		} else {
+			current.push(token);
+		}
+	}
+	groups.push(current);
 
-  const nonEmptyGroups = groups.filter((group) =>
-    group.some((token) => token.type !== "space"),
-  );
-  if (nonEmptyGroups.length === 0) {
-    return [groups[0]];
-  }
-  return nonEmptyGroups;
+	const nonEmptyGroups = groups.filter((group) =>
+		group.some((token) => token.type !== "space"),
+	);
+	if (nonEmptyGroups.length === 0) {
+		return [groups[0]];
+	}
+	return nonEmptyGroups;
 }
 
 function escapeHtml(value: string): string {
-  return value
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
+	return value
+		.replace(/&/g, "&amp;")
+		.replace(/</g, "&lt;")
+		.replace(/>/g, "&gt;")
+		.replace(/"/g, "&quot;")
+		.replace(/'/g, "&#39;");
 }
