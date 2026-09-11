@@ -20,7 +20,7 @@ HTML must not depend on any CDN for correctness.**
 | Language / runtime | TypeScript on Node.js (LTS 20/22+) | The entire CLI, render module, dev server, and PDF export module |
 | CLI surface | Commander.js | Parses `nh-deck render <file>`, `nh-deck pdf <file>`, and future subcommands |
 | Markdown → HTML | `marked` | Converts a deck's Markdown source into an HTML string |
-| Math rendering | KaTeX | **Not yet installed** — decided but deferred past this walking skeleton (see Adoption status) |
+| Math rendering | KaTeX | **Adopted** — inline/block LaTeX math renders with fonts embedded locally as base64, no CDN fallback (see Adoption status) |
 | Diagram rendering | Mermaid (`beautiful-mermaid`) | **Adopted** — `mermaid` fenced code blocks render as embedded, CDN-free SVG diagrams (see Adoption status) |
 | Local dev server | `node:http` (no framework) | Serves rendered HTML on an ephemeral local port for `nh-deck render` |
 | PDF export | `puppeteer-core` + `chrome-launcher` | Detects a local Chrome-family browser and prints the rendered HTML to PDF |
@@ -39,7 +39,7 @@ HTML must not depend on any CDN for correctness.**
 | `puppeteer-core` + `chrome-launcher` | **Adopt** | PDF export path. `puppeteer-core` (no bundled Chromium download) + `chrome-launcher` (locates an already-installed Chrome/Chromium/Edge/Brave binary) together avoid shipping or downloading a browser binary as part of this CLI. |
 | `tsc`-only build | **Adopt** | Explicitly **not** tsup, webpack, or esbuild. See Rationale below. |
 | Vitest | **Adopt** | Test runner for unit + integration layers. |
-| KaTeX | **Assess / planned** | Decided as the eventual math-rendering library but **not yet installed** — explicitly deferred past this walking skeleton, not silently skipped. Do not add as a dependency until the fast-follow phase that implements it. |
+| KaTeX | **Adopt** | Math rendering, shipped. Fonts embedded locally as base64 `data:` URIs, no CDN fallback path at all — verified via a real end-to-end browser check (zero network requests); see `docs/adr/0004-katex-local-embedded-math.md`. |
 | Mermaid (`beautiful-mermaid`) | **Adopt** | Diagram rendering, shipped. Chosen for its minimal, DOM-free/Puppeteer-free dependency tree (`elkjs` + `entities` only). Its own generated SVG output was found to contain a hardcoded Google Fonts CDN `@import` — a real anti-pattern, not hypothetical — which is stripped before embedding; see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`. |
 | Playwright | **Hold — rejected** | See Rationale below. |
 | Express or any web framework | **Hold** | The local dev server is a plain `node:http` server on purpose — no framework is needed for "serve one rendered HTML string on an ephemeral port." |
@@ -76,16 +76,15 @@ HTML must not depend on any CDN for correctness.**
   serve one already-rendered HTML string on an ephemeral port, optionally
   open a browser. That does not need routing, middleware, or templating —
   pulling in a web framework for it would be scope creep against KISS/YAGNI.
-- **Mermaid shipped local-only; KaTeX decided-but-deferred, not silently
-  dropped.** Both are real, intentional parts of the eventual feature set
-  (matching the reference project's math/diagram support). Mermaid
-  diagram rendering has landed, and confirms the local-first constraint is
-  actively enforced, not just aspirational: `beautiful-mermaid`'s own
-  default output tried to fetch a Google Fonts CDN font, and that was
-  found and stripped before shipping rather than accepted as a shortcut.
-  KaTeX remains explicitly out of scope for now and is **not** installed
-  as a dependency yet — when it does land, it must render locally
-  (bundled JS/CSS shipped with the tool) too, per the same constraint.
+- **KaTeX and Mermaid both shipped local-only, not silently dropped.**
+  Both are real, intentional parts of the eventual feature set (matching
+  the reference project's math/diagram support), and both confirm the
+  local-first constraint is actively enforced, not just aspirational.
+  KaTeX ships its own fonts embedded as base64 `data:` URIs, no CDN
+  fallback path at all. Mermaid's chosen library (`beautiful-mermaid`)
+  had its own default output tried to fetch a Google Fonts CDN font, and
+  that was found and stripped before shipping rather than accepted as a
+  shortcut. Any future rendering feature must meet the same bar.
 
 ## Version & upgrade policy
 
@@ -99,17 +98,17 @@ HTML must not depend on any CDN for correctness.**
   manual `npm update`); apply standard semver caution on majors, especially
   for `puppeteer-core` (API surface can shift between major versions).
 - **Mermaid (`beautiful-mermaid`)**: pinned at `^1.1.3` as of this adoption.
-- **KaTeX**: no version pinned yet — there is nothing installed to pin. Pick
-  and pin a version at the point it's actually adopted, not before.
+- **KaTeX / `marked-katex-extension`**: pinned at `^0.18.7` / `^5.1.12` as of this adoption.
 
 ## Constraints
 
 - The CLI must never make a network call for its own correctness — no
   telemetry, no update-checks, no remote config fetch.
 - Rendered HTML output must be fully self-contained for correctness: no
-  required CDN `<script>`/`<link>` tag. Mermaid ships local/bundled SVG
-  output, with a real CDN font reference found and stripped rather than
-  shipped. (KaTeX, once added, must meet the same bar.)
+  required CDN `<script>`/`<link>` tag. KaTeX ships fonts embedded as
+  base64 `data:` URIs; Mermaid ships local/bundled SVG output, with a real
+  CDN font reference found and stripped rather than shipped. Any future
+  rendering feature must meet the same bar.
 - PDF export must never bundle or auto-download a Chromium binary — it must
   detect and use a locally installed Chrome-family browser, and fail with a
   clear, non-crashing error message if none is found.
@@ -126,9 +125,7 @@ HTML must not depend on any CDN for correctness.**
   `node:http`.
 - **Full `puppeteer` (with bundled Chromium)** — Hold. `puppeteer-core`
   (no bundled browser) is the adopted variant.
-- **KaTeX** — not deprecated, just not yet installed. Listed under Adoption
-  status as Assess/planned, not here, to avoid implying rejection. Mermaid
-  (formerly the same status) has since shipped — see Adoption status.
+- Neither KaTeX nor Mermaid appear here — both shipped; see Adoption status.
 
 ## Local dev requirements
 

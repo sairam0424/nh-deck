@@ -22,10 +22,10 @@ standalone clone). `nh-skills` and `daily-dose` have also shipped their
 own phases — see their own repos for their state.
 
 Tech stack: TypeScript on Node.js (target LTS 20/22+), Commander.js for
-the CLI surface, `marked` for Markdown → HTML (Mermaid diagram rendering
-has shipped, CDN-free — see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`;
-KaTeX math rendering remains **decided-but-not-yet-installed** on this
-branch — deferred as an explicit fast-follow, not silently skipped),
+the CLI surface, `marked` for Markdown → HTML (KaTeX math and Mermaid
+diagram rendering have both shipped, CDN-free — see
+`docs/adr/0004-katex-local-embedded-math.md` and
+`docs/adr/0005-mermaid-local-cdn-import-stripped.md`),
 a plain `node:http` local dev server (no framework), and
 `puppeteer-core` + `chrome-launcher` for PDF export via a locally
 detected Chrome/Chromium/Edge/Brave binary (no bundled Chromium, no
@@ -47,8 +47,8 @@ shapes the Known Security Considerations.
 | Core loop: render Markdown → HTML, `serve` (local preview), `export --pdf` | 4     | **Complete — verified with a real server response and a real 57KB PDF** |
 | Single-OS CI (`ubuntu-latest`) for the walking skeleton              | 4     | Complete, green |
 | 3-OS × multi-Node-version CI matrix expansion                        | 5     | Planned, not started |
+| KaTeX (math) rendering support                                       | 6     | **Done — shipped CDN-free** |
 | Mermaid (diagrams) rendering support                                 | 6     | **Done — shipped CDN-free** |
-| KaTeX (math) rendering support                                       | 6     | Planned, not started |
 
 ## Recent Progress
 
@@ -70,12 +70,12 @@ shapes the Known Security Considerations.
 
 1. Expand CI to the full 3-OS × multi-Node-version matrix — the walking
    skeleton is green, so this is now unblocked.
-2. Fast-follow: add KaTeX (math) rendering, bundled locally per the no-CDN
-   constraint in `SECURITY.md`. (Mermaid diagram rendering has shipped —
-   see Adoption status above.)
+2. ~~Fast-follow: add KaTeX (math) rendering, bundled locally per the
+   no-CDN constraint in `SECURITY.md`.~~ Done — see Adoption status above.
 3. Add a real automated PDF-export CI smoke test (currently only manually
    verified locally, not yet in the CI pipeline).
-4. Add a top-level `README.md` refresh once KaTeX lands too.
+4. Add a top-level `README.md` refresh now that both KaTeX and Mermaid
+   have landed.
 
 ## Risks & Blockers
 
