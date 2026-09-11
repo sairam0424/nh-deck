@@ -10,10 +10,13 @@ import {
 	resolveOutputPath,
 	watchFileForChanges,
 } from "./cliHelpers.js";
+import { parseFrontmatter } from "./frontmatter.js";
 import { exportToPdf } from "./pdfExport.js";
 import { exportToPng } from "./pngExport.js";
 import { containsUnsafeHtml, generateHtml } from "./render.js";
 import { startServer } from "./server.js";
+import type { ThemeColors } from "./themes.js";
+import { resolveThemeName, THEMES } from "./themes.js";
 
 /**
  * Non-fatal stderr warning printed once, on the first read of a deck's
@@ -56,6 +59,45 @@ function formatActionError(error: unknown, file: string): string {
 	return `nh-deck: ${message}`;
 }
 
+/**
+ * Resolves the effective theme colors for a render/pdf/png invocation,
+ * handling frontmatter/--theme precedence and --css mutual exclusivity.
+ * Prints any resulting stderr note/warning as a side effect (matching
+ * this file's existing UNSAFE_HTML_WARNING pattern: non-fatal, stderr,
+ * never touches process.exitCode). See
+ * docs/specs/theme-system-design.md §3.5/§4 for the exact precedence
+ * rules this implements.
+ *
+ * Returns undefined when no theme should be applied (customCss given,
+ * or nothing was requested).
+ */
+function resolveEffectiveTheme(
+	frontmatterTheme: string | undefined,
+	flagTheme: string | undefined,
+	customCss: string | undefined,
+): ThemeColors | undefined {
+	const requested = flagTheme ?? frontmatterTheme;
+
+	if (customCss) {
+		if (requested) {
+			process.stderr.write(
+				`nh-deck: note: --css overrides the requested theme '${requested}'; it was not applied.\n`,
+			);
+		}
+		return undefined;
+	}
+
+	if (!requested) {
+		return undefined;
+	}
+
+	const { name, warning } = resolveThemeName(requested);
+	if (warning) {
+		process.stderr.write(`${warning}\n`);
+	}
+	return THEMES[name].colors;
+}
+
 const program = new Command();
 
 program
@@ -78,20 +120,36 @@ program
 		"--css <path>",
 		"path to a custom CSS file that fully replaces the default stylesheet",
 	)
+	.option(
+		"--theme <name>",
+		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
+	)
 	.action(
 		async (
 			file: string,
-			options: { open: boolean; port?: number; watch?: boolean; css?: string },
+			options: {
+				open: boolean;
+				port?: number;
+				watch?: boolean;
+				css?: string;
+				theme?: string;
+			},
 		) => {
 			try {
 				const customCss = options.css
 					? readFileSync(options.css, "utf8")
 					: undefined;
-				const markdown = readFileSync(file, "utf8");
-				if (containsUnsafeHtml(markdown)) {
+				const rawMarkdown = readFileSync(file, "utf8");
+				if (containsUnsafeHtml(rawMarkdown)) {
 					process.stderr.write(UNSAFE_HTML_WARNING);
 				}
-				const html = generateHtml(markdown, file, customCss);
+				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
+				const themeColors = resolveEffectiveTheme(
+					frontmatter.theme,
+					options.theme,
+					customCss,
+				);
+				const html = generateHtml(markdown, file, customCss, themeColors);
 				const { url, updateHtml, server } = await startServer(
 					html,
 					options.port,
@@ -105,8 +163,12 @@ program
 				if (options.watch) {
 					const rerender = debounce(() => {
 						try {
-							const updatedMarkdown = readFileSync(file, "utf8");
-							updateHtml(generateHtml(updatedMarkdown, file, customCss));
+							const updatedRawMarkdown = readFileSync(file, "utf8");
+							const { body: updatedMarkdown } =
+								parseFrontmatter(updatedRawMarkdown);
+							updateHtml(
+								generateHtml(updatedMarkdown, file, customCss, themeColors),
+							);
 						} catch {
 							// A transient read failure (e.g. mid-save) is not fatal — the
 							// next file-change event retries.
@@ -133,25 +195,41 @@ program
 		"--css <path>",
 		"path to a custom CSS file that fully replaces the default stylesheet",
 	)
-	.action(async (file: string, output?: string, options?: { css?: string }) => {
-		try {
-			const customCss = options?.css
-				? readFileSync(options.css, "utf8")
-				: undefined;
-			const markdown = readFileSync(file, "utf8");
-			if (containsUnsafeHtml(markdown)) {
-				process.stderr.write(UNSAFE_HTML_WARNING);
-			}
-			const html = generateHtml(markdown, file, customCss);
-			const outputPath = resolveOutputPath(file, output);
+	.option(
+		"--theme <name>",
+		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
+	)
+	.action(
+		async (
+			file: string,
+			output?: string,
+			options?: { css?: string; theme?: string },
+		) => {
+			try {
+				const customCss = options?.css
+					? readFileSync(options.css, "utf8")
+					: undefined;
+				const rawMarkdown = readFileSync(file, "utf8");
+				if (containsUnsafeHtml(rawMarkdown)) {
+					process.stderr.write(UNSAFE_HTML_WARNING);
+				}
+				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
+				const themeColors = resolveEffectiveTheme(
+					frontmatter.theme,
+					options?.theme,
+					customCss,
+				);
+				const html = generateHtml(markdown, file, customCss, themeColors);
+				const outputPath = resolveOutputPath(file, output);
 
-			await exportToPdf(html, outputPath);
-			process.stdout.write(`Wrote PDF to ${outputPath}\n`);
-		} catch (error) {
-			process.stderr.write(`${formatActionError(error, file)}\n`);
-			process.exitCode = 1;
-		}
-	});
+				await exportToPdf(html, outputPath);
+				process.stdout.write(`Wrote PDF to ${outputPath}\n`);
+			} catch (error) {
+				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.exitCode = 1;
+			}
+		},
+	);
 
 program
 	.command("png <file> [output]")
@@ -160,26 +238,42 @@ program
 		"--css <path>",
 		"path to a custom CSS file that fully replaces the default stylesheet",
 	)
-	.action(async (file: string, output?: string, options?: { css?: string }) => {
-		try {
-			const customCss = options?.css
-				? readFileSync(options.css, "utf8")
-				: undefined;
-			const markdown = readFileSync(file, "utf8");
-			if (containsUnsafeHtml(markdown)) {
-				process.stderr.write(UNSAFE_HTML_WARNING);
-			}
-			const html = generateHtml(markdown, file, customCss);
-			const outputPath = resolveOutputPath(file, output, "png");
+	.option(
+		"--theme <name>",
+		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
+	)
+	.action(
+		async (
+			file: string,
+			output?: string,
+			options?: { css?: string; theme?: string },
+		) => {
+			try {
+				const customCss = options?.css
+					? readFileSync(options.css, "utf8")
+					: undefined;
+				const rawMarkdown = readFileSync(file, "utf8");
+				if (containsUnsafeHtml(rawMarkdown)) {
+					process.stderr.write(UNSAFE_HTML_WARNING);
+				}
+				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
+				const themeColors = resolveEffectiveTheme(
+					frontmatter.theme,
+					options?.theme,
+					customCss,
+				);
+				const html = generateHtml(markdown, file, customCss, themeColors);
+				const outputPath = resolveOutputPath(file, output, "png");
 
-			const written = await exportToPng(html, outputPath);
-			process.stdout.write(
-				`Wrote ${written.length} PNG file(s), starting at ${written[0]}\n`,
-			);
-		} catch (error) {
-			process.stderr.write(`${formatActionError(error, file)}\n`);
-			process.exitCode = 1;
-		}
-	});
+				const written = await exportToPng(html, outputPath);
+				process.stdout.write(
+					`Wrote ${written.length} PNG file(s), starting at ${written[0]}\n`,
+				);
+			} catch (error) {
+				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.exitCode = 1;
+			}
+		},
+	);
 
 program.parse();
