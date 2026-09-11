@@ -1,6 +1,6 @@
 # nh-deck
 
-nh-deck is a local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks — this author's own take on the presentation-CLI concept popularized by [arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun). Write your deck as plain Markdown, render it and serve it from a local HTTP server on your own machine, present it straight from your browser, and export it to PDF — all without an internet connection or an account, and without any of it ever leaving your machine. It's one of three independent sibling projects under the [Not-Humans-Lab](../Not-Humans-Lab/) umbrella (alongside `nh-skills` and the planned `daily-dose`), each an independent repo with its own toolchain.
+nh-deck is a local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks. Write your deck as plain Markdown, render it and serve it from a local HTTP server on your own machine, present it straight from your browser, and export it to PDF — all without an internet connection or an account, and without any of it ever leaving your machine. It's one of three independent sibling projects under the [Not-Humans-Lab](../Not-Humans-Lab/) umbrella (alongside `nh-skills` and the planned `daily-dose`), each an independent repo with its own toolchain.
 
 ## Installation
 
@@ -57,4 +57,4 @@ This is an early walking skeleton, not a feature-complete tool. The following ar
 
 KaTeX (math rendering) and Mermaid (diagrams) are both supported today, CDN-free — see `AGENTS.md`'s Known Gotchas for how.
 
-nh-deck never phones home and the rendered HTML never depends on a CDN for correctness — that local-first constraint carries over unchanged from the original `deckrun` concept, even while the features above are still catching up.
+nh-deck never phones home and the rendered HTML never depends on a CDN for correctness — that local-first constraint is absolute, even while the features above are still catching up.

@@ -7,10 +7,8 @@ does not restate or duplicate the umbrella-level tech.md that lives at
 that flows down from there.
 
 nh-deck is a local-first CLI for writing, presenting, and exporting
-Markdown-based slide decks — the author's own version of
-[arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun). Every
-choice below is made in service of one non-negotiable constraint carried
-over from that reference project: **the CLI never phones home, and rendered
+Markdown-based slide decks. Every choice below is made in service of one
+non-negotiable constraint: **the CLI never phones home, and rendered
 HTML must not depend on any CDN for correctness.**
 
 ## Stack summary
@@ -43,7 +41,7 @@ HTML must not depend on any CDN for correctness.**
 | Mermaid (`beautiful-mermaid`) | **Adopt** | Diagram rendering, shipped. Chosen for its minimal, DOM-free/Puppeteer-free dependency tree (`elkjs` + `entities` only). Its own generated SVG output was found to contain a hardcoded Google Fonts CDN `@import` — a real anti-pattern, not hypothetical — which is stripped before embedding; see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`. |
 | Playwright | **Hold — rejected** | See Rationale below. |
 | Express or any web framework | **Hold** | The local dev server is a plain `node:http` server on purpose — no framework is needed for "serve one rendered HTML string on an ephemeral port." |
-| Bundler (esbuild/webpack/tsup/rollup) | **Hold** | No bundler at all — matches the reference project's "no bundler" philosophy. `tsc` transpile-only is the entire build step. |
+| Bundler (esbuild/webpack/tsup/rollup) | **Hold** | No bundler at all — a CLI this small doesn't need one. `tsc` transpile-only is the entire build step. |
 | Multi-OS / multi-Node CI matrix | **Adopt** | Live: `ubuntu-latest`/`macos-14`/`windows-latest` × Node 20/22/latest (9 combinations, `fail-fast: false`). Started as a single `ubuntu-latest` job for the walking skeleton, expanded once that skeleton went green. |
 | `open` | **Adopt** | Production dependency. Used in `src/index.ts` to open the rendered deck in the user's default browser after `nh-deck render`, unless `--no-open` is passed. |
 | `@biomejs/biome` | **Adopt** | Lint + format. Configured via `biome.json`; the CI `Lint` step runs `npm run lint` (`biome ci .`). |
@@ -69,9 +67,7 @@ HTML must not depend on any CDN for correctness.**
   requirement without any bundled/downloaded browser, adding Playwright
   alongside it would be redundant tooling with a real conflict risk, not a
   neutral second option.
-- **`tsc`-only build, no bundler.** The reference project
-  (`arpitbbhayani/deckrun`) ships without a bundler, and this project
-  preserves that philosophy deliberately: a CLI tool with a handful of
+- **`tsc`-only build, no bundler.** A CLI tool with a handful of
   source files doesn't need tree-shaking, code-splitting, or a bundler's
   build-time complexity. Plain `tsc` transpile emits `dist/index.js` with
   the shebang preserved, which is all an npm `bin` entry needs.
@@ -80,9 +76,8 @@ HTML must not depend on any CDN for correctness.**
   open a browser. That does not need routing, middleware, or templating —
   pulling in a web framework for it would be scope creep against KISS/YAGNI.
 - **KaTeX and Mermaid both shipped local-only, not silently dropped.**
-  Both are real, intentional parts of the eventual feature set (matching
-  the reference project's math/diagram support), and both confirm the
-  local-first constraint is actively enforced, not just aspirational.
+  Both are real, intentional parts of the feature set, and both confirm
+  the local-first constraint is actively enforced, not just aspirational.
   KaTeX ships its own fonts embedded as base64 `data:` URIs, no CDN
   fallback path at all. Mermaid's chosen library (`beautiful-mermaid`)
   had its own default output tried to fetch a Google Fonts CDN font, and

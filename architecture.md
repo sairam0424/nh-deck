@@ -12,8 +12,7 @@ phase, not speculative future features.
 nh-deck is a standalone, independent GitHub repository — a local-first CLI
 tool for writing, presenting, and exporting Markdown-based slide decks,
 matching this workspace's polyrepo convention (it is not nested inside
-Not-Humans-Lab). It is the author's own version of
-[arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun).
+Not-Humans-Lab).
 
 **nh-deck is not a hosted, multi-user product.** There are no user accounts,
 no server-side persistence, no "shareable deck" hosting infrastructure. A

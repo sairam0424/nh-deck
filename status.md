@@ -12,7 +12,7 @@
 
 nh-deck is an independent, standalone GitHub repository (github.com/sairam0424/nh-deck) — a local-first
 CLI tool for writing, presenting, and exporting Markdown-based slide
-decks, in the spirit of `arpitbbhayani/deckrun`. It is one of three
+decks. It is one of three
 sibling projects (`daily-dose`, `nh-deck`, `nh-skills`) under the
 "Not-Humans-Lab" umbrella; cross-cutting system-level docs for that
 umbrella live in the separate, docs-only meta-repo at `../Not-Humans-Lab/`
@@ -34,9 +34,9 @@ with a preserved shebang as the npm `bin` entry. Tests with Vitest. See
 `docs/adr/0001-adopt-ts-node-cli-with-puppeteer-core-export.md` for the
 full rationale.
 
-**Local-first is a hard, non-negotiable constraint**, carried over from
-the reference project: the CLI never phones home, and rendered HTML must
-not depend on any CDN for correctness. See `SECURITY.md` for how this
+**Local-first is a hard, non-negotiable constraint**: the CLI never
+phones home, and rendered HTML must not depend on any CDN for
+correctness. See `SECURITY.md` for how this
 shapes the Known Security Considerations.
 
 ## Active Specs & Plans
