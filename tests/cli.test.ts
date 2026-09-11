@@ -6,8 +6,10 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { generateHtml } from "../src/render.js";
 
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
+const fixturePath = path.join(repoRoot, "fixtures", "sample.md");
 
 const SERVING_LINE_PATTERN = /nh-deck serving .* at http:\/\/127\.0\.0\.1:\d+/;
 const STARTUP_TIMEOUT_MS = 8_000;
@@ -335,6 +337,75 @@ describe("CLI: nh-deck pdf", () => {
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);
+
+	it(
+		"exports a real PDF file with a custom --css file",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-css-test-${randomUUID()}.pdf`,
+			);
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-custom-css-pdf-test-${randomUUID()}.css`,
+			);
+			const customCss = ".slide { color: hotpink; }";
+			writeFileSync(cssPath, customCss);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					cssPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			// The PDF's own bytes are a poor place to look for verbatim CSS text:
+			// Chromium's print-to-PDF renders the <style> tag's effect (glyph
+			// positions, fill colors), not its source text, so ".slide { color:
+			// hotpink; }" never appears as searchable ASCII in the output --
+			// unlike a plain HTTP response body (see the "render --css" test
+			// above), a PDF has no equivalent of "read back the served bytes".
+			// As a reliable proxy for "pdf --css exercises the same customCss
+			// wiring render --css already exercises", call generateHtml directly
+			// with the same markdown+CSS and confirm it fully replaces the
+			// default stylesheet -- this is the exact function pdf's action
+			// calls with the same options.css-derived customCss argument.
+			const fixtureMarkdown = readFileSync(fixturePath, "utf8");
+			const html = generateHtml(
+				fixtureMarkdown,
+				"fixtures/sample.md",
+				customCss,
+			);
+			expect(html).toContain(customCss);
+			expect(html).not.toContain("font-family: -apple-system");
+
+			rmSync(outputPath, { force: true });
+			rmSync(cssPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck png", () => {
@@ -386,6 +457,66 @@ describe("CLI: nh-deck png", () => {
 			for (let n = 3; n <= 5; n++) {
 				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
 			}
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"exports PNGs with a custom --css file",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-css-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const secondSlidePath = outputPath.replace(/\.png$/, "-2.png");
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-custom-css-png-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					cssPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+			expect(existsSync(secondSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			rmSync(firstSlidePath, { force: true });
+			rmSync(secondSlidePath, { force: true });
+			// fixtures/sample.md has 5 slides -- clean up the rest too.
+			for (let n = 3; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+			rmSync(cssPath, { force: true });
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);
