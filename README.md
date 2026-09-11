@@ -50,7 +50,7 @@ PDF export works by launching a Chrome/Chromium/Edge/Brave binary that's already
 
 ## Themes
 
-nh-deck ships 4 fixed, named color themes — `light`, `dark`, `dracula`, and `nord` — that recolor the base deck (background, text, borders, code blocks) and KaTeX math consistently. A deck with no theme requested renders exactly as it always has (the `light` theme's colors are the same defaults nh-deck has always used).
+nh-deck ships 4 fixed, named color themes — `light`, `dark`, `dracula`, and `nord` — that recolor the base deck (background, text, borders, code blocks) and KaTeX math consistently. A deck with no theme requested renders exactly as it always has. Explicitly requesting the `light` theme is close, but not identical, to that default — code-block backgrounds in particular differ noticeably (see `docs/adr/0008-named-theme-system.md`).
 
 > **Known gap:** Mermaid diagrams do not yet change color with the active theme — they still render with their own default colors regardless of which theme (if any) is applied. See `docs/adr/0008-named-theme-system.md` for details and `Context.md`'s Open risks for the tracked follow-up.
 
