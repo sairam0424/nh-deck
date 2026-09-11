@@ -16,3 +16,14 @@ nh-deck render fixtures/sample.md --port 4000
 ```
 
 No accounts, no hosting, no CDN dependencies — just your Markdown file.
+
+## A Quick Diagram
+
+nh-deck can render Mermaid diagrams too:
+
+```mermaid
+flowchart TD
+  Start --> Decision
+  Decision -->|Yes| Action
+  Decision -->|No| End
+```

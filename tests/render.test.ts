@@ -48,6 +48,13 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("jsdelivr.net");
 		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
+
+	it("renders the fixture's Mermaid diagram section", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain("<h2>A Quick Diagram</h2>");
+		expect(html).toContain("<svg");
+	});
 });
 
 describe("generateHtml — Mermaid diagrams", () => {
