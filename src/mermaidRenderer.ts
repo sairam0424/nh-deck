@@ -19,11 +19,11 @@ const CSS_IMPORT_PATTERN = /@import url\([^)]*\);?\s*/g;
  * equivalent: one malformed diagram must not crash the whole render.
  */
 export function renderMermaidDiagram(code: string): string {
-  try {
-    const svg = renderMermaidSVG(code);
-    return svg.replace(CSS_IMPORT_PATTERN, "");
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return `<pre class="mermaid-error">Mermaid diagram error: ${escapeHtml(message)}</pre>`;
-  }
+	try {
+		const svg = renderMermaidSVG(code);
+		return svg.replace(CSS_IMPORT_PATTERN, "");
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		return `<pre class="mermaid-error">Mermaid diagram error: ${escapeHtml(message)}</pre>`;
+	}
 }
