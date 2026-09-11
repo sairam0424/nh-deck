@@ -19,6 +19,21 @@ No accounts, no hosting, no CDN dependencies — just your Markdown file.
 
 ---
 
+# Presenting Your Deck
+
+Once a deck is rendered, `nh-deck render` serves it locally so you can
+present straight from the browser — no build step, no upload.
+
+---
+
+# Exporting to PDF
+
+When you're ready to share a static copy, `nh-deck pdf` exports the same
+rendered deck to a PDF file using a browser already installed on your
+machine.
+
+---
+
 # A Quick Formula
 
 nh-deck can render inline math like $E = mc^2$, and block equations too:

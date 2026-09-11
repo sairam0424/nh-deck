@@ -55,6 +55,92 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("jsdelivr.net");
 		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
+
+	it('splits the fixture into four <section class="slide"> blocks on its --- delimiters', () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(4);
+	});
+
+	it("renders each of the fixture's three slide headings inside its own section", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain("<h1>Getting Started with nh-deck</h1>");
+		expect(html).toContain("<h1>Presenting Your Deck</h1>");
+		expect(html).toContain("<h1>Exporting to PDF</h1>");
+	});
+});
+
+describe("generateHtml — slide segmentation", () => {
+	it("wraps single-slide content in exactly one <section> when there is no delimiter", () => {
+		const html = generateHtml("# Only slide\n\nSome text.");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("splits into multiple sections on a --- preceded by a blank line", () => {
+		const html = generateHtml(
+			"# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.",
+		);
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(2);
+		expect(html).toContain("<h1>Slide 1</h1>");
+		expect(html).toContain("<h1>Slide 2</h1>");
+	});
+
+	it("does not split on a --- immediately after a paragraph (setext H2 heading)", () => {
+		const html = generateHtml("Some Text\n---\nMore text.");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+		expect(html).toContain("<h2>Some Text</h2>");
+	});
+
+	it("does not split on a --- inside a fenced code block", () => {
+		const html = generateHtml(
+			"Before.\n\n```\ncode\n---\nmore code\n```\n\nAfter.",
+		);
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+		expect(html).toContain("---\nmore code");
+	});
+
+	it("filters out an empty slide produced by two consecutive delimiters", () => {
+		const html = generateHtml(
+			"# Slide 1\n\nFirst.\n\n---\n\n---\n\n# Slide 2\n\nSecond.",
+		);
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(2);
+	});
+
+	it("wraps an empty deck in exactly one <section> (zero-delimiter backward-compatibility invariant)", () => {
+		const html = generateHtml("");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a whitespace-only deck in exactly one <section> (zero-delimiter backward-compatibility invariant)", () => {
+		const html = generateHtml("   \n\n   ");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a deck consisting solely of a single --- delimiter in exactly one <section>", () => {
+		const html = generateHtml("---");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a deck consisting solely of two --- delimiters in exactly one <section>", () => {
+		const html = generateHtml("---\n\n---");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a leading --- typed before any slide content in exactly one <section>", () => {
+		const html = generateHtml("---\n\n   ");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
 });
 
 describe("generateHtml — KaTeX math", () => {
