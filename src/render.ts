@@ -1,9 +1,34 @@
-import type { Token } from "marked";
+import type { Token, Tokens } from "marked";
 import { marked } from "marked";
 import markedKatex from "marked-katex-extension";
+import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
+import { renderMermaidDiagram } from "./mermaidRenderer.js";
 
 marked.use(markedKatex({ throwOnError: false }));
+
+marked.use({
+	useNewRenderer: true,
+	renderer: {
+		code({ text, lang, escaped }: Tokens.Code): string {
+			const langString = (lang ?? "").match(/^\S*/)?.[0];
+
+			if (langString === "mermaid") {
+				return renderMermaidDiagram(text);
+			}
+
+			// Everything below exactly replicates marked@13.0.3's own default
+			// code() renderer (verified directly against its source) for every
+			// language other than "mermaid" -- this override must not change how
+			// any other fenced code block renders.
+			const code = `${text.replace(/\n$/, "")}\n`;
+			if (!langString) {
+				return `<pre><code>${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+			}
+			return `<pre><code class="language-${escapeHtml(langString)}">${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+		},
+	},
+});
 
 /**
  * Converts Markdown source into a complete, self-contained HTML document,
@@ -31,8 +56,11 @@ marked.use(markedKatex({ throwOnError: false }));
  * Invalid LaTeX degrades to a visible `class="katex-error"` span instead of
  * throwing (`throwOnError: false`).
  *
- * Mermaid (diagrams) rendering is explicitly deferred as a fast-follow
- * feature and is NOT wired up here yet.
+ * Mermaid (diagrams) rendering is wired up via a marked renderer override on
+ * the `code` token (see the `marked.use({ renderer: { code ... } })` call
+ * above) -- `mermaid` fenced code blocks render as CDN-free SVG diagrams via
+ * `renderMermaidDiagram`, while every other language renders exactly as
+ * marked's own default code renderer would.
  */
 export function generateHtml(markdown: string, title?: string): string {
 	const tokens = marked.lexer(markdown);
@@ -192,13 +220,4 @@ function splitIntoSlides(tokens: Token[]): Token[][] {
 		return [groups[0]];
 	}
 	return nonEmptyGroups;
-}
-
-function escapeHtml(value: string): string {
-	return value
-		.replace(/&/g, "&amp;")
-		.replace(/</g, "&lt;")
-		.replace(/>/g, "&gt;")
-		.replace(/"/g, "&quot;")
-		.replace(/'/g, "&#39;");
 }

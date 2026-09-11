@@ -47,6 +47,13 @@ describe("generateHtml", () => {
 		expect(html).toContain('class="katex"');
 	});
 
+	it("renders the fixture's Mermaid diagram section", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain("<h2>A Quick Diagram</h2>");
+		expect(html).toContain("<svg");
+	});
+
 	it("never references an external CDN (local-first constraint)", () => {
 		const html = generateHtml(fixtureMarkdown, "sample");
 
@@ -56,18 +63,20 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
 
-	it('splits the fixture into four <section class="slide"> blocks on its --- delimiters', () => {
+	it('splits the fixture into five <section class="slide"> blocks on its --- delimiters', () => {
 		const html = generateHtml(fixtureMarkdown, "sample");
 		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
-		expect(sectionCount).toBe(4);
+		expect(sectionCount).toBe(5);
 	});
 
-	it("renders each of the fixture's three slide headings inside its own section", () => {
+	it("renders each of the fixture's slide headings inside its own section", () => {
 		const html = generateHtml(fixtureMarkdown, "sample");
 
 		expect(html).toContain("<h1>Getting Started with nh-deck</h1>");
 		expect(html).toContain("<h1>Presenting Your Deck</h1>");
 		expect(html).toContain("<h1>Exporting to PDF</h1>");
+		expect(html).toContain("<h1>A Quick Formula</h1>");
+		expect(html).toContain("<h2>A Quick Diagram</h2>");
 	});
 });
 
@@ -191,5 +200,47 @@ describe("generateHtml — KaTeX math", () => {
 		expect(html).not.toContain("unpkg.com");
 		expect(html).not.toContain("jsdelivr.net");
 		expect(html).not.toContain("cdnjs.cloudflare.com");
+	});
+});
+
+describe("generateHtml — Mermaid diagrams", () => {
+	it("renders a mermaid fenced code block as an SVG diagram", () => {
+		const html = generateHtml("```mermaid\nflowchart TD\n  A --> B\n```");
+
+		expect(html).toContain("<svg");
+		expect(html).not.toContain("```mermaid");
+	});
+
+	it("renders a visible error box for invalid mermaid syntax instead of throwing", () => {
+		expect(() =>
+			generateHtml("```mermaid\nnot a real diagram\n```"),
+		).not.toThrow();
+
+		const html = generateHtml("```mermaid\nnot a real diagram\n```");
+		expect(html).toContain("mermaid-error");
+	});
+
+	it("never references an external CDN when a diagram is present", () => {
+		const html = generateHtml("```mermaid\nflowchart TD\n  A --> B\n```");
+
+		expect(html).not.toMatch(/https?:\/\/cdn\./i);
+		expect(html).not.toContain("unpkg.com");
+		expect(html).not.toContain("jsdelivr.net");
+		expect(html).not.toContain("cdnjs.cloudflare.com");
+		expect(html).not.toContain("fonts.googleapis.com");
+	});
+
+	it("renders a non-mermaid fenced code block exactly as before this phase", () => {
+		const html = generateHtml("```bash\necho hi\n```");
+
+		expect(html).toContain(
+			'<pre><code class="language-bash">echo hi\n</code></pre>',
+		);
+	});
+
+	it("renders a fenced code block with no language tag exactly as before this phase", () => {
+		const html = generateHtml("```\nplain text\n```");
+
+		expect(html).toContain("<pre><code>plain text\n</code></pre>");
 	});
 });

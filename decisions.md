@@ -41,6 +41,7 @@ instead of getting its own ADR file.
 | 0002 | [Adopt per-slide segmentation via marked's lexer/parser split](docs/adr/0002-per-slide-segmentation.md) | Accepted | 2026-09-10 | —          |
 | 0003 | [SSE-based live-reload for render --watch](docs/adr/0003-sse-based-live-reload.md) | Accepted | 2026-09-11 | —          |
 | 0004 | [KaTeX math rendering with locally-embedded fonts](docs/adr/0004-katex-local-embedded-math.md) | Accepted | 2026-09-11 | —          |
+| 0005 | [Mermaid diagram rendering with a stripped CDN font import](docs/adr/0005-mermaid-local-cdn-import-stripped.md) | Accepted | 2026-09-11 | —          |
 
 ## Lightweight Decisions Log
 

@@ -41,3 +41,16 @@ nh-deck can render inline math like $E = mc^2$, and block equations too:
 $$
 \int_0^1 x^2\,dx = \frac{1}{3}
 $$
+
+---
+
+## A Quick Diagram
+
+nh-deck can render Mermaid diagrams too:
+
+```mermaid
+flowchart TD
+  Start --> Decision
+  Decision -->|Yes| Action
+  Decision -->|No| End
+```
