@@ -42,6 +42,7 @@ instead of getting its own ADR file.
 | 0003 | [SSE-based live-reload for render --watch](docs/adr/0003-sse-based-live-reload.md) | Accepted | 2026-09-11 | —          |
 | 0004 | [KaTeX math rendering with locally-embedded fonts](docs/adr/0004-katex-local-embedded-math.md) | Accepted | 2026-09-11 | —          |
 | 0005 | [Mermaid diagram rendering with a stripped CDN font import](docs/adr/0005-mermaid-local-cdn-import-stripped.md) | Accepted | 2026-09-11 | —          |
+| 0006 | [Phase 5 polish: --css opt-out, presenter notes, PDF pagination, PNG export](docs/adr/0006-phase-5-polish.md) | Accepted | 2026-09-11 | —          |
 
 ## Lightweight Decisions Log
 
