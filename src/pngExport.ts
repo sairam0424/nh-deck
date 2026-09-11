@@ -9,12 +9,20 @@ import { detectBrowserExecutable } from "./browserLaunch.js";
  * are derived by inserting "-N" (1-indexed) before outputPath's extension,
  * e.g. "deck.png" -> "deck-1.png", "deck-2.png", ... Returns the list of
  * file paths actually written, in slide order.
+ *
+ * `executablePathOverride`, when provided, is used instead of calling
+ * `detectBrowserExecutable()` -- existing 2-argument callers are unaffected.
+ * This exists so `scripts/check-pdf-fidelity.mjs` can drive the same export
+ * path against two different detected browsers for a visual-fidelity
+ * comparison, rather than always exporting against whichever browser
+ * chrome-launcher would pick first.
  */
 export async function exportToPng(
 	html: string,
 	outputPath: string,
+	executablePathOverride?: string,
 ): Promise<string[]> {
-	const executablePath = detectBrowserExecutable();
+	const executablePath = executablePathOverride ?? detectBrowserExecutable();
 
 	let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 	try {

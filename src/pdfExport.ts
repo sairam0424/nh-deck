@@ -7,14 +7,21 @@ import { detectBrowserExecutable } from "./browserLaunch.js";
  *
  * No Chromium is bundled or downloaded — if no local installation is found,
  * this throws a clear, descriptive Error rather than crashing with a raw
- * Puppeteer stack trace. An automatic download fallback is a planned but
- * not-yet-implemented feature.
+ * Puppeteer stack trace.
+ *
+ * `executablePathOverride`, when provided, is used instead of calling
+ * `detectBrowserExecutable()` -- existing 2-argument callers are unaffected.
+ * This exists so `scripts/check-pdf-fidelity.mjs` can drive the same export
+ * path against two different detected browsers for a visual-fidelity
+ * comparison, rather than always exporting against whichever browser
+ * chrome-launcher would pick first.
  */
 export async function exportToPdf(
 	html: string,
 	outputPath: string,
+	executablePathOverride?: string,
 ): Promise<void> {
-	const executablePath = detectBrowserExecutable();
+	const executablePath = executablePathOverride ?? detectBrowserExecutable();
 
 	let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 	try {
