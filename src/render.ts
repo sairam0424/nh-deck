@@ -1,7 +1,20 @@
+import type { Token } from "marked";
 import { marked } from "marked";
 
 /**
- * Converts Markdown source into a complete, self-contained HTML document.
+ * Converts Markdown source into a complete, self-contained HTML document,
+ * split into `<section class="slide">` blocks on each top-level `---`
+ * thematic break.
+ *
+ * Slide-boundary detection is delegated entirely to marked's own tokenizer
+ * (see splitIntoSlides below) rather than a hand-rolled regex over the raw
+ * Markdown string, because CommonMark's own grammar is ambiguous here: a
+ * `---` immediately after a paragraph line (no blank line) is a setext H2
+ * heading underline, not a thematic break, and a `---` inside a fenced code
+ * block is never a break at all. marked's tokenizer already resolves both
+ * cases correctly (verified directly against its lexer output) — see
+ * docs/adr/0002-per-slide-segmentation.md for the full comparison against
+ * a regex-based alternative.
  *
  * Local-first constraint: the returned document must never reference any
  * external CDN (no <script src="https://...">, no <link href="https://...">).
@@ -11,7 +24,13 @@ import { marked } from "marked";
  * fast-follow feature and are NOT wired up here yet.
  */
 export function generateHtml(markdown: string, title?: string): string {
-	const fragment = marked.parse(markdown, { async: false }) as string;
+	const tokens = marked.lexer(markdown);
+	const slidesHtml = splitIntoSlides(tokens)
+		.map(
+			(slideTokens) =>
+				`<section class="slide">\n${marked.parser(slideTokens)}</section>`,
+		)
+		.join("\n");
 	const pageTitle = escapeHtml(
 		title && title.trim().length > 0 ? title : "nh-deck",
 	);
@@ -82,6 +101,16 @@ export function generateHtml(markdown: string, title?: string): string {
     a {
       color: #0b5fff;
     }
+    .slide {
+      margin-bottom: 3rem;
+      padding-bottom: 2rem;
+      border-bottom: 1px solid #e0e0e0;
+    }
+    .slide:last-of-type {
+      margin-bottom: 0;
+      padding-bottom: 0;
+      border-bottom: none;
+    }
     @media (prefers-color-scheme: dark) {
       body { color: #e6e6e6; background: #121212; }
       h1 { border-bottom-color: #333333; }
@@ -89,14 +118,61 @@ export function generateHtml(markdown: string, title?: string): string {
       blockquote { border-left-color: #444444; color: #b0b0b0; }
       th, td { border-color: #333333; }
       a { color: #6ea8ff; }
+      .slide { border-bottom-color: #333333; }
     }
   </style>
 </head>
 <body>
-${fragment}
+${slidesHtml}
 </body>
 </html>
 `;
+}
+
+/**
+ * Groups a top-level token stream into one array per slide, dividing at
+ * each "hr" token (marked's tokenizer output for a `---` thematic break).
+ * Two consecutive "hr" tokens — or a leading/trailing one — produce an
+ * empty group; those are filtered out rather than rendered as a blank
+ * slide. A stream with no "hr" tokens at all produces exactly one group
+ * (the required backward-compatibility case for a deck with no delimiter).
+ *
+ * If every group turns out empty (or whitespace-only), the general filter
+ * below would discard all of them and return zero slides — a silent blank
+ * page with no error. This happens not only for an empty/whitespace-only
+ * deck with no "hr" token (`marked.lexer("")` -> `[]`,
+ * `marked.lexer("   \n\n   ")` -> a single "space" token, so `groups` has
+ * exactly one, already-empty entry), but also for a deck consisting solely
+ * of one or more `---` delimiters plus whitespace (e.g. "---", or
+ * "---\n\n---"): every "hr" token pushes an additional empty group, so
+ * `groups` ends up with two or more empty entries instead of one. Rescuing
+ * only when `groups.length === 1` catches the former case but misses the
+ * latter, so the rescue fires whenever *every* group is empty, regardless
+ * of how many "hr"-caused splits produced them — and collapses back down to
+ * exactly one (empty) group, preserving the "never render zero sections"
+ * invariant without rendering a pile of redundant blank slides for a
+ * document that has no visible content anywhere.
+ */
+function splitIntoSlides(tokens: Token[]): Token[][] {
+	const groups: Token[][] = [];
+	let current: Token[] = [];
+	for (const token of tokens) {
+		if (token.type === "hr") {
+			groups.push(current);
+			current = [];
+		} else {
+			current.push(token);
+		}
+	}
+	groups.push(current);
+
+	const nonEmptyGroups = groups.filter((group) =>
+		group.some((token) => token.type !== "space"),
+	);
+	if (nonEmptyGroups.length === 0) {
+		return [groups[0]];
+	}
+	return nonEmptyGroups;
 }
 
 function escapeHtml(value: string): string {
