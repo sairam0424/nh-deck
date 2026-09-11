@@ -28,6 +28,13 @@ const NOTES_STYLE = `
       }
     }`;
 
+const PRINT_PAGINATION_STYLE = `
+    @media print {
+      .slide {
+        break-after: page;
+      }
+    }`;
+
 marked.use(markedKatex({ throwOnError: false }));
 
 marked.use({
@@ -202,6 +209,7 @@ ${
 }
     ${katexStyle}
     ${NOTES_STYLE}
+    ${PRINT_PAGINATION_STYLE}
   </style>
 </head>
 <body>

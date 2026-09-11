@@ -303,3 +303,11 @@ describe("generateHtml — presenter notes", () => {
 		expect(html).toMatch(/@media print[^}]*\.notes[^}]*display:\s*none/);
 	});
 });
+
+describe("generateHtml — PDF pagination", () => {
+	it("includes a print-media rule that breaks after each slide", () => {
+		const html = generateHtml("# Slide 1\n\n---\n\n# Slide 2");
+
+		expect(html).toMatch(/@media print[^}]*\.slide[^}]*break-after:\s*page/);
+	});
+});
