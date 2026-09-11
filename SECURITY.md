@@ -1,8 +1,7 @@
 # Security Policy
 
 nh-deck is a **local-first CLI tool** for writing, presenting, and
-exporting Markdown-based slide decks — the author's own version of
-[arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun). It is
+exporting Markdown-based slide decks. It is
 one of three independent sibling projects (`daily-dose`, `nh-deck`,
 `nh-skills`) under the "Not-Humans-Lab" umbrella; cross-cutting
 system-level docs for that umbrella live in the separate, docs-only
@@ -119,8 +118,8 @@ for that constraint's origin).
   it does not get silently added as a `--host` flag.
 - **Rendered Markdown/HTML is not sanitized against XSS, by design.**
   nh-deck passes Markdown through `marked` and renders the resulting HTML
-  as-is, inheriting deckrun's "raw HTML passes through untouched" design
-  choice. This is an accepted trade-off, not an oversight: a user writing
+  as-is, by deliberate design: raw HTML passes through untouched. This is
+  an accepted trade-off, not an oversight: a user writing
   and presenting their **own** deck is inside their own trust boundary —
   sanitizing their own embedded HTML/JS would break legitimate use of raw
   HTML in slides (custom styling, embeds, small scripts).
