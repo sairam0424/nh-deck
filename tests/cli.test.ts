@@ -224,6 +224,127 @@ describe("CLI: nh-deck render", () => {
 	);
 });
 
+describe("CLI: nh-deck render — unsafe HTML warning", () => {
+	it(
+		"writes the raw-HTML warning to stderr (not stdout) for a deck containing a genuine <script> tag",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-unsafe-html-test-${randomUUID()}.md`,
+			);
+			writeFileSync(tempFile, "# Slide\n\n<script>alert(1)</script>\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(matchedLine).toMatch(SERVING_LINE_PATTERN);
+			expect(stderr).toBe(
+				"nh-deck: warning: this deck contains raw HTML, which is rendered as-is (including any <script> tags). Only open decks from sources you trust.\n",
+			);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempFile, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"does not write the warning for a plain markdown-only deck",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(stderr).not.toMatch(/nh-deck: warning:/);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"does not write the warning for a deck using only presenter-note HTML comments",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-presenter-notes-only-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(stderr).not.toMatch(/nh-deck: warning:/);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempFile, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render — error handling", () => {
 	it(
 		"prints a clean 'could not find file' error and exits non-zero when the file does not exist, instead of a raw ENOENT/unhandled-rejection stack trace",
@@ -878,6 +999,83 @@ describe("CLI: nh-deck render --watch", () => {
 
 			const message = await reloadPromise;
 			expect(message).toContain("data: reload");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempFile, { force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"warns once on the initial render and not again on a debounced re-render triggered by a file save",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-watch-unsafe-html-test-${randomUUID()}.md`,
+			);
+			writeFileSync(tempFile, "# Slide\n\n<script>alert(1)</script>\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+					"--watch",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const warningCount = () =>
+				(stderr.match(/nh-deck: warning:/g) ?? []).length;
+
+			expect(warningCount()).toBe(1);
+
+			const reloadPromise = new Promise<string>((resolve, reject) => {
+				const req = http.get(`${url}/__nh-deck-reload`, (res) => {
+					res.on("data", (chunk: Buffer) => {
+						const text = chunk.toString();
+						if (text.includes("data:")) {
+							req.destroy();
+							resolve(text);
+						}
+					});
+					res.on("error", reject);
+				});
+				req.on("error", reject);
+			});
+
+			// Give the SSE connection a moment to establish before triggering a
+			// change -- the re-saved content still contains raw HTML, so if the
+			// check ran again on every debounced re-render (rather than only on
+			// the initial render), the warning count below would double.
+			await new Promise((r) => setTimeout(r, 300));
+			writeFileSync(tempFile, "# Slide changed\n\n<script>alert(2)</script>\n");
+
+			await reloadPromise;
+			// The debounce window is 100ms; wait comfortably past it before the
+			// final assertion so a would-be second warning has time to appear.
+			await new Promise((r) => setTimeout(r, 300));
+
+			expect(warningCount()).toBe(1);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);

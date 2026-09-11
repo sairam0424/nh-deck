@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import { generateHtml } from "../src/render.js";
+import { containsUnsafeHtml, generateHtml } from "../src/render.js";
 
 // NOTE on the ".js" import extension above: this project uses TypeScript's
 // NodeNext module resolution (see src/index.ts, which imports "./render.js"
@@ -309,5 +309,45 @@ describe("generateHtml — PDF pagination", () => {
 		const html = generateHtml("# Slide 1\n\n---\n\n# Slide 2");
 
 		expect(html).toMatch(/@media print[^}]*\.slide[^}]*break-after:\s*page/);
+	});
+});
+
+describe("containsUnsafeHtml", () => {
+	it("returns true for a deck containing a genuine <script> tag", () => {
+		expect(containsUnsafeHtml("# Slide\n\n<script>alert(1)</script>\n")).toBe(
+			true,
+		);
+	});
+
+	it("returns true for a deck containing a genuine <iframe> tag", () => {
+		expect(
+			containsUnsafeHtml(
+				'# Slide\n\n<iframe src="https://example.com"></iframe>\n',
+			),
+		).toBe(true);
+	});
+
+	it("returns true for raw HTML embedded inline within a paragraph, not just standalone on its own line", () => {
+		expect(
+			containsUnsafeHtml(
+				"# Slide\n\nSome text with an inline <img src=x onerror=alert(1)> tag mid-sentence.\n",
+			),
+		).toBe(true);
+	});
+
+	it("returns false for a plain markdown-only deck", () => {
+		expect(
+			containsUnsafeHtml(
+				"# Slide\n\nJust plain text, a [link](https://example.com), and a\n\n- list\n- of items\n",
+			),
+		).toBe(false);
+	});
+
+	it("returns false for a deck using only presenter-note HTML comments", () => {
+		expect(
+			containsUnsafeHtml(
+				"# Slide One\n\nFirst slide body.\n\n<!-- remember to smile -->\n\n---\n\n# Slide Two\n\nSecond slide body.\n\n<!-- pause for questions -->\n",
+			),
+		).toBe(false);
 	});
 });

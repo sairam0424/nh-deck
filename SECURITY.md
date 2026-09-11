@@ -128,9 +128,16 @@ for that constraint's origin).
     deck file (downloaded, received from someone else, cloned from a
     repo they don't control), any HTML or `<script>` embedded in that
     deck's Markdown executes in their browser exactly as if they'd
-    written it themselves. nh-deck does not warn on this today. Treat any
-    third-party `.md` deck with the same caution as running an unknown
-    script — do not open decks from sources you don't trust.
+    written it themselves. nh-deck now warns on this: `render`, `pdf`,
+    and `png` all check the deck's Markdown for raw HTML (any HTML token
+    other than a presenter-note comment) and print a one-line, non-fatal
+    stderr warning — `nh-deck: warning: this deck contains raw HTML,
+    which is rendered as-is (including any <script> tags). Only open
+    decks from sources you trust.` — before rendering or exporting. The
+    warning does not block anything or change the exit code; it exists so
+    the risk above is surfaced rather than silent. Treat any third-party
+    `.md` deck with the same caution as running an unknown script — do
+    not open decks from sources you don't trust.
   - Sanitizing by default is deliberately not in scope for the walking
     skeleton — it would need to be an explicit, documented opt-in/opt-out
     (or a "you are opening a deck you didn't author" prompt) rather than

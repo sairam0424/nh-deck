@@ -76,8 +76,13 @@ shapes the Known Security Considerations.
    verified locally, not yet in the CI pipeline).~~ Done — `tests/pdfExport.test.ts`
    is a real, unmocked PDF-export test that runs via `npx vitest run` in
    `ci.yml` across all 9 OS/Node combinations.
-4. Add a top-level `README.md` refresh now that both KaTeX and Mermaid
-   have landed.
+4. ~~Add a top-level `README.md` refresh now that both KaTeX and Mermaid
+   have landed.~~ Done — README's Usage and Current limitations sections
+   were refreshed in PR #8 to cover KaTeX/Mermaid/png/`--watch`/`--css`.
+5. Automated cross-browser PDF-export visual-fidelity check (Context.md
+   Roadmap item 7) — not yet started.
+6. Full theme, template, and transition system (Context.md Roadmap item 11)
+   — deliberately deferred pending its own design pass.
 
 ## Risks & Blockers
 
@@ -90,4 +95,6 @@ shapes the Known Security Considerations.
   becomes a real complaint.
 - **Risk:** raw HTML in rendered decks is not sanitized by design (see
   `SECURITY.md`) — opening a third-party deck file executes any embedded
-  HTML/script it contains. No warning mechanism exists yet for this.
+  HTML/script it contains. A warning mechanism now exists for this:
+  `render`/`pdf`/`png` print a non-fatal stderr warning when a deck
+  contains raw HTML other than a presenter-note comment.

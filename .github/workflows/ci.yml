@@ -30,7 +30,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Audit dependencies (production only — see Context.md's Open Risks for the tracked dev-only exception)
+      - name: Audit dependencies (production only — the dev-only vitest/vite/esbuild exception this once tracked in Context.md's Open Risks was resolved 2026-09-11 via the vitest 5 bump; see Context.md)
         run: npm audit --omit=dev --audit-level=high
 
       - name: Typecheck
@@ -71,3 +71,51 @@ jobs:
             echo "::error::'nh-deck --help' did not print recognizable help output"
             exit 1
           fi
+
+  pdf-fidelity-check:
+    name: PDF/PNG cross-browser fidelity check
+    # Deliberately its own job, not folded into the build-and-test matrix
+    # above: this check needs 2 distinct Chrome-family browsers installed to
+    # mean anything, which isn't worth doing across all 9 matrix
+    # combinations. See docs/adr/0007-pdf-cross-browser-fidelity-check.md.
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # ubuntu-latest's own runner image already ships Google Chrome
+      # pre-installed (verified against actions/runner-images' own
+      # install-google-chrome.sh) -- that alone satisfies
+      # detectBrowserExecutable()'s normal single-browser needs, but this
+      # job specifically needs a *second*, distinct Chromium-family binary
+      # for the fidelity comparison to have anything to compare against.
+      # `chrome-version: latest` pulls a genuine upstream Chromium snapshot
+      # build (not another copy of Google Chrome), so this is a real second
+      # browser rather than a same-binary duplicate.
+      - name: Install a second, distinct Chromium browser
+        id: setup-chromium
+        uses: browser-actions/setup-chrome@48ad923757ca74d66703209fe939badbdf80f2f4 # v2.2.0
+        with:
+          chrome-version: latest
+
+      # Sets CHROME_PATH (chrome-launcher's own documented override env var)
+      # to the freshly-installed Chromium build's path, so
+      # detectAllBrowserExecutables() reports it as a distinct installation
+      # alongside the runner image's pre-installed Google Chrome, rather
+      # than relying on chrome-launcher's name-based `which` lookups to spot
+      # a binary that setup-chrome itself says "is not always named `chrome`
+      # or `chromium`".
+      - name: Run cross-browser PDF/PNG fidelity check
+        env:
+          CHROME_PATH: ${{ steps.setup-chromium.outputs.chrome-path }}
+        run: npm run check:fidelity

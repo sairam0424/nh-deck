@@ -9,16 +9,37 @@ import { detectBrowserExecutable } from "./browserLaunch.js";
  * are derived by inserting "-N" (1-indexed) before outputPath's extension,
  * e.g. "deck.png" -> "deck-1.png", "deck-2.png", ... Returns the list of
  * file paths actually written, in slide order.
+ *
+ * `executablePathOverride`, when provided, is used instead of calling
+ * `detectBrowserExecutable()` -- existing 2-argument callers are unaffected.
+ * This exists so `scripts/check-pdf-fidelity.mjs` can drive the same export
+ * path against two different detected browsers for a visual-fidelity
+ * comparison, rather than always exporting against whichever browser
+ * chrome-launcher would pick first.
+ *
+ * `extraLaunchArgs`, when provided, is appended to Puppeteer's launch args.
+ * Existing callers passing 0-3 arguments are unaffected (defaults to none).
+ * This exists so `scripts/check-pdf-fidelity.mjs` can pass `--no-sandbox`
+ * for a freshly-downloaded CI-only Chromium build whose sandbox helper
+ * lacks the setuid permissions GitHub Actions containers need -- the real
+ * CLI export path (used on a real end user's own machine, with a
+ * normally-installed browser) never needs this and never passes it.
  */
 export async function exportToPng(
 	html: string,
 	outputPath: string,
+	executablePathOverride?: string,
+	extraLaunchArgs: string[] = [],
 ): Promise<string[]> {
-	const executablePath = detectBrowserExecutable();
+	const executablePath = executablePathOverride ?? detectBrowserExecutable();
 
 	let browser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 	try {
-		browser = await puppeteer.launch({ executablePath, headless: true });
+		browser = await puppeteer.launch({
+			executablePath,
+			headless: true,
+			args: extraLaunchArgs,
+		});
 		const page = await browser.newPage();
 		// "networkidle0"/"networkidle2" are not valid waitUntil values for
 		// setContent() (only for real navigation via goto()) as of
