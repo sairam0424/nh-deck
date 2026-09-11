@@ -93,6 +93,14 @@ describe("resolveOutputPath", () => {
 			/Refusing to overwrite the source file/,
 		);
 	});
+
+	it("derives a .png path when an extension is explicitly given", () => {
+		expect(resolveOutputPath("deck.md", undefined, "png")).toBe("deck.png");
+	});
+
+	it("still defaults to .pdf when no extension is given (backward compatibility)", () => {
+		expect(resolveOutputPath("deck.md")).toBe("deck.pdf");
+	});
 });
 
 describe("debounce", () => {

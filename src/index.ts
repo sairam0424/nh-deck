@@ -10,6 +10,7 @@ import {
 	watchFileForChanges,
 } from "./cliHelpers.js";
 import { exportToPdf } from "./pdfExport.js";
+import { exportToPng } from "./pngExport.js";
 import { generateHtml } from "./render.js";
 import { startServer } from "./server.js";
 
@@ -99,6 +100,26 @@ program
 
 			await exportToPdf(html, outputPath);
 			process.stdout.write(`Wrote PDF to ${outputPath}\n`);
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			process.stderr.write(`nh-deck: ${message}\n`);
+			process.exitCode = 1;
+		}
+	});
+
+program
+	.command("png <file> [output]")
+	.description("Export a Markdown deck to one PNG per slide.")
+	.action(async (file: string, output?: string) => {
+		try {
+			const markdown = readFileSync(file, "utf8");
+			const html = generateHtml(markdown, file);
+			const outputPath = resolveOutputPath(file, output, "png");
+
+			const written = await exportToPng(html, outputPath);
+			process.stdout.write(
+				`Wrote ${written.length} PNG file(s), starting at ${written[0]}\n`,
+			);
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
 			process.stderr.write(`nh-deck: ${message}\n`);

@@ -337,6 +337,60 @@ describe("CLI: nh-deck pdf", () => {
 	);
 });
 
+describe("CLI: nh-deck png", () => {
+	it(
+		"exports one PNG per slide and reports the first output path on stdout",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const secondSlidePath = outputPath.replace(/\.png$/, "-2.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+			expect(existsSync(secondSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			rmSync(firstSlidePath, { force: true });
+			rmSync(secondSlidePath, { force: true });
+			// fixtures/sample.md has 5 slides -- clean up the rest too.
+			for (let n = 3; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render --watch", () => {
 	it(
 		"pushes a reload event over SSE when the watched file changes",
