@@ -54,4 +54,27 @@ describe("exportToPdf", () => {
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);
+
+	it(
+		"produces one PDF page per slide when the deck has multiple slides",
+		async () => {
+			const html = generateHtml(
+				"# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.\n\n---\n\n# Slide 3\n\nThird.",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-pagination-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			await exportToPdf(html, outputPath);
+
+			const pdfBytes = readFileSync(outputPath);
+			const pageCount = (
+				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+			).length;
+			expect(pageCount).toBe(3);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
 });

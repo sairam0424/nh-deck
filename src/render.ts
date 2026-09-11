@@ -4,6 +4,36 @@ import markedKatex from "marked-katex-extension";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
+import { extractNotes } from "./presenterNotes.js";
+
+const NOTES_STYLE = `
+    .notes {
+      display: none;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: #fffbe6;
+      border-top: 2px solid #e0c46c;
+      padding: 1rem 1.5rem;
+      max-height: 30vh;
+      overflow-y: auto;
+    }
+    .notes:not([hidden]) {
+      display: block;
+    }
+    @media print {
+      .notes {
+        display: none !important;
+      }
+    }`;
+
+const PRINT_PAGINATION_STYLE = `
+    @media print {
+      .slide {
+        break-after: page;
+      }
+    }`;
 
 marked.use(markedKatex({ throwOnError: false }));
 
@@ -62,13 +92,21 @@ marked.use({
  * `renderMermaidDiagram`, while every other language renders exactly as
  * marked's own default code renderer would.
  */
-export function generateHtml(markdown: string, title?: string): string {
+export function generateHtml(
+	markdown: string,
+	title?: string,
+	customCss?: string,
+): string {
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
-		.map(
-			(slideTokens) =>
-				`<section class="slide">\n${marked.parser(slideTokens)}</section>`,
-		)
+		.map((slideTokens) => {
+			const notesHtml = extractNotes(slideTokens)
+				.map(
+					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
+				)
+				.join("\n");
+			return `<section class="slide">\n${marked.parser(slideTokens)}${notesHtml}</section>`;
+		})
 		.join("\n");
 	const pageTitle = escapeHtml(
 		title && title.trim().length > 0 ? title : "nh-deck",
@@ -88,7 +126,9 @@ export function generateHtml(markdown: string, title?: string): string {
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>${pageTitle}</title>
   <style>
-    :root {
+${
+	customCss ??
+	`    :root {
       color-scheme: light dark;
     }
     body {
@@ -165,12 +205,22 @@ export function generateHtml(markdown: string, title?: string): string {
       th, td { border-color: #333333; }
       a { color: #6ea8ff; }
       .slide { border-bottom-color: #333333; }
-    }
+    }`
+}
     ${katexStyle}
+    ${NOTES_STYLE}
+    ${PRINT_PAGINATION_STYLE}
   </style>
 </head>
 <body>
 ${slidesHtml}
+  <script>
+    if (new URLSearchParams(location.search).has("notes")) {
+      document.querySelectorAll(".notes").forEach((el) => {
+        el.hidden = false;
+      });
+    }
+  </script>
 </body>
 </html>
 `;

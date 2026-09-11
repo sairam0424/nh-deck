@@ -46,13 +46,13 @@ In order — do not build out of sequence. Reconciled 2026-09-10 against a full 
 3. ~~Quick wins: 5 code-robustness fixes (render try/catch, --port validation, pdf output-path derivation, puppeteer launch/finally) + CI/tooling hardening (npm cache, npm audit, Biome + typecheck gate, PR-checklist doc-drift item).~~ Done — merged to main.
 4. ~~Real per-slide segmentation (`---` → `<section>` boundaries).~~ Done — `generateHtml()` now splits on `---` via `marked`'s lexer/parser token-group split (see `docs/adr/0002-per-slide-segmentation.md`). Foundational for live-reload (item 5) and presenter notes/PDF pagination (item 6).
 5. ~~Genuine live-reload for `render`.~~ Done — `render --watch` now re-renders and pushes a same-origin SSE reload event on file change (see `docs/adr/0003-sse-based-live-reload.md`); the previously-false "live reload" claim in `AGENTS.md`'s Overview is now accurate.
-6. Presenter notes (HTML-comment convention) + per-slide PDF pagination — both depend on item 4.
+6. ~~Presenter notes (HTML-comment convention) + per-slide PDF pagination — both depend on item 4.~~ Done (see `docs/adr/0006-phase-5-polish.md`).
 7. Automated cross-browser PDF-export visual-fidelity check (unchanged from the prior roadmap's item 3 fast-follow — independent of items 3–6 and 8–11 below).
 8. ~~KaTeX (math rendering).~~ Done — inline and block LaTeX math now renders via KaTeX with fonts embedded locally as base64 (no CDN fallback path); see `docs/adr/0004-katex-local-embedded-math.md`.
 9. ~~Mermaid (diagram rendering), local-only.~~ Done — `mermaid` fenced code blocks now render as embedded SVG diagrams with the library's own CDN font import stripped (no CDN fallback path); see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`.
-10. `--css <path>` opt-out flag for the baseline stylesheet — a smaller, immediately-actionable slice of item 11.
+10. ~~`--css <path>` opt-out flag for the baseline stylesheet — a smaller, immediately-actionable slice of item 11.~~ Done (see `docs/adr/0006-phase-5-polish.md`).
 11. **Full theme, template, and transition system** — the rest of the reference project's (deckrun's) feature set, brought in deliberately and evaluated each time against `SOUL.md`'s "render faithfully, don't editorialize" value — must stay opt-in, never a forced default. Needs its own brainstorming pass when reached.
-12. PNG (and, further out, PPTX) export via the already-detected browser — depends on item 4.
+12. ~~PNG (and, further out, PPTX) export via the already-detected browser — depends on item 4.~~ Done — PNG export implemented (see `docs/adr/0006-phase-5-polish.md`); PPTX explicitly remains out of scope.
 
 ## Open risks
 

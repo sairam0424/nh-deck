@@ -244,3 +244,70 @@ describe("generateHtml — Mermaid diagrams", () => {
 		expect(html).toContain("<pre><code>plain text\n</code></pre>");
 	});
 });
+
+describe("generateHtml — custom CSS opt-out", () => {
+	it("uses the default baseline stylesheet when no custom CSS is given", () => {
+		const html = generateHtml("# Slide");
+
+		expect(html).toContain("font-family: -apple-system");
+	});
+
+	it("fully replaces the baseline stylesheet when custom CSS is given", () => {
+		const html = generateHtml(
+			"# Slide",
+			undefined,
+			".slide { color: hotpink; }",
+		);
+
+		expect(html).toContain(".slide { color: hotpink; }");
+		expect(html).not.toContain("font-family: -apple-system");
+	});
+
+	it("still embeds KaTeX CSS/fonts alongside custom CSS when math is present", () => {
+		const html = generateHtml(
+			"Math: $x^2$.",
+			undefined,
+			".slide { color: hotpink; }",
+		);
+
+		expect(html).toContain(".slide { color: hotpink; }");
+		expect(html).toContain("KaTeX_Main");
+	});
+});
+
+describe("generateHtml — presenter notes", () => {
+	it("renders a slide's HTML comment as a hidden aside with class notes", () => {
+		const html = generateHtml("# Slide\n\n<!-- speaker note here -->\n");
+
+		expect(html).toContain(
+			'<aside class="notes" hidden>speaker note here</aside>',
+		);
+	});
+
+	it("renders no aside when a slide has no comments", () => {
+		const html = generateHtml("# Slide\n\nNo notes here.");
+
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("includes an inline script that reveals notes when ?notes is present", () => {
+		const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+
+		expect(html).toContain("URLSearchParams");
+		expect(html).toContain(".notes");
+	});
+
+	it("always hides notes in print media, regardless of the ?notes toggle", () => {
+		const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+
+		expect(html).toMatch(/@media print[^}]*\.notes[^}]*display:\s*none/);
+	});
+});
+
+describe("generateHtml — PDF pagination", () => {
+	it("includes a print-media rule that breaks after each slide", () => {
+		const html = generateHtml("# Slide 1\n\n---\n\n# Slide 2");
+
+		expect(html).toMatch(/@media print[^}]*\.slide[^}]*break-after:\s*page/);
+	});
+});

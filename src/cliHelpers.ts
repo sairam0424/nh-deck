@@ -18,15 +18,22 @@ export function parsePort(value: string): number {
 }
 
 /**
- * Derives the PDF output path for the `pdf` command. If no explicit output
- * is given, replaces a trailing .md with .pdf, or appends .pdf if the input
- * has no .md suffix (never silently returns the unchanged input path).
- * Always guards against the resolved output equalling the resolved input.
+ * Derives the output path for an export command (`pdf`, `png`, ...). If no
+ * explicit output is given, replaces a trailing .md with `.${extension}`, or
+ * appends `.${extension}` if the input has no .md suffix (never silently
+ * returns the unchanged input path). Always guards against the resolved
+ * output equalling the resolved input.
  */
-export function resolveOutputPath(file: string, output?: string): string {
+export function resolveOutputPath(
+	file: string,
+	output?: string,
+	extension = "pdf",
+): string {
 	const outputPath =
 		output ??
-		(extname(file) === ".md" ? file.replace(/\.md$/, ".pdf") : `${file}.pdf`);
+		(extname(file) === ".md"
+			? file.replace(/\.md$/, `.${extension}`)
+			: `${file}.${extension}`);
 
 	if (resolve(outputPath) === resolve(file)) {
 		throw new Error(
