@@ -38,6 +38,7 @@ instead of getting its own ADR file.
 | ID   | Title                                                                      | Status   | Date       | Supersedes |
 | ---- | ----------------------------------------------------------------------------- | -------- | ---------- | ---------- |
 | 0001 | [Adopt TS/Node CLI with puppeteer-core export](docs/adr/0001-adopt-ts-node-cli-with-puppeteer-core-export.md) | Accepted | 2026-09-02 | —          |
+| 0005 | [Mermaid diagram rendering with a stripped CDN font import](docs/adr/0005-mermaid-local-cdn-import-stripped.md) | Accepted | 2026-09-11 | —          |
 
 ## Lightweight Decisions Log
 
