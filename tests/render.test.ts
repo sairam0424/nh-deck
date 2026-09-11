@@ -40,6 +40,20 @@ describe("generateHtml", () => {
 		);
 	});
 
+	it("renders the fixture's fourth slide with KaTeX math", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain("<h1>A Quick Formula</h1>");
+		expect(html).toContain('class="katex"');
+	});
+
+	it("renders the fixture's Mermaid diagram section", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain("<h2>A Quick Diagram</h2>");
+		expect(html).toContain("<svg");
+	});
+
 	it("never references an external CDN (local-first constraint)", () => {
 		const html = generateHtml(fixtureMarkdown, "sample");
 
@@ -49,11 +63,143 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
 
-	it("renders the fixture's Mermaid diagram section", () => {
+	it('splits the fixture into five <section class="slide"> blocks on its --- delimiters', () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(5);
+	});
+
+	it("renders each of the fixture's slide headings inside its own section", () => {
 		const html = generateHtml(fixtureMarkdown, "sample");
 
+		expect(html).toContain("<h1>Getting Started with nh-deck</h1>");
+		expect(html).toContain("<h1>Presenting Your Deck</h1>");
+		expect(html).toContain("<h1>Exporting to PDF</h1>");
+		expect(html).toContain("<h1>A Quick Formula</h1>");
 		expect(html).toContain("<h2>A Quick Diagram</h2>");
-		expect(html).toContain("<svg");
+	});
+});
+
+describe("generateHtml — slide segmentation", () => {
+	it("wraps single-slide content in exactly one <section> when there is no delimiter", () => {
+		const html = generateHtml("# Only slide\n\nSome text.");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("splits into multiple sections on a --- preceded by a blank line", () => {
+		const html = generateHtml(
+			"# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.",
+		);
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(2);
+		expect(html).toContain("<h1>Slide 1</h1>");
+		expect(html).toContain("<h1>Slide 2</h1>");
+	});
+
+	it("does not split on a --- immediately after a paragraph (setext H2 heading)", () => {
+		const html = generateHtml("Some Text\n---\nMore text.");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+		expect(html).toContain("<h2>Some Text</h2>");
+	});
+
+	it("does not split on a --- inside a fenced code block", () => {
+		const html = generateHtml(
+			"Before.\n\n```\ncode\n---\nmore code\n```\n\nAfter.",
+		);
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+		expect(html).toContain("---\nmore code");
+	});
+
+	it("filters out an empty slide produced by two consecutive delimiters", () => {
+		const html = generateHtml(
+			"# Slide 1\n\nFirst.\n\n---\n\n---\n\n# Slide 2\n\nSecond.",
+		);
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(2);
+	});
+
+	it("wraps an empty deck in exactly one <section> (zero-delimiter backward-compatibility invariant)", () => {
+		const html = generateHtml("");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a whitespace-only deck in exactly one <section> (zero-delimiter backward-compatibility invariant)", () => {
+		const html = generateHtml("   \n\n   ");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a deck consisting solely of a single --- delimiter in exactly one <section>", () => {
+		const html = generateHtml("---");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a deck consisting solely of two --- delimiters in exactly one <section>", () => {
+		const html = generateHtml("---\n\n---");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+
+	it("wraps a leading --- typed before any slide content in exactly one <section>", () => {
+		const html = generateHtml("---\n\n   ");
+		const sectionCount = (html.match(/<section class="slide">/g) ?? []).length;
+		expect(sectionCount).toBe(1);
+	});
+});
+
+describe("generateHtml — KaTeX math", () => {
+	it("renders inline math via KaTeX", () => {
+		const html = generateHtml("Einstein: $E = mc^2$.");
+
+		expect(html).toContain('class="katex"');
+	});
+
+	it("renders block/display math via KaTeX", () => {
+		const html = generateHtml("$$\n\\int_0^1 x^2\\,dx = \\frac{1}{3}\n$$");
+
+		expect(html).toContain('class="katex-display"');
+	});
+
+	it("does not treat $ inside inline code as math", () => {
+		const html = generateHtml("Price: `$5` today.");
+
+		expect(html).toContain("<code>$5</code>");
+		expect(html).not.toContain('class="katex"');
+	});
+
+	it("does not treat $ inside a fenced code block as math", () => {
+		const html = generateHtml("```\necho $HOME costs $5\n```");
+
+		expect(html).toContain("echo $HOME costs $5");
+		expect(html).not.toContain('class="katex"');
+	});
+
+	it("gracefully degrades invalid LaTeX instead of throwing", () => {
+		expect(() => generateHtml("Broken: $\\frac{1$.")).not.toThrow();
+		const html = generateHtml("Broken: $\\frac{1$.");
+
+		expect(html).toContain('class="katex-error"');
+	});
+
+	it("does not embed KaTeX CSS/fonts when no math is present", () => {
+		const html = generateHtml("# Just a heading\n\nNo math here.");
+
+		expect(html).not.toContain("KaTeX_Main");
+	});
+
+	it("embeds KaTeX fonts locally with no CDN reference when math is present", () => {
+		const html = generateHtml("Math: $x^2$.");
+
+		expect(html).toContain("KaTeX_Main");
+		expect(html).not.toMatch(/https?:\/\/cdn\./i);
+		expect(html).not.toContain("unpkg.com");
+		expect(html).not.toContain("jsdelivr.net");
+		expect(html).not.toContain("cdnjs.cloudflare.com");
 	});
 });
 
