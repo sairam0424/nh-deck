@@ -24,7 +24,7 @@ node dist/index.js <command>
 
 ## Usage
 
-Render a Markdown deck and serve it locally, then open it in your browser (add `--no-open` to skip auto-opening, or `--port <n>` to pin a specific port):
+Render a Markdown deck and serve it locally, then open it in your browser (add `--no-open` to skip auto-opening, `--port <n>` to pin a specific port, `--watch` to re-render and auto-refresh the browser whenever the file changes, or `--css <path>` to fully replace the default stylesheet with your own):
 
 ```bash
 nh-deck render deck.md
@@ -36,7 +36,15 @@ Export a deck to PDF:
 nh-deck pdf deck.md
 ```
 
-(from a local clone, substitute `node dist/index.js` for `nh-deck` in either example)
+Export a deck to one PNG per slide:
+
+```bash
+nh-deck png deck.md
+```
+
+`pdf` and `png` also accept `--css <path>` to replace the default stylesheet, same as `render`.
+
+(from a local clone, substitute `node dist/index.js` for `nh-deck` in any of the examples above)
 
 PDF export works by launching a Chrome/Chromium/Edge/Brave binary that's already installed on your machine (via `puppeteer-core` + `chrome-launcher`) — nh-deck never downloads or bundles a browser itself.
 
@@ -44,9 +52,9 @@ PDF export works by launching a Chrome/Chromium/Edge/Brave binary that's already
 
 This is an early walking skeleton, not a feature-complete tool. The following are deliberate, tracked fast-follows rather than oversights:
 
-- **Math and diagrams** — KaTeX (math rendering) and Mermaid (diagrams) support is decided but not yet installed. They are deferred, not silently dropped.
-- **Themes, templates, and transitions** — no visual customization yet; every deck renders with a single default look.
+- **Themes, templates, and transitions** — no full visual customization system yet beyond the `--css` flag (which lets you replace the default stylesheet outright); every deck otherwise renders with the single default look.
 - **PDF export fidelity across browsers** — the full 3-OS × multi-Node CI matrix confirms PDF export *works* on Chrome/Chromium across Linux, macOS, and Windows, but visual-fidelity differences between Chrome vs. Edge vs. Brave (whichever `chrome-launcher` detects on a given machine) haven't been characterized yet.
-- **PDF export fallback** — if no local Chrome/Chromium/Edge/Brave install is found, `nh-deck pdf` fails rather than automatically downloading a browser for you.
+
+KaTeX (math rendering) and Mermaid (diagrams) are both supported today, CDN-free — see `AGENTS.md`'s Known Gotchas for how.
 
 nh-deck never phones home and the rendered HTML never depends on a CDN for correctness — that local-first constraint carries over unchanged from the original `deckrun` concept, even while the features above are still catching up.
