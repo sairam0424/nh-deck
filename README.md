@@ -48,11 +48,38 @@ nh-deck png deck.md
 
 PDF export works by launching a Chrome/Chromium/Edge/Brave binary that's already installed on your machine (via `puppeteer-core` + `chrome-launcher`) — nh-deck never downloads or bundles a browser itself.
 
+## Themes
+
+nh-deck ships 4 fixed, named color themes — `light`, `dark`, `dracula`, and `nord` — that recolor the base deck (background, text, borders, code blocks) and KaTeX math consistently. A deck with no theme requested renders exactly as it always has (the `light` theme's colors are the same defaults nh-deck has always used).
+
+> **Known gap:** Mermaid diagrams do not yet change color with the active theme — they still render with their own default colors regardless of which theme (if any) is applied. See `docs/adr/0008-named-theme-system.md` for details and `Context.md`'s Open risks for the tracked follow-up.
+
+Select a theme either via a `--theme <name>` flag on any of `render`, `pdf`, or `png`:
+
+```bash
+nh-deck render deck.md --theme dark
+```
+
+or via a `theme:` key in the deck's own Markdown frontmatter, so the choice travels with the file:
+
+```markdown
+---
+theme: dracula
+---
+# My deck
+
+Slide content...
+```
+
+If both are given, `--theme` wins over the frontmatter value. An unrecognized theme name prints a non-fatal warning to stderr and falls back to `light` — it never blocks rendering or export.
+
+`--css <path>` always wins over any requested theme (flag or frontmatter) — the two are mutually exclusive, with no CSS-cascade layering. If you pass both, nh-deck prints a stderr note and uses your custom stylesheet, not the theme's colors. See `docs/adr/0008-named-theme-system.md` for the full design rationale.
+
 ## Current limitations
 
 This is an early walking skeleton, not a feature-complete tool. The following are deliberate, tracked fast-follows rather than oversights:
 
-- **Themes, templates, and transitions** — no full visual customization system yet beyond the `--css` flag (which lets you replace the default stylesheet outright); every deck otherwise renders with the single default look.
+- **Templates and transitions** — no per-slide layout system or live-presenting animation yet; themes (see above) are the only visual-customization system shipped so far beyond the `--css` flag (which lets you replace the default stylesheet outright).
 - **PDF export fidelity across browsers** — the full 3-OS × multi-Node CI matrix confirms PDF export *works* on Chrome/Chromium across Linux, macOS, and Windows, but visual-fidelity differences between Chrome vs. Edge vs. Brave (whichever `chrome-launcher` detects on a given machine) haven't been characterized yet.
 
 KaTeX (math rendering) and Mermaid (diagrams) are both supported today, CDN-free — see `AGENTS.md`'s Known Gotchas for how.
