@@ -76,8 +76,13 @@ shapes the Known Security Considerations.
    verified locally, not yet in the CI pipeline).~~ Done — `tests/pdfExport.test.ts`
    is a real, unmocked PDF-export test that runs via `npx vitest run` in
    `ci.yml` across all 9 OS/Node combinations.
-4. Add a top-level `README.md` refresh now that both KaTeX and Mermaid
-   have landed.
+4. ~~Add a top-level `README.md` refresh now that both KaTeX and Mermaid
+   have landed.~~ Done — README's Usage and Current limitations sections
+   were refreshed in PR #8 to cover KaTeX/Mermaid/png/`--watch`/`--css`.
+5. Automated cross-browser PDF-export visual-fidelity check (Context.md
+   Roadmap item 7) — not yet started.
+6. Full theme, template, and transition system (Context.md Roadmap item 11)
+   — deliberately deferred pending its own design pass.
 
 ## Risks & Blockers
 
