@@ -4,7 +4,7 @@ This file follows the vendor-neutral [AGENTS.md](https://agents.md) open specifi
 
 ## Overview
 
-nh-deck is a local-first CLI for writing, presenting, and exporting Markdown-based slide decks — the author's own version of [arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun). You write a deck as a single Markdown file, render it to HTML, present it via a local dev server with live reload, and export it to PDF. No accounts, no hosting, no multi-user sharing infrastructure: the tool runs entirely on the machine it's invoked from.
+nh-deck is a local-first CLI for writing, presenting, and exporting Markdown-based slide decks. You write a deck as a single Markdown file, render it to HTML, present it via a local dev server with live reload, and export it to PDF. No accounts, no hosting, no multi-user sharing infrastructure: the tool runs entirely on the machine it's invoked from.
 
 nh-deck is one of three independent sibling projects (daily-dose, nh-deck, nh-skills) under the **Not-Humans-Lab** umbrella. Not-Humans-Lab (`../Not-Humans-Lab/`) is a docs-only meta-repo holding cross-cutting system-level decisions (license, branch strategy, testing skeleton). This repo is its own standalone GitHub repository — not nested inside Not-Humans-Lab — and is the source of truth for everything specific to nh-deck. Cross-cutting conventions are linked by relative path, never duplicated:
 
@@ -15,7 +15,7 @@ nh-deck is one of three independent sibling projects (daily-dose, nh-deck, nh-sk
 
 ## The Local-First Constraint (read this first)
 
-nh-deck never phones home. The CLI makes no outbound network calls in its core render/serve/export path, and the HTML it renders must not depend on any CDN for correctness. This is inherited unmodified from the reference project and is treated as a hard constraint, not a preference — see `SOUL.md` for the full rationale and `CLAUDE.md` for the mechanism that protects it during agent-assisted changes.
+nh-deck never phones home. The CLI makes no outbound network calls in its core render/serve/export path, and the HTML it renders must not depend on any CDN for correctness. This is treated as a hard constraint, not a preference — see `SOUL.md` for the full rationale and `CLAUDE.md` for the mechanism that protects it during agent-assisted changes.
 
 ## Setup
 
@@ -30,7 +30,7 @@ Requires Node.js LTS 20 or 22+. No other setup step exists at this project's cur
 ## Build / Test / Run Commands
 
 - **Build**: `npm run build`
-  Runs plain `tsc` (no bundler — transpile only, matching the reference project's "no bundler" philosophy). Emits `dist/index.js` (plus the rest of `dist/`) with a preserved shebang, wired as the npm `bin` entry.
+  Runs plain `tsc` (no bundler — transpile only). Emits `dist/index.js` (plus the rest of `dist/`) with a preserved shebang, wired as the npm `bin` entry.
 - **Test**: `npm test`
   Runs the Vitest suite, including the CLI's own snapshot-test harness for rendered HTML output (see below).
 - **Run locally without a global install**: `node dist/index.js <command>` after building, or `npm link` for a global `nh-deck` binary during development.
@@ -143,7 +143,7 @@ Same template as every sibling project in this suite — see this repo's own `Br
 
 ## Known Gotchas
 
-- **KaTeX and Mermaid have both shipped, CDN-free.** The reference project (deckrun) supports LaTeX math via KaTeX and diagrams via Mermaid. KaTeX math renders with fonts embedded locally as base64 (see `docs/adr/0004-katex-local-embedded-math.md`); Mermaid rendering is done too — ` ```mermaid ` fenced code blocks render as embedded SVG diagrams via a `marked` renderer override (`src/render.ts`/`src/mermaidRenderer.ts`), with a real Google Fonts CDN `@import` that the chosen library (`beautiful-mermaid`) bakes into its own output found and stripped rather than shipped (see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`). Do not quietly work around any future rendering feature's edge cases with a CDN script tag in rendered HTML; that would violate the local-first constraint. See `Context.md` for the roadmap position.
+- **KaTeX and Mermaid have both shipped, CDN-free.** KaTeX math renders with fonts embedded locally as base64 (see `docs/adr/0004-katex-local-embedded-math.md`); Mermaid rendering is done too — ` ```mermaid ` fenced code blocks render as embedded SVG diagrams via a `marked` renderer override (`src/render.ts`/`src/mermaidRenderer.ts`), with a real Google Fonts CDN `@import` that the chosen library (`beautiful-mermaid`) bakes into its own output found and stripped rather than shipped (see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`). Do not quietly work around any future rendering feature's edge cases with a CDN script tag in rendered HTML; that would violate the local-first constraint. See `Context.md` for the roadmap position.
 - **No bundler means no code-splitting, no minification, no tree-shaking.** `tsc`-only output is larger and less optimized than a bundled equivalent. This is an intentional tradeoff (see `../Not-Humans-Lab/decisions.md` for the "no bundler" convention this repo follows), not an oversight — do not "fix" it by introducing esbuild/webpack/rollup without a real, demonstrated need.
 - **The CI matrix now genuinely exercises cross-platform Chrome/Chromium detection** — `tests/pdfExport.test.ts` runs on all 9 OS/Node combinations, so PDF export's OS-specific binary-detection paths are verified, not just assumed. What's still unverified: visual *fidelity* differences between whichever browser (Chrome/Edge/Brave) `chrome-launcher` happens to detect on a given machine — the matrix proves export works everywhere, not that it looks identical everywhere.
 - **`chrome-launcher`'s binary detection is host-dependent.** If no supported browser is installed, PDF export must fail with a clear, actionable error message — not a silent hang or a cryptic Puppeteer stack trace. Any change to the export path should be tested against "no browser found" as an explicit case.

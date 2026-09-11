@@ -1,10 +1,9 @@
 # Support
 
 nh-deck is a personal, local-first CLI tool for writing, presenting, and
-exporting Markdown-based slide decks (the author's own version of
-[arpitbbhayani/deckrun](https://github.com/arpitbbhayani/deckrun)). It is
-maintained by one person in spare time. Support here is **best effort,
-with no SLA** — please calibrate expectations accordingly. If you need
+exporting Markdown-based slide decks. It is maintained by one person in
+spare time. Support here is **best effort, with no SLA** — please
+calibrate expectations accordingly. If you need
 guaranteed response times, this project is not the right dependency for
 that.
 

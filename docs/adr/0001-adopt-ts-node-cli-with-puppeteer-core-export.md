@@ -7,16 +7,16 @@ Accepted — 2026-09-02
 ## Context and Problem Statement
 
 nh-deck is a local-first CLI tool for writing, presenting, and exporting
-Markdown-based slide decks, built as our own version of
-`arpitbbhayani/deckrun`, inside the three-project "Not-Humans-Lab" suite
-(`daily-dose`, `nh-deck`, `nh-skills`). Before writing the first real
-command, we need to decide the CLI's runtime/language, its command-line
-framework, its Markdown → HTML rendering approach, its local preview
-mechanism, its PDF export mechanism, and its build strategy.
+Markdown-based slide decks, inside the three-project "Not-Humans-Lab"
+suite (`daily-dose`, `nh-deck`, `nh-skills`). Before writing the first
+real command, we need to decide the CLI's runtime/language, its
+command-line framework, its Markdown → HTML rendering approach, its
+local preview mechanism, its PDF export mechanism, and its build
+strategy.
 
-The reference project's core value proposition, which we are explicitly
-preserving, is **local-first**: the CLI never phones home, and rendered
-HTML must not depend on any CDN for correctness. This constrains several
+This project's core value proposition, non-negotiable from the start, is
+**local-first**: the CLI never phones home, and rendered HTML must not
+depend on any CDN for correctness. This constrains several
 of the choices below — most visibly, it rules out reaching for a CDN
 `<script>` tag as a shortcut for math (KaTeX) or diagram (Mermaid)
 rendering, and it means any PDF export mechanism must run entirely on the
@@ -39,10 +39,10 @@ evaluated against that near-term goal as well as long-term maintainability.
   export. Full `puppeteer` bundles its own Chromium download (~300MB+),
   which is heavy for a CLI tool a user installs globally and conflicts
   with "small, fast, local" expectations for a slide-deck tool.
-- **Match the reference project's build philosophy.** `deckrun` uses no
-  bundler — plain transpilation. We want to carry that forward rather
-  than introduce bundler configuration (esbuild/webpack/rollup) that the
-  reference project's philosophy doesn't call for.
+- **Keep the build step trivial.** A CLI this small doesn't need a
+  bundler — plain transpilation is enough, and introducing bundler
+  configuration (esbuild/webpack/rollup) would be complexity this project
+  doesn't call for.
 - **Fast walking skeleton over broad compatibility up front.** CI should
   start as single-OS (`ubuntu-latest`) and expand to the full 3-OS ×
   multi-Node-version matrix only after the core loop is proven — paying
@@ -85,8 +85,8 @@ Rationale, directly from the decision drivers above:
 
 - **Rust/Go static-binary rewrite (Option 2)** would give a
   no-runtime-dependency single binary, which is attractive for
-  distribution, but it throws away the reference project's Node/TS
-  ecosystem fit and would require rewriting the Markdown-rendering and
+  distribution, but it throws away Node/TS's ecosystem fit for this kind
+  of tool and would require rewriting the Markdown-rendering and
   browser-automation integration from scratch in a language with a much
   thinner headless-Chrome-automation ecosystem than Node's. For a walking
   skeleton whose goal is proving the render/serve/export loop quickly,
@@ -135,8 +135,7 @@ Rationale, directly from the decision drivers above:
   routing middleware, templating, or any of what a web framework provides.
   Adding Express would be dependency weight with no corresponding need
   (YAGNI).
-- **`tsc`-only build (no bundler)** matches the reference project's
-  stated "no bundler" philosophy directly and keeps the build step
+- **`tsc`-only build (no bundler)** keeps the build step
   trivial to reason about: `tsc` transpiles, the shebang on the entry
   file is preserved, and `dist/index.js` becomes the npm `bin` entry with
   no bundler configuration to maintain.
@@ -152,8 +151,8 @@ Rationale, directly from the decision drivers above:
 **Good:**
 
 - The CLI stays in one ecosystem end to end (Node/TypeScript), matching
-  both the reference project and the rest of this workspace's tooling
-  conventions, with no cross-language build step.
+  the rest of this workspace's tooling conventions, with no
+  cross-language build step.
 - Install weight stays small: no bundled Chromium, no bundler, no web
   framework — the CLI's own dependency footprint is `commander`,
   `marked`, `puppeteer-core`, and `chrome-launcher`, all named explicitly
@@ -161,8 +160,8 @@ Rationale, directly from the decision drivers above:
 - The local-first / no-CDN constraint is structurally respected: nothing
   in this stack requires a network call to render, preview, or export a
   deck.
-- `tsc`-only build keeps the build step simple to debug and matches the
-  reference project's "no bundler" philosophy exactly.
+- `tsc`-only build keeps the build step simple to debug, with no
+  bundler configuration to maintain.
 - Deferring KaTeX/Mermaid is now an explicit, documented decision (here
   and in `status.md`/`decisions.md`) rather than a silent gap a future
   contributor might not notice.
@@ -223,8 +222,6 @@ This decision is confirmed as implemented when:
   during Phase 4 planning for nh-deck; this document formalizes that
   reasoning in Michael Nygard's ADR format and does not introduce new
   rationale beyond it.
-- Reference project this repo models itself on:
-  `arpitbbhayani/deckrun`.
 - Cross-cutting, system-level conventions shared with the sibling
   projects (`daily-dose`, `nh-skills`) — including the Apache-2.0 license
   decision — live in the separate docs-only meta-repo at
