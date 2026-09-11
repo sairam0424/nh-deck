@@ -25,3 +25,14 @@ export function extractNotes(tokens: Token[]): string[] {
 	}
 	return notes;
 }
+
+/**
+ * Returns true if `text` is (the start of) a standalone HTML comment, using
+ * the exact same pattern extractNotes uses to recognize a presenter note.
+ * Shared with render.ts's containsUnsafeHtml so both places agree on what
+ * counts as an already-reviewed, expected presenter-note comment versus
+ * genuine other raw HTML.
+ */
+export function isPresenterNoteComment(text: string): boolean {
+	return HTML_COMMENT_PATTERN.test(text);
+}

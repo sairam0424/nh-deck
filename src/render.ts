@@ -4,7 +4,7 @@ import markedKatex from "marked-katex-extension";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
-import { extractNotes } from "./presenterNotes.js";
+import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
 
 const NOTES_STYLE = `
     .notes {
@@ -224,6 +224,49 @@ ${slidesHtml}
 </body>
 </html>
 `;
+}
+
+/**
+ * Returns true if `markdown` contains any raw-HTML content -- an "html"-type
+ * token anywhere in marked's token tree, block-level or inline, nested
+ * inside a paragraph/heading/list/table cell or not -- that is NOT a
+ * presenter-note comment (see presenterNotes.ts's isPresenterNoteComment).
+ *
+ * A deck that only contains presenter-note comments is expected,
+ * already-reviewed content (see presenterNotes.ts) and must never trip
+ * this check; only genuine other raw HTML (a real tag like `<script>`,
+ * `<iframe>`, `<img onerror=...>`, or any HTML comment that isn't a
+ * standalone presenter note) should. See src/index.ts for where this feeds
+ * a one-time, non-fatal stderr warning.
+ */
+export function containsUnsafeHtml(markdown: string): boolean {
+	return tokenTreeContainsUnsafeHtml(marked.lexer(markdown));
+}
+
+/**
+ * Walks the entire token tree generically (any array is walked
+ * element-by-element, any object is walked property-by-property) rather
+ * than hand-enumerating marked's per-token-type nested fields (Paragraph's
+ * `.tokens`, List's `.items`, Table's `.header`/`.rows`, etc.) -- this stays
+ * correct even if marked adds a new nested-token shape later, since it never
+ * has to be told where nested tokens live.
+ */
+function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
+	if (Array.isArray(node)) {
+		return node.some(tokenTreeContainsUnsafeHtml);
+	}
+	if (node === null || typeof node !== "object") {
+		return false;
+	}
+	const token = node as Record<string, unknown>;
+	if (
+		token.type === "html" &&
+		typeof token.text === "string" &&
+		!isPresenterNoteComment(token.text)
+	) {
+		return true;
+	}
+	return Object.values(token).some(tokenTreeContainsUnsafeHtml);
 }
 
 /**

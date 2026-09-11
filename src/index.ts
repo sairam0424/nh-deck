@@ -12,8 +12,22 @@ import {
 } from "./cliHelpers.js";
 import { exportToPdf } from "./pdfExport.js";
 import { exportToPng } from "./pngExport.js";
-import { generateHtml } from "./render.js";
+import { containsUnsafeHtml, generateHtml } from "./render.js";
 import { startServer } from "./server.js";
+
+/**
+ * Non-fatal stderr warning printed once, on the first read of a deck's
+ * Markdown source, whenever it contains raw HTML that isn't a
+ * presenter-note comment (see containsUnsafeHtml in render.ts). Written to
+ * stderr rather than stdout so it never contaminates any script/pipeline
+ * that consumes this CLI's stdout (e.g. the serving-URL line, the exported
+ * file path). Never changes process.exitCode or blocks rendering/export --
+ * nh-deck's raw-HTML-passes-through-untouched design (see SECURITY.md) is
+ * unchanged; this is only a heads-up for whoever is about to open the
+ * result.
+ */
+const UNSAFE_HTML_WARNING =
+	"nh-deck: warning: this deck contains raw HTML, which is rendered as-is (including any <script> tags). Only open decks from sources you trust.\n";
 
 /**
  * Formats a caught action-handler error for `nh-deck: <message>` stderr
@@ -74,6 +88,9 @@ program
 					? readFileSync(options.css, "utf8")
 					: undefined;
 				const markdown = readFileSync(file, "utf8");
+				if (containsUnsafeHtml(markdown)) {
+					process.stderr.write(UNSAFE_HTML_WARNING);
+				}
 				const html = generateHtml(markdown, file, customCss);
 				const { url, updateHtml, server } = await startServer(
 					html,
@@ -122,6 +139,9 @@ program
 				? readFileSync(options.css, "utf8")
 				: undefined;
 			const markdown = readFileSync(file, "utf8");
+			if (containsUnsafeHtml(markdown)) {
+				process.stderr.write(UNSAFE_HTML_WARNING);
+			}
 			const html = generateHtml(markdown, file, customCss);
 			const outputPath = resolveOutputPath(file, output);
 
@@ -146,6 +166,9 @@ program
 				? readFileSync(options.css, "utf8")
 				: undefined;
 			const markdown = readFileSync(file, "utf8");
+			if (containsUnsafeHtml(markdown)) {
+				process.stderr.write(UNSAFE_HTML_WARNING);
+			}
 			const html = generateHtml(markdown, file, customCss);
 			const outputPath = resolveOutputPath(file, output, "png");
 
