@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { Command } from "commander";
 import open from "open";
 import {
@@ -13,6 +14,33 @@ import { exportToPdf } from "./pdfExport.js";
 import { exportToPng } from "./pngExport.js";
 import { generateHtml } from "./render.js";
 import { startServer } from "./server.js";
+
+/**
+ * Formats a caught action-handler error for `nh-deck: <message>` stderr
+ * output. An ENOENT failure reading the input `<file>` argument gets a
+ * clean, human-authored message instead of the raw Node.js syscall wording
+ * (e.g. "ENOENT: no such file or directory, open '...'"). Every other error
+ * — including an ENOENT from a missing --css file — falls through to the
+ * generic message unchanged.
+ *
+ * The path comparison resolves both sides to absolute paths: on Windows,
+ * Node's fs errors report an absolute `.path` (e.g. `D:\...\file.md`) even
+ * when a relative path was passed in, while POSIX keeps the relative string
+ * as-passed -- a raw `===` comparison only matches on POSIX.
+ */
+function formatActionError(error: unknown, file: string): string {
+	const errnoPath = (error as NodeJS.ErrnoException)?.path;
+	if (
+		error instanceof Error &&
+		(error as NodeJS.ErrnoException).code === "ENOENT" &&
+		typeof errnoPath === "string" &&
+		resolve(errnoPath) === resolve(file)
+	) {
+		return `nh-deck: could not find file '${file}'`;
+	}
+	const message = error instanceof Error ? error.message : String(error);
+	return `nh-deck: ${message}`;
+}
 
 const program = new Command();
 
@@ -75,8 +103,7 @@ program
 					await open(url);
 				}
 			} catch (error) {
-				const message = error instanceof Error ? error.message : String(error);
-				process.stderr.write(`nh-deck: ${message}\n`);
+				process.stderr.write(`${formatActionError(error, file)}\n`);
 				process.exitCode = 1;
 			}
 		},
@@ -101,8 +128,7 @@ program
 			await exportToPdf(html, outputPath);
 			process.stdout.write(`Wrote PDF to ${outputPath}\n`);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			process.stderr.write(`nh-deck: ${message}\n`);
+			process.stderr.write(`${formatActionError(error, file)}\n`);
 			process.exitCode = 1;
 		}
 	});
@@ -128,8 +154,7 @@ program
 				`Wrote ${written.length} PNG file(s), starting at ${written[0]}\n`,
 			);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : String(error);
-			process.stderr.write(`nh-deck: ${message}\n`);
+			process.stderr.write(`${formatActionError(error, file)}\n`);
 			process.exitCode = 1;
 		}
 	});

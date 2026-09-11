@@ -27,7 +27,7 @@ nh-deck's core promise is that it never phones home: no accounts, no hosting, no
 
 Do not silently work around this constraint (e.g. by making the network call "opt-in" via a flag) without the same explicit check-in — an opt-in network call is still a network call this project's identity says it doesn't have. If the user explicitly approves an exception, note the approval and the reasoning in the relevant commit/PR description so the decision is traceable later.
 
-This gate exists specifically because KaTeX and Mermaid are deferred (not yet installed) rather than silently skipped — see `AGENTS.md`'s Known Gotchas and `Context.md`'s roadmap. When that fast-follow work actually begins, the same gate applies: local-asset installation is fine, a CDN `<script>` tag is not, and the user gets to make that call explicitly, not have it made for them by convenience.
+KaTeX and Mermaid have already shipped, CDN-free — see `AGENTS.md`'s Known Gotchas — and they are the precedent for how this gate is supposed to work: KaTeX's fonts are embedded locally as base64, and Mermaid's own CDN Google Fonts `@import` was found and stripped rather than shipped. This gate exists to keep any *future* rendering feature honoring that same precedent instead of quietly reintroducing a network dependency: local-asset installation is fine, a CDN `<script>` tag or `@import` is not, and the user gets to make that call explicitly, not have it made for them by convenience.
 
 ### Scope discipline
 

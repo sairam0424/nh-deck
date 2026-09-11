@@ -26,6 +26,18 @@ describe("startServer", () => {
 
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
+
+	it("rejects with the bind error when the port is already in use", async () => {
+		const first = await startServer("<p>first</p>", 0);
+
+		await expect(
+			startServer("<p>second</p>", first.port),
+		).rejects.toMatchObject({
+			code: "EADDRINUSE",
+		});
+
+		await new Promise<void>((resolve) => first.server.close(() => resolve()));
+	});
 });
 
 describe("startServer — watch mode", () => {
@@ -56,6 +68,24 @@ describe("startServer — watch mode", () => {
 		expect(body).not.toMatch(/https?:\/\//);
 
 		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("appends the reload script via string concatenation when the HTML has no </body> tag", async () => {
+		const html = "<p>no closing body tag here</p>";
+		const { server, url } = await startServer(html, 0, { watch: true });
+
+		const response = await fetch(url);
+		const body = await response.text();
+
+		// No </body> for withReloadScript to splice into, so it must fall back
+		// to plain concatenation (`${html}${RELOAD_SCRIPT}`) rather than
+		// silently dropping the reload script.
+		expect(body.startsWith(html)).toBe(true);
+		expect(body.slice(html.length)).toContain("<script>");
+		expect(body).toContain("/__nh-deck-reload");
+		expect(body).not.toMatch(/https?:\/\//);
+
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 

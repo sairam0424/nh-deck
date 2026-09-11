@@ -46,7 +46,7 @@ shapes the Known Security Considerations.
 | Pre-scaffold docs (`SECURITY.md`, `SUPPORT.md`, `status.md`, `decisions.md`) | 4     | Complete    |
 | Core loop: render Markdown → HTML, `serve` (local preview), `export --pdf` | 4     | **Complete — verified with a real server response and a real 57KB PDF** |
 | Single-OS CI (`ubuntu-latest`) for the walking skeleton              | 4     | Complete, green |
-| 3-OS × multi-Node-version CI matrix expansion                        | 5     | Planned, not started |
+| 3-OS × multi-Node-version CI matrix expansion                        | 5     | **Complete — see `.github/workflows/ci.yml`'s 9-combination matrix and `Context.md`'s Current state section** |
 | KaTeX (math) rendering support                                       | 6     | **Done — shipped CDN-free** |
 | Mermaid (diagrams) rendering support                                 | 6     | **Done — shipped CDN-free** |
 
@@ -68,12 +68,14 @@ shapes the Known Security Considerations.
 
 ## Upcoming Milestones
 
-1. Expand CI to the full 3-OS × multi-Node-version matrix — the walking
-   skeleton is green, so this is now unblocked.
+1. ~~Expand CI to the full 3-OS × multi-Node-version matrix.~~ Done — see
+   `.github/workflows/ci.yml`'s 9-combination matrix and Adoption status above.
 2. ~~Fast-follow: add KaTeX (math) rendering, bundled locally per the
    no-CDN constraint in `SECURITY.md`.~~ Done — see Adoption status above.
-3. Add a real automated PDF-export CI smoke test (currently only manually
-   verified locally, not yet in the CI pipeline).
+3. ~~Add a real automated PDF-export CI smoke test (currently only manually
+   verified locally, not yet in the CI pipeline).~~ Done — `tests/pdfExport.test.ts`
+   is a real, unmocked PDF-export test that runs via `npx vitest run` in
+   `ci.yml` across all 9 OS/Node combinations.
 4. Add a top-level `README.md` refresh now that both KaTeX and Mermaid
    have landed.
 

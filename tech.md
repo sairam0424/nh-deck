@@ -26,7 +26,7 @@ HTML must not depend on any CDN for correctness.**
 | PDF export | `puppeteer-core` + `chrome-launcher` | Detects a local Chrome-family browser and prints the rendered HTML to PDF |
 | Build | `tsc` (transpile-only, no bundler) | Produces `dist/index.js` with a preserved shebang as the npm `bin` entry |
 | Test runner | Vitest | Unit + integration tests (see `TESTING.md`) |
-| CI | GitHub Actions, single job (`ubuntu-latest`) | One OS for this walking skeleton; the full multi-OS/multi-Node matrix is a deferred fast-follow |
+| CI | GitHub Actions, multi-OS/multi-Node matrix | Live: `ubuntu-latest`/`macos-14`/`windows-latest` × Node 20/22/latest (9 combinations, `fail-fast: false`). Started as a single `ubuntu-latest` job for the walking skeleton, expanded once that skeleton went green |
 | License | Apache-2.0 | Decided at the Not-Humans-Lab umbrella level, applied identically across sibling projects |
 
 ## Adoption status
@@ -45,6 +45,9 @@ HTML must not depend on any CDN for correctness.**
 | Express or any web framework | **Hold** | The local dev server is a plain `node:http` server on purpose — no framework is needed for "serve one rendered HTML string on an ephemeral port." |
 | Bundler (esbuild/webpack/tsup/rollup) | **Hold** | No bundler at all — matches the reference project's "no bundler" philosophy. `tsc` transpile-only is the entire build step. |
 | Multi-OS / multi-Node CI matrix | **Adopt** | Live: `ubuntu-latest`/`macos-14`/`windows-latest` × Node 20/22/latest (9 combinations, `fail-fast: false`). Started as a single `ubuntu-latest` job for the walking skeleton, expanded once that skeleton went green. |
+| `open` | **Adopt** | Production dependency. Used in `src/index.ts` to open the rendered deck in the user's default browser after `nh-deck render`, unless `--no-open` is passed. |
+| `@biomejs/biome` | **Adopt** | Lint + format. Configured via `biome.json`; the CI `Lint` step runs `npm run lint` (`biome ci .`). |
+| `tsx` | **Adopt** | Dev dependency. Runs the CLI directly from TypeScript source (`node --import tsx`) in `tests/cli.test.ts`'s integration tests, without requiring a build step first. |
 
 ## Rationale (non-obvious choices)
 

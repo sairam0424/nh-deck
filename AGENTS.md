@@ -48,7 +48,7 @@ Rendering correctness is verified with Vitest snapshot tests, not manual inspect
 
 - TypeScript on Node.js, compiled with plain `tsc` — no bundler, no build-time code generation.
 - Follow the global coding-style rules already in force for this workspace (KISS, DRY, YAGNI, immutability, descriptive naming, 200-400 lines per file typical).
-- CLI surface is built with Commander.js, wired directly in `src/index.ts` — at this project's current size (two subcommands: `render`, `pdf`) there is no `src/commands/` split; revisit only if the subcommand count grows enough to justify it.
+- CLI surface is built with Commander.js, wired directly in `src/index.ts` — at this project's current size (three subcommands: `render`, `pdf`, `png`) there is no `src/commands/` split; revisit only if the subcommand count grows enough to justify it.
 - Markdown-to-HTML conversion goes through the `marked` library. Do not hand-roll Markdown parsing.
 - PDF export goes through `puppeteer-core` + `chrome-launcher` against a locally-detected Chrome/Chromium/Edge/Brave binary. Never bundle a Chromium binary and never add the full `puppeteer` package (which bundles one) — see Security Notes.
 
@@ -64,12 +64,25 @@ nh-deck/
   tsconfig.json                  — tsc transpile-only config
   src/
     index.ts                — CLI entry point (shebang preserved through build), wires the
-                               "render" and "pdf" Commander.js subcommands directly
-    render.ts                 — generateHtml(markdown, title?): markdown -> self-contained HTML
-    htmlEscape.ts               — escapeHtml(value): shared HTML-escaping helper
-    mermaidRenderer.ts           — renderMermaidDiagram(code): CDN-free Mermaid SVG, or an escaped error box
-    server.ts                  — startServer(html, port?): plain node:http dev server, no framework
-    pdfExport.ts                 — exportToPdf(html, outputPath): puppeteer-core + chrome-launcher
+                               "render", "pdf", and "png" Commander.js subcommands directly
+    cliHelpers.ts              — parsePort/resolveOutputPath/debounce/watchFileForChanges/
+                                  closeWatcherOnServerClose: shared --port/--watch/output-path
+                                  helpers used by index.ts
+    render.ts                    — generateHtml(markdown, title?): markdown -> self-contained HTML
+    htmlEscape.ts                  — escapeHtml(value): shared HTML-escaping helper
+    katexAssets.ts                   — getEmbeddedKatexCss(): KaTeX's own stylesheet with its
+                                        @font-face fonts inlined as base64, so math rendering
+                                        stays CDN-free
+    mermaidRenderer.ts                 — renderMermaidDiagram(code): CDN-free Mermaid SVG, or an escaped error box
+    presenterNotes.ts                    — extractNotes(tokens): pulls presenter-note text out of a
+                                            slide's standalone HTML comments
+    server.ts                              — startServer(html, port?): plain node:http dev server, no framework
+    browserLaunch.ts                         — detectBrowserExecutable(): shared chrome-launcher lookup for a
+                                                local Chrome/Chromium/Edge/Brave binary, used by pdfExport.ts
+                                                and pngExport.ts
+    pdfExport.ts                               — exportToPdf(html, outputPath): puppeteer-core + chrome-launcher
+    pngExport.ts                                 — exportToPng(html, outputPath): puppeteer-core + chrome-launcher,
+                                                    screenshots each slide to its own PNG
   dist/                           — tsc build output (gitignored, npm bin entry lives here)
   fixtures/
     sample.md                      — sample deck used by both render.test.ts and cli.test.ts
@@ -77,6 +90,36 @@ nh-deck/
     render.test.ts                  — Vitest unit tests for generateHtml (pure function)
     cli.test.ts                      — Vitest integration test: spawns the real CLI, asserts on
                                         stdout with the ephemeral port normalized before comparison
+    cliHelpers.test.ts                — unit tests for parsePort/resolveOutputPath/debounce/
+                                         watchFileForChanges, including atomic-save rename survival
+    htmlEscape.test.ts                  — unit tests for escapeHtml
+    katexAssets.test.ts                   — asserts getEmbeddedKatexCss() embeds fonts as base64
+                                             data URIs with no CDN or relative fonts/ path left behind
+    mermaidRenderer.test.ts                 — asserts renderMermaidDiagram() output is CDN-free
+                                               (no @import, no fonts.googleapis.com)
+    presenterNotes.test.ts                    — unit tests for extractNotes() against real
+                                                 marked() token output
+    server.test.ts                              — unit tests for startServer(), including the
+                                                   --watch SSE reload path
+    browserLaunch.test.ts                         — mocks chrome-launcher to report no
+                                                     installation; asserts detectBrowserExecutable()
+                                                     throws a clear error
+    pdfExport.test.ts                               — real, unmocked end-to-end PDF export test
+                                                       (launches an actual local browser)
+    pdfExport.noBrowser.test.ts                       — mocks chrome-launcher to report no
+                                                         installation; asserts exportToPdf() throws
+                                                         a clear error
+    pdfExport.launchFailure.test.ts                     — mocks puppeteer-core's launch() to reject;
+                                                           asserts exportToPdf() surfaces a clear
+                                                           error, not a raw stack trace
+    pngExport.test.ts                                     — end-to-end test asserting exportToPng()
+                                                             writes one real, non-empty PNG per slide
+    pngExport.noBrowser.test.ts                             — mocks chrome-launcher to report no
+                                                               installation; asserts exportToPng() throws
+                                                               a clear error
+    pngExport.launchFailure.test.ts                           — mocks puppeteer-core's launch() to reject;
+                                                                 asserts exportToPng() surfaces a clear
+                                                                 error, not a raw stack trace
   .github/workflows/
     ci.yml                             — 9-combination matrix (3 OS x 3 Node versions) build+test+pack-smoke-test job
 ```
