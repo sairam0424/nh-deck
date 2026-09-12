@@ -26,6 +26,10 @@ export const PRESENTATION_SCRIPT = `<script>
   counter.className = "presentation-counter";
   document.body.appendChild(counter);
 
+  const progress = document.createElement("div");
+  progress.className = "presentation-progress";
+  document.body.appendChild(progress);
+
   const parseHashIndex = () => {
     const n = parseInt(location.hash.slice(1), 10);
     return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
@@ -38,6 +42,9 @@ export const PRESENTATION_SCRIPT = `<script>
       slide.classList.toggle("is-active", i === current);
     });
     counter.textContent = (current + 1) + " / " + slides.length;
+    const lastIndex = slides.length - 1;
+    const progressPercent = lastIndex === 0 ? 100 : (current / lastIndex) * 100;
+    progress.style.width = progressPercent + "%";
     location.hash = String(current + 1);
   };
 

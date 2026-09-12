@@ -220,4 +220,40 @@ describe("presentation mode", () => {
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"shows a presentation-progress element whose width tracks slide position from first to last slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			const progressElementCount = await page.evaluate(
+				() => document.querySelectorAll(".presentation-progress").length,
+			);
+			expect(progressElementCount).toBe(1);
+
+			const progressWidth = () =>
+				page.evaluate(
+					() =>
+						(
+							document.querySelector(
+								".presentation-progress",
+							) as HTMLElement | null
+						)?.style.width,
+				);
+
+			// Slide 1 of 3 (index 0): 0 / (3 - 1) * 100 = 0%.
+			expect(await progressWidth()).toBe("0%");
+
+			// Slide 2 of 3 (index 1, the middle slide): 1 / (3 - 1) * 100 = 50%.
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await progressWidth()).toBe("50%");
+
+			// Slide 3 of 3 (index 2, the last slide): 2 / (3 - 1) * 100 = 100%.
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+			expect(await progressWidth()).toBe("100%");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
 });

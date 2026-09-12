@@ -142,6 +142,27 @@ const PRESENTATION_STYLE = `
     }`;
 
 /**
+ * Scoped under body.presenting the same way .presentation-counter is,
+ * above -- but kept in its own constant rather than folded into
+ * PRESENTATION_STYLE so it can be suppressed by a custom --css the same
+ * way LAYOUT_STYLE/transitionToCssBlock's output already is (see
+ * layoutOverride/transitionStyle in generateHtml below). PRESENTATION_STYLE
+ * itself is deliberately NOT suppressible -- the slide show/hide toggle it
+ * defines is load-bearing for presentation mode's entire visual mechanic --
+ * but a decorative progress bar has no such requirement.
+ */
+const PRESENTATION_PROGRESS_STYLE = `
+    body.presenting .presentation-progress {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: var(--nh-accent);
+      width: 0%;
+      transition: width 0.2s ease;
+    }`;
+
+/**
  * Overrides PRESENTATION_STYLE's plain display:none/block toggle with an
  * animatable version for the given transition: both the active and
  * inactive slide stay display:block (position:absolute, stacked), so
@@ -383,6 +404,7 @@ export function generateHtml(
 	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
 	const transitionStyle =
 		!customCss && transitionName ? transitionToCssBlock(transitionName) : "";
+	const progressStyle = !customCss ? PRESENTATION_PROGRESS_STYLE : "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -488,6 +510,7 @@ ${
     ${NOTES_STYLE}
     ${PRINT_PAGINATION_STYLE}
     ${PRESENTATION_STYLE}
+    ${progressStyle}
     ${layoutOverride}
     ${transitionStyle}
   </style>
