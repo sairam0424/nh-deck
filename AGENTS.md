@@ -140,10 +140,20 @@ nh-deck/
     pngExport.launchFailure.test.ts                           — mocks puppeteer-core's launch() to reject;
                                                                  asserts exportToPng() surfaces a clear
                                                                  error, not a raw stack trace
-    slideLayouts.test.ts                                         — unit tests for resolveLayoutName/extractSlideLayout, including the presenter-note-collision guard
-    transitions.test.ts                                           — unit tests for resolveTransitionName, including the case-insensitive and unknown-name-warning cases
-    presentationScript.test.ts                                     — string-assertion tests for PRESENTATION_SCRIPT's contents (present-param gating, keys, hash persistence, link-click exclusion)
-    presentationMode.test.ts                                        — real, unmocked browser test for ?present navigation (keyboard/click advance, link-click exclusion, hash persistence across reload)
+    slideLayouts.test.ts                                         — unit tests for resolveLayoutName/
+                                                                    extractSlideLayout, including the
+                                                                    presenter-note-collision guard
+    transitions.test.ts                                           — unit tests for resolveTransitionName,
+                                                                     including the case-insensitive and
+                                                                     unknown-name-warning cases
+    presentationScript.test.ts                                     — string-assertion tests for
+                                                                      PRESENTATION_SCRIPT's contents
+                                                                      (present-param gating, keys, hash
+                                                                      persistence, link-click exclusion)
+    presentationMode.test.ts                                        — real, unmocked browser test for
+                                                                       ?present navigation (keyboard/click
+                                                                       advance, link-click exclusion, hash
+                                                                       persistence across reload)
   .github/workflows/
     ci.yml                             — 9-combination matrix (3 OS x 3 Node versions) build+test+pack-smoke-test job
 ```

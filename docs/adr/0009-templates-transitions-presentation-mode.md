@@ -7,8 +7,8 @@ Accepted — 2026-09-12
 ## Context and Problem Statement
 
 `Context.md`'s Roadmap item 11 named "Full theme, template, and transition
-system" as the deferred gap behind the theme portion the theme system
-(`docs/adr/0008-named-theme-system.md`) already shipped. Once the theme
+system" as the deferred gap; the theme portion of it, the theme system
+(`docs/adr/0008-named-theme-system.md`), already shipped. Once the theme
 system landed, that same roadmap line explicitly carried the remainder
 forward: "**Templates and transitions remain deferred** — ... Needs its
 own brainstorming pass when reached." This ADR is that pass, landed.
