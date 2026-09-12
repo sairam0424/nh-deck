@@ -68,7 +68,16 @@ nh-deck/
     cliHelpers.ts              — parsePort/resolveOutputPath/debounce/watchFileForChanges/
                                   closeWatcherOnServerClose: shared --port/--watch/output-path
                                   helpers used by index.ts
-    render.ts                    — generateHtml(markdown, title?): markdown -> self-contained HTML
+    frontmatter.ts               — parseFrontmatter(markdown): splits a deck's optional
+                                    "---\nkey: value\n---" frontmatter block from its body,
+                                    used for the "theme:" key (falls through untouched on
+                                    anything that doesn't parse as flat key:value lines, so a
+                                    deck opening with a stylistic "---" horizontal rule is
+                                    never misread as frontmatter)
+    themes.ts                     — THEMES/DEFAULT_THEME_NAME/resolveThemeName(name): the
+                                      fixed 4-theme registry (light/dark/dracula/nord),
+                                      re-exporting beautiful-mermaid's own named color palettes
+    render.ts                    — generateHtml(markdown, title?, customCss?, themeColors?): markdown -> self-contained HTML
     htmlEscape.ts                  — escapeHtml(value): shared HTML-escaping helper
     katexAssets.ts                   — getEmbeddedKatexCss(): KaTeX's own stylesheet with its
                                         @font-face fonts inlined as base64, so math rendering
@@ -92,6 +101,10 @@ nh-deck/
                                         stdout with the ephemeral port normalized before comparison
     cliHelpers.test.ts                — unit tests for parsePort/resolveOutputPath/debounce/
                                          watchFileForChanges, including atomic-save rename survival
+    frontmatter.test.ts                 — unit tests for parseFrontmatter, including the
+                                           slide-separator-collision fall-through cases
+    themes.test.ts                       — unit tests for THEMES/resolveThemeName, including
+                                            case-insensitivity and the unknown-name warning/fallback
     htmlEscape.test.ts                  — unit tests for escapeHtml
     katexAssets.test.ts                   — asserts getEmbeddedKatexCss() embeds fonts as base64
                                              data URIs with no CDN or relative fonts/ path left behind

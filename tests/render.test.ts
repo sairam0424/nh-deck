@@ -78,6 +78,25 @@ describe("generateHtml", () => {
 		expect(html).toContain("<h1>A Quick Formula</h1>");
 		expect(html).toContain("<h2>A Quick Diagram</h2>");
 	});
+
+	it("produces byte-identical output with no theme argument (regression guard for the CSS custom-properties refactor)", () => {
+		const withoutTheme = generateHtml(fixtureMarkdown, "sample");
+		const withUndefinedTheme = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedTheme).toBe(withoutTheme);
+		// Baseline hardcoded colors from the pre-refactor stylesheet must still
+		// appear literally in the default (no-theme) output.
+		expect(withoutTheme).toContain("#1a1a1a");
+		expect(withoutTheme).toContain("#ffffff");
+		expect(withoutTheme).toContain("@media (prefers-color-scheme: dark)");
+		expect(withoutTheme).toContain("#e6e6e6");
+		expect(withoutTheme).toContain("#121212");
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {
@@ -272,6 +291,41 @@ describe("generateHtml — custom CSS opt-out", () => {
 
 		expect(html).toContain(".slide { color: hotpink; }");
 		expect(html).toContain("KaTeX_Main");
+	});
+});
+
+describe("generateHtml — named themes", () => {
+	it("applies a theme's colors as CSS custom properties when one is given", () => {
+		const html = generateHtml(fixtureMarkdown, "sample", undefined, {
+			bg: "#2e3440",
+			fg: "#d8dee9",
+			line: "#4c566a",
+			accent: "#88c0d0",
+			muted: "#616e88",
+		});
+
+		expect(html).toContain("--nh-bg: #2e3440");
+		expect(html).toContain("--nh-fg: #d8dee9");
+	});
+
+	it("gives .katex text a color tied to the active theme's foreground variable", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+		expect(html).toMatch(/\.katex\s*\{[^}]*color:\s*var\(--nh-fg\)/);
+	});
+
+	it("ignores a theme when customCss is also given", () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			"body { color: purple; }",
+			{
+				bg: "#2e3440",
+				fg: "#d8dee9",
+			},
+		);
+
+		expect(html).toContain("body { color: purple; }");
+		expect(html).not.toContain("--nh-bg: #2e3440");
 	});
 });
 

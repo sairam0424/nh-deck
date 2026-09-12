@@ -1,6 +1,12 @@
 import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+	existsSync,
+	mkdtempSync,
+	readFileSync,
+	rmSync,
+	writeFileSync,
+} from "node:fs";
 import * as http from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -127,6 +133,22 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
 			clearTimeout(timer);
 			resolve();
 		});
+	});
+}
+
+/** Fetches the response body from `url` as a UTF-8 string. */
+function fetchBody(url: string): Promise<string> {
+	return new Promise((resolve, reject) => {
+		http
+			.get(url, (res) => {
+				let data = "";
+				res.on("data", (chunk: Buffer) => {
+					data += chunk.toString();
+				});
+				res.on("end", () => resolve(data));
+				res.on("error", reject);
+			})
+			.on("error", reject);
 	});
 }
 
@@ -1082,5 +1104,235 @@ describe("CLI: nh-deck render --watch", () => {
 			rmSync(tempFile, { force: true });
 		},
 		WATCH_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: theme selection", () => {
+	it(
+		"applies a named theme's colors via the --theme flag on render",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// github-dark's bg, per src/themes.ts's THEMES.dark.
+			expect(body).toContain("--nh-bg: #0d1117");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a deck's own frontmatter theme: value when no --theme flag is given",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-theme-frontmatter-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ntheme: dracula\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// dracula's bg, per src/themes.ts's THEMES.dracula.
+			expect(body).toContain("--nh-bg: #282a36");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets a --theme flag override a conflicting frontmatter theme: value",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-theme-precedence-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ntheme: light\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+					"--theme",
+					"nord",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// nord's bg, per src/themes.ts's THEMES.nord -- confirms the --theme
+			// flag won over the deck's conflicting frontmatter theme: light.
+			expect(body).toContain("--nh-bg: #2e3440");
+			// github-light's own fg (distinct from the baseline stylesheet's
+			// hardcoded #1a1a1a default fg) would only appear here if the
+			// frontmatter's "light" had incorrectly won instead -- a bare bg check
+			// alone can't tell the two apart, since the baseline stylesheet's own
+			// hardcoded default bg (#ffffff) happens to equal github-light's bg too.
+			expect(body).not.toContain("--nh-fg: #1f2328");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets --css win over a --theme flag, with a stderr note and no theme override applied",
+		async () => {
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-theme-css-conflict-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css",
+					cssPath,
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain(".slide { color: hotpink; }");
+			expect(body).not.toContain("--nh-bg: #0d1117");
+			expect(stderr).toMatch(/--css overrides the requested theme/);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(cssPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"falls back to the default theme with a warning for an unrecognized --theme name",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--theme",
+					"totally-not-a-theme",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(matchedLine).toMatch(SERVING_LINE_PATTERN);
+			expect(stderr).toMatch(/unknown theme/i);
+
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// The default "light" theme's own bg -- confirms the fallback still
+			// rendered successfully rather than crashing or failing outright.
+			expect(body).toContain("--nh-bg: #ffffff");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
 	);
 });
