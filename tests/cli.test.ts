@@ -1152,6 +1152,122 @@ describe("CLI: nh-deck render --watch", () => {
 		},
 		WATCH_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"survives a transient read failure during a debounced re-render and keeps serving",
+		async () => {
+			const dir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-watch-read-failure-"),
+			);
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "# Original\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const initialBody = await fetchBody(url);
+			expect(initialBody).toContain("Original");
+
+			// Delete the watched file right as a change event fires, so the
+			// debounced re-render's readFileSync hits ENOENT mid-"save" -- the
+			// exact transient-failure shape the empty catch in the --watch
+			// rerender closure (src/index.ts) exists to survive.
+			rmSync(deckPath, { force: true });
+			// Wait comfortably past the 100ms debounce window so the failed
+			// re-render attempt actually runs before asserting survival.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			// The process must not have crashed from the uncaught read failure.
+			expect(child.exitCode).toBeNull();
+			expect(child.signalCode).toBeNull();
+
+			// The server must still be serving the last successfully rendered
+			// HTML -- the failed read must not have torn anything down.
+			const bodyAfterFailure = await fetchBody(url);
+			expect(bodyAfterFailure).toContain("Original");
+
+			// A subsequent valid save must still be picked up: this proves the
+			// watcher/server genuinely survived (retried on the next change
+			// event), not merely that it hadn't crashed yet.
+			writeFileSync(deckPath, "# Recovered\n");
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const recoveredBody = await fetchBody(url);
+			expect(recoveredBody).toContain("Recovered");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"re-applies a deck's own updated frontmatter transition: value on a debounced re-render",
+		async () => {
+			const dir = mkdtempSync(path.join(tmpdir(), "nh-deck-watch-transition-"));
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "---\ntransition: fade\n---\n# Slide one\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const initialBody = await fetchBody(url);
+			expect(initialBody).toContain("transition: opacity"); // fade transition
+
+			// Edit the deck's frontmatter to a different transition, then wait
+			// for the debounced re-render to pick it up.
+			writeFileSync(deckPath, "---\ntransition: slide\n---\n# Slide one\n");
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const updatedBody = await fetchBody(url);
+			expect(updatedBody).toContain("transform: translateX"); // slide transition
+			expect(updatedBody).not.toContain("transition: opacity");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: theme selection", () => {
