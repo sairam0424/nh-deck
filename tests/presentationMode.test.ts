@@ -148,4 +148,40 @@ describe("presentation mode", () => {
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"keeps a layout's flex centering active even inside presentation mode",
+		async () => {
+			const deckWithLayout =
+				"<!-- layout: title -->\n\n# Slide 1\n\nSubtitle.\n\n---\n\n# Slide 2\n\nSecond.";
+			const page = await openPresentationPage(generateHtml(deckWithLayout));
+
+			const display = await page.evaluate(() => {
+				const el = document.querySelector(".slide.is-active");
+				return el ? getComputedStyle(el).display : null;
+			});
+
+			expect(display).toBe("flex");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"keeps a layout's flex centering active in presentation mode even with a transition set",
+		async () => {
+			const deckWithLayout =
+				"<!-- layout: section -->\n\n# Slide 1\n\nSubtitle.\n\n---\n\n# Slide 2\n\nSecond.";
+			const page = await openPresentationPage(
+				generateHtml(deckWithLayout, undefined, undefined, undefined, "fade"),
+			);
+
+			const display = await page.evaluate(() => {
+				const el = document.querySelector(".slide.is-active");
+				return el ? getComputedStyle(el).display : null;
+			});
+
+			expect(display).toBe("flex");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
 });
