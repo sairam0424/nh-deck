@@ -5,6 +5,7 @@ import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
 import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
+import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
 
 const NOTES_STYLE = `
@@ -34,6 +35,73 @@ const PRINT_PAGINATION_STYLE = `
       .slide {
         break-after: page;
       }
+    }`;
+
+const LAYOUT_STYLE = `
+    .slide.layout-title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .slide.layout-title h1 {
+      font-size: 3rem;
+      border-bottom: none;
+    }
+    .slide.layout-title p:first-of-type {
+      color: var(--nh-muted);
+      font-size: 1.25rem;
+    }
+    .slide.layout-section {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .slide.layout-section h1,
+    .slide.layout-section h2 {
+      font-size: 2.5rem;
+      border-bottom: none;
+    }
+    .slide.layout-section p,
+    .slide.layout-section ul,
+    .slide.layout-section ol {
+      color: var(--nh-muted);
+      font-size: 1rem;
+    }
+    .slide.layout-two-column {
+      column-count: 2;
+      column-gap: 2rem;
+    }
+    .slide.layout-two-column h1,
+    .slide.layout-two-column h2,
+    .slide.layout-two-column h3 {
+      break-after: avoid;
+    }
+    .slide.layout-two-column pre,
+    .slide.layout-two-column table,
+    .slide.layout-two-column img {
+      break-inside: avoid;
+    }
+    .slide.layout-quote {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .slide.layout-quote p {
+      font-size: 1.75rem;
+      font-style: italic;
+    }
+    .slide.layout-quote p:last-of-type {
+      font-size: 1rem;
+      font-style: normal;
+      color: var(--nh-muted);
     }`;
 
 /**
@@ -135,12 +203,16 @@ export function generateHtml(
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
 		.map((slideTokens) => {
-			const notesHtml = extractNotes(slideTokens)
+			const { layout, tokens: filteredTokens } =
+				extractSlideLayout(slideTokens);
+			const { name: layoutName } = resolveLayoutName(layout);
+			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
+			const notesHtml = extractNotes(filteredTokens)
 				.map(
 					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
 				)
 				.join("\n");
-			return `<section class="slide">\n${marked.parser(slideTokens)}${notesHtml}</section>`;
+			return `<section class="slide${layoutClass}">\n${marked.parser(filteredTokens)}${notesHtml}</section>`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -155,6 +227,7 @@ export function generateHtml(
 		: "";
 	const themeOverride =
 		!customCss && themeColors ? themeToCssVarBlock(themeColors) : "";
+	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -258,6 +331,7 @@ ${
     ${katexStyle}
     ${NOTES_STYLE}
     ${PRINT_PAGINATION_STYLE}
+    ${layoutOverride}
   </style>
 </head>
 <body>

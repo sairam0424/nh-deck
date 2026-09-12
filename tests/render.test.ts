@@ -134,6 +134,53 @@ describe("generateHtml", () => {
 
 		expect(withUndefinedTheme).toBe(withoutTheme);
 	});
+
+	it("applies a layout CSS class from a slide's layout marker comment", () => {
+		const html = generateHtml(
+			"<!-- layout: title -->\n\n# Big Heading\n\nSubtitle text.",
+		);
+
+		expect(html).toContain('<section class="slide layout-title">');
+	});
+
+	it("renders a slide with no layout marker exactly as before -- no layout class", () => {
+		const html = generateHtml("# Big Heading\n\nSubtitle text.");
+
+		// LAYOUT_STYLE's CSS (like NOTES_STYLE/PRINT_PAGINATION_STYLE) is
+		// injected unconditionally -- it's scoped entirely to
+		// ".slide.layout-*" selectors, so it has zero effect on a <section>
+		// that never gets a layout-* class. The precise check for "no
+		// layout class applied" is this exact section-tag substring: a
+		// section with a layout class would render
+		// `class="slide layout-title"`, which would not match.
+		expect(html).toContain('<section class="slide">');
+	});
+
+	it("excludes a layout marker comment from both the rendered notes and the raw output", () => {
+		const html = generateHtml("<!-- layout: title -->\n\n# Heading\n");
+
+		expect(html).not.toContain("layout:");
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("silently ignores an unrecognized layout name -- no class applied, no crash", () => {
+		const html = generateHtml("<!-- layout: nonexistent -->\n\n# Heading\n");
+
+		expect(html).toContain('<section class="slide">');
+		expect(html).not.toContain("layout-nonexistent");
+	});
+
+	it("still treats a layout marker comment as an already-reviewed comment, not raw HTML", () => {
+		expect(containsUnsafeHtml("<!-- layout: title -->\n\n# Heading\n")).toBe(
+			false,
+		);
+	});
+
+	it("does not apply LAYOUT_STYLE's CSS when a custom --css is given", () => {
+		const html = generateHtml("# Heading", "sample", ".slide { color: red; }");
+
+		expect(html).not.toContain(".slide.layout-title");
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {
