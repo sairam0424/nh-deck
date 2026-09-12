@@ -49,7 +49,7 @@ const LAYOUT_STYLE = `
       text-align: center;
     }
     .slide.layout-title h1 {
-      font-size: 3rem;
+      font-size: clamp(2.25rem, 5vw, 3.5rem);
       border-bottom: none;
     }
     .slide.layout-title p:first-of-type {
@@ -78,6 +78,9 @@ const LAYOUT_STYLE = `
     .slide.layout-two-column {
       column-count: 2;
       column-gap: 2rem;
+    }
+    @media (max-width: 640px) {
+      .slide.layout-two-column { column-count: 1; }
     }
     .slide.layout-two-column h1,
     .slide.layout-two-column h2,
@@ -464,7 +467,7 @@ ${
     }
     ${themeOverride}
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
       line-height: 1.6;
       max-width: 860px;
       margin: 0 auto;
