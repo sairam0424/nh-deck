@@ -181,6 +181,85 @@ describe("generateHtml", () => {
 
 		expect(html).not.toContain(".slide.layout-title");
 	});
+
+	it("embeds the presentation-mode script unconditionally, inert without ?present", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain('has("present")');
+	});
+
+	it("adds transition CSS when a transition name is given", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			"fade",
+		);
+
+		expect(html).toContain("transition: opacity");
+	});
+
+	it("adds a different transition's CSS for the slide transition", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			"slide",
+		);
+
+		expect(html).toContain("transform: translateX");
+	});
+
+	it("adds no transition animation CSS when no transition name is given", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(html).not.toContain("transform: translateX");
+		expect(html).not.toContain("transition: opacity");
+	});
+
+	it("does not apply transition CSS when a custom --css is given, even with a transition name", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			".slide { color: red; }",
+			undefined,
+			"fade",
+		);
+
+		expect(html).not.toContain("transition: opacity");
+	});
+
+	it("still applies presentation mode's base show/hide CSS even with a custom --css", () => {
+		const html = generateHtml("# Slide", "sample", ".slide { color: red; }");
+
+		expect(html).toContain("body.presenting .slide.is-active");
+	});
+
+	it("produces byte-identical output with no transition argument (regression guard)", () => {
+		const withoutArg = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+		);
+		const withUndefinedTransition = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedTransition).toBe(withoutArg);
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {

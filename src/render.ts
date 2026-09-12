@@ -4,9 +4,11 @@ import markedKatex from "marked-katex-extension";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
+import { PRESENTATION_SCRIPT } from "./presentationScript.js";
 import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
 import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
+import type { TransitionName } from "./transitions.js";
 
 const NOTES_STYLE = `
     .notes {
@@ -104,6 +106,66 @@ const LAYOUT_STYLE = `
       color: var(--nh-muted);
     }`;
 
+const PRESENTATION_STYLE = `
+    body.presenting .slide {
+      display: none;
+    }
+    body.presenting .slide.is-active {
+      display: block;
+    }
+    body.presenting .presentation-counter {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: var(--nh-code-bg);
+      color: var(--nh-muted);
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }`;
+
+/**
+ * Overrides PRESENTATION_STYLE's plain display:none/block toggle with an
+ * animatable version for the given transition: both the active and
+ * inactive slide stay display:block (position:absolute, stacked), so
+ * opacity/transform can transition smoothly between them. Suppressible
+ * by --css, unlike PRESENTATION_STYLE itself -- see the plan's Global
+ * Constraints for why the split is drawn there.
+ */
+function transitionToCssBlock(name: TransitionName): string {
+	if (name === "fade") {
+		return `
+    body.presenting .slide {
+      display: block;
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    body.presenting .slide.is-active {
+      opacity: 1;
+      pointer-events: auto;
+    }`;
+	}
+	return `
+    body.presenting .slide {
+      display: block;
+      position: absolute;
+      inset: 0;
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+    }
+    body.presenting .slide.is-active {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+    }`;
+}
+
 /**
  * Maps a theme's {bg, fg, line, accent, muted} onto nh-deck's own CSS
  * custom-property names, with fallback chains for themes that omit some
@@ -198,6 +260,7 @@ export function generateHtml(
 	title?: string,
 	customCss?: string,
 	themeColors?: ThemeColors,
+	transitionName?: TransitionName,
 ): string {
 	currentMermaidColors = themeColors;
 	const tokens = marked.lexer(markdown);
@@ -228,6 +291,8 @@ export function generateHtml(
 	const themeOverride =
 		!customCss && themeColors ? themeToCssVarBlock(themeColors) : "";
 	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
+	const transitionStyle =
+		!customCss && transitionName ? transitionToCssBlock(transitionName) : "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -331,7 +396,9 @@ ${
     ${katexStyle}
     ${NOTES_STYLE}
     ${PRINT_PAGINATION_STYLE}
+    ${PRESENTATION_STYLE}
     ${layoutOverride}
+    ${transitionStyle}
   </style>
 </head>
 <body>
@@ -343,6 +410,7 @@ ${slidesHtml}
       });
     }
   </script>
+  ${PRESENTATION_SCRIPT}
 </body>
 </html>
 `;
