@@ -57,6 +57,11 @@ up to this release, not just changes since a prior tag (none existed before now)
   output, not just `pre`/`table`/`img`.
 - The presenter-notes panel now follows the active theme instead of a fixed
   cream/gold color scheme.
+- Inline code is no longer invisible inside a themed `section`-layout slide
+  (its text color collided exactly with its own background under every
+  shipped theme, since both derived from the same fallback value) — found
+  via a live end-to-end pass against a running dev server, not the
+  pre-existing test suite.
 - `resolveOutputPath`'s `.md` extension check is now case-insensitive (a
   source file named with a capital `.MD` extension no longer gets a doubled
   output extension).
