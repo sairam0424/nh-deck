@@ -1300,7 +1300,10 @@ describe("CLI: nh-deck render --watch", () => {
 
 			const updatedBody = await fetchBody(url);
 			expect(updatedBody).toContain("transform: translateX"); // slide transition
-			expect(updatedBody).not.toContain("transition: opacity");
+			// The fade transition's own base rule (0.3s ease) must be gone, even
+			// though the shared prefers-reduced-motion override (0.2s linear) is
+			// present for every transition, "slide" included.
+			expect(updatedBody).not.toContain("transition: opacity 0.3s ease");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2090,7 +2093,10 @@ describe("CLI: transition selection", () => {
 
 			const body = await fetchBody(url);
 			expect(body).toContain("transform: translateX");
-			expect(body).not.toContain("transition: opacity");
+			// The fade transition's own base rule (0.3s ease) must be gone, even
+			// though the shared prefers-reduced-motion override (0.2s linear) is
+			// present for every transition, "slide" included.
+			expect(body).not.toContain("transition: opacity 0.3s ease");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);

@@ -163,12 +163,34 @@ const PRESENTATION_PROGRESS_STYLE = `
     }`;
 
 /**
+ * Appended, unconditionally, to every transitionToCssBlock() return value
+ * regardless of which transition (fade/slide) is active -- a user who has
+ * prefers-reduced-motion enabled gets a fast opacity-only crossfade instead
+ * of either the full slide/fade animation or motion being silently left
+ * untouched. Deliberately substitutes a fast crossfade rather than
+ * disabling the transition entirely (transition: none): an instant, jarring
+ * slide swap with zero visual continuity is its own kind of jolt, and a
+ * fast linear opacity fade is the pattern verified against a real
+ * competitor's implementation of this same accessibility affordance.
+ */
+const REDUCED_MOTION_STYLE = `
+    @media (prefers-reduced-motion: reduce) {
+      .slide { transition: opacity 0.2s linear !important; transform: none !important; }
+    }`;
+
+/**
  * Overrides PRESENTATION_STYLE's plain display:none/block toggle with an
  * animatable version for the given transition: both the active and
  * inactive slide stay display:block (position:absolute, stacked), so
  * opacity/transform can transition smoothly between them. Suppressible
  * by --css, unlike PRESENTATION_STYLE itself -- see the plan's Global
  * Constraints for why the split is drawn there.
+ *
+ * The "slide" transition also carries a `body.presenting.direction-backward`
+ * override: PRESENTATION_SCRIPT toggles that class onto <body> at the moment
+ * of navigation (ArrowLeft, or ArrowRight's/click's absence of it), so a
+ * backward navigation flips the translateX sign instead of replaying the
+ * exact same left-to-right motion forward navigation uses.
  */
 function transitionToCssBlock(name: TransitionName): string {
 	if (name === "fade") {
@@ -184,7 +206,7 @@ function transitionToCssBlock(name: TransitionName): string {
     body.presenting .slide.is-active {
       opacity: 1;
       pointer-events: auto;
-    }`;
+    }${REDUCED_MOTION_STYLE}`;
 	}
 	return `
     body.presenting .slide {
@@ -200,7 +222,13 @@ function transitionToCssBlock(name: TransitionName): string {
       transform: translateX(0);
       opacity: 1;
       pointer-events: auto;
-    }`;
+    }
+    body.presenting.direction-backward .slide {
+      transform: translateX(-100%);
+    }
+    body.presenting.direction-backward .slide.is-active {
+      transform: translateX(0);
+    }${REDUCED_MOTION_STYLE}`;
 }
 
 // Percentage of --nh-fg blended into --nh-bg to derive --nh-code-bg and

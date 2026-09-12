@@ -281,6 +281,36 @@ describe("generateHtml", () => {
 		expect(html).not.toContain("transition: opacity");
 	});
 
+	it.each(["fade", "slide"] as const)(
+		"includes a prefers-reduced-motion override regardless of --transition value (%s)",
+		(transitionName) => {
+			const html = generateHtml(
+				"# Slide",
+				"sample",
+				undefined,
+				undefined,
+				transitionName,
+			);
+
+			expect(html).toContain("@media (prefers-reduced-motion: reduce)");
+			expect(html).toContain(
+				".slide { transition: opacity 0.2s linear !important; transform: none !important; }",
+			);
+		},
+	);
+
+	it("does not apply the reduced-motion override when a custom --css is given, even with a transition name", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			".slide { color: red; }",
+			undefined,
+			"fade",
+		);
+
+		expect(html).not.toContain("prefers-reduced-motion");
+	});
+
 	it("still applies presentation mode's base show/hide CSS even with a custom --css", () => {
 		const html = generateHtml("# Slide", "sample", ".slide { color: red; }");
 

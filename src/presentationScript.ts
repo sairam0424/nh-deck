@@ -9,6 +9,12 @@
  * Entirely inert unless `?present` is in the URL -- the continuous-scroll
  * default view is completely unaffected, matching the existing `?notes`
  * toggle's own opt-in-via-URL precedent.
+ *
+ * goTo() also toggles a `direction-backward` class on <body> to record
+ * which way navigation just moved (ArrowLeft = backward; ArrowRight,
+ * Space, and click all move forward) -- render.ts's "slide" transition CSS
+ * reads that class to flip translateX's sign, so backward navigation
+ * visually reverses instead of replaying forward's exact same motion.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -48,19 +54,20 @@ export const PRESENTATION_SCRIPT = `<script>
     location.hash = String(current + 1);
   };
 
-  const goTo = (index) => {
+  const goTo = (index, isBackward) => {
     if (index < 0 || index >= slides.length) {
       return;
     }
+    document.body.classList.toggle("direction-backward", Boolean(isBackward));
     current = index;
     render();
   };
 
   document.addEventListener("keydown", (event) => {
     if (event.key === "ArrowRight" || event.key === " ") {
-      goTo(current + 1);
+      goTo(current + 1, false);
     } else if (event.key === "ArrowLeft") {
-      goTo(current - 1);
+      goTo(current - 1, true);
     }
   });
 
@@ -68,7 +75,7 @@ export const PRESENTATION_SCRIPT = `<script>
     if (event.target.closest("a")) {
       return;
     }
-    goTo(current + 1);
+    goTo(current + 1, false);
   });
 
   render();

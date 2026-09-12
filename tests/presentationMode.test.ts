@@ -77,6 +77,53 @@ describe("presentation mode", () => {
 	);
 
 	it(
+		"reverses the slide transition's translateX direction when navigating backward vs forward (regression: backward previously replayed forward's exact same left-to-right motion)",
+		async () => {
+			const page = await openPresentationPage(
+				generateHtml(
+					THREE_SLIDE_DECK,
+					undefined,
+					undefined,
+					undefined,
+					"slide",
+				),
+			);
+
+			// Wait for the 0.3s CSS transition to settle so the read below sees
+			// the rule's resting value rather than a mid-animation interpolation.
+			const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
+
+			// Reads the translateX component (matrix's tx) of the first
+			// currently-inactive slide -- always a slide sitting at its rule's
+			// resting transform, never the actively-animating one becoming
+			// active.
+			const inactiveSlideTranslateX = () =>
+				page.evaluate(() => {
+					const el = document.querySelector(".slide:not(.is-active)");
+					const transform = el ? getComputedStyle(el).transform : "none";
+					const match = transform.match(/matrix\(([^)]+)\)/);
+					if (!match) {
+						return 0;
+					}
+					const parts = match[1].split(",").map((n) => Number.parseFloat(n));
+					return parts[4] ?? 0;
+				});
+
+			await page.keyboard.press("ArrowRight");
+			await settle();
+			const forwardTx = await inactiveSlideTranslateX();
+
+			await page.keyboard.press("ArrowLeft");
+			await settle();
+			const backwardTx = await inactiveSlideTranslateX();
+
+			expect(forwardTx).toBeGreaterThan(0);
+			expect(backwardTx).toBeLessThan(0);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"stays on the last slide when ArrowRight is pressed past the end, and on the first slide when ArrowLeft is pressed before the start",
 		async () => {
 			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
