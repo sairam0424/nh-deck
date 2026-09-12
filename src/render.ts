@@ -104,6 +104,20 @@ const LAYOUT_STYLE = `
       font-size: 1rem;
       font-style: normal;
       color: var(--nh-muted);
+    }
+    /* Without this, presentation mode's own display:block toggle
+       (PRESENTATION_STYLE, and transitionToCssBlock when a transition is
+       active) wins the specificity fight against .slide.layout-title's
+       plain display:flex, silently breaking vertical centering only
+       inside ?present. Re-asserting display:flex here at higher
+       specificity (0,4,1) beats both (0,3,1) and (0,2,1) regardless of
+       source order. layout-two-column needs no such rule -- column-count
+       works on a block container, so presentation mode's forced
+       display:block never breaks it. */
+    body.presenting .slide.is-active.layout-title,
+    body.presenting .slide.is-active.layout-section,
+    body.presenting .slide.is-active.layout-quote {
+      display: flex;
     }`;
 
 const PRESENTATION_STYLE = `
