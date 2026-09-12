@@ -70,9 +70,9 @@ export function resolveTransitionName(requested: string | undefined): {
 Exports a single string constant, `PRESENTATION_SCRIPT`, containing the client-side navigation JS (kept out of `render.ts` to avoid growing its inline-script list further):
 
 - Reads `URLSearchParams(location.search).has("present")`; no-ops entirely if absent.
-- On activation: reads `location.hash` (e.g. `#3`) for the starting slide index, defaulting to slide 1 if absent/invalid; hides every `.slide` section except the current one via the `hidden` attribute; renders a small "N / total" counter.
+- On activation: reads `location.hash` (e.g. `#3`) for the starting slide index, defaulting to slide 1 if absent/invalid; marks the current `.slide` section with an `is-active` class (removed from every other slide); renders a small "N / total" counter. **Revised during implementation planning:** an `is-active` class, not the `hidden` attribute, is what's actually toggled — `hidden` maps to `display: none`, which can't be animated, and the fade/slide transitions (§3.5) need the outgoing/incoming slide to be simultaneously in the DOM with an animatable property (`opacity`/`transform`) changing between them. `render.ts`'s always-present base CSS still uses a plain `display: none`/`block` toggle keyed off `is-active` when no transition is active; only the transition-specific CSS override switches to the animatable version.
 - Listens for `ArrowRight`/`Space` (advance) and `ArrowLeft` (back) `keydown` events, and `click` on the document body **except** when the click target is or is inside an `<a>` element (so links inside slide content keep working).
-- On every navigation, updates `location.hash` to the new index (survives `--watch`'s `location.reload()`, since the hash is not part of what a reload discards) and re-applies the `hidden` toggling.
+- On every navigation, updates `location.hash` to the new index (survives `--watch`'s `location.reload()`, since the hash is not part of what a reload discards) and re-applies the `is-active` toggling.
 
 ### 3.4 `presenterNotes.ts` — no changes needed
 
@@ -81,7 +81,7 @@ Exports a single string constant, `PRESENTATION_SCRIPT`, containing the client-s
 ### 3.5 `render.ts` changes
 
 - New `LAYOUT_STYLE` constant (alongside the existing `NOTES_STYLE`/`PRINT_PAGINATION_STYLE`) defining the 4 layouts' CSS: `title` centers content vertically with a larger first heading; `section` is a minimal big-heading divider that de-emphasizes (not hides — hiding user-written content would be editorializing) body text below the heading; `quote` centers text with the last paragraph styled as a smaller attribution line; `two-column` uses `column-count: 2` to auto-flow the slide's existing content — no new Markdown split-syntax.
-- New transition CSS block, generated from the resolved `transitionName`: `fade` animates `opacity` on the `hidden`-attribute toggle presentation mode already does; `slide` animates a `transform: translateX(...)`.
+- New transition CSS block, generated from the resolved `transitionName`, overriding the base `is-active` toggle (above) with an animatable version: `fade` animates `opacity`; `slide` animates a `transform: translateX(...)`. This override is suppressible by `--css`; the base `is-active` toggle itself is not (see the Global Constraints in `docs/plans/templates-transitions-implementation-plan.md` for why the split is drawn there).
 - Per-slide rendering loop calls `extractSlideLayout(slideTokens)` **before** `extractNotes`, passing the returned filtered token array to both `extractNotes` and `marked.parser` (not the original `slideTokens`), and applies the resolved layout name as an additional CSS class on that slide's `<section class="slide">` wrapper (`<section class="slide layout-title">`).
 - `generateHtml` gains a 5th optional positional parameter, `transitionName?: TransitionName`, continuing the existing pattern (`themeColors` was added as the 4th). `PRESENTATION_SCRIPT` is always embedded (inert without `?present`, same as the existing `?notes` script).
 - Both `LAYOUT_STYLE` and the transition CSS block are omitted when `customCss` is set, matching how `themeOverride` is already omitted — `--css` replaces everything.
@@ -110,7 +110,7 @@ Exports a single string constant, `PRESENTATION_SCRIPT`, containing the client-s
 
 ## 6. Documentation updates required (as part of implementation, not this spec)
 
-- `AGENTS.md`'s Directory Map: add `src/slideLayouts.ts`, `src/transitions.ts`, `src/presentationScript.ts`, and the 3 new test files.
+- `AGENTS.md`'s Directory Map: add `src/slideLayouts.ts`, `src/transitions.ts`, `src/presentationScript.ts`, and the 4 new test files (`tests/slideLayouts.test.ts`, `tests/transitions.test.ts`, `tests/presentationScript.test.ts`, `tests/presentationMode.test.ts`).
 - `Context.md`'s Roadmap item 11: mark done once shipped, same pattern as the theme system's own roadmap entry update.
 - A new ADR documenting the presentation-mode addition (it's a genuine new subsystem, not just a config toggle) — the theme system got `docs/adr/0008-named-theme-system.md`; this would be `docs/adr/0009-...`.
 
