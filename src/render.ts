@@ -72,7 +72,6 @@ marked.use(markedKatex({ throwOnError: false }));
 let currentMermaidColors: ThemeColors | undefined;
 
 marked.use({
-	useNewRenderer: true,
 	renderer: {
 		code({ text, lang, escaped }: Tokens.Code): string {
 			const langString = (lang ?? "").match(/^\S*/)?.[0];

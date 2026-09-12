@@ -36,7 +36,7 @@
 		"chrome-launcher": "^1.1.2",
 		"commander": "^15.0.0",
 		"katex": "^0.18.7",
-		"marked": "^13.0.3",
+		"marked": "^18.0.12",
 		"marked-katex-extension": "^5.1.12",
 		"open": "^11.0.2",
 		"puppeteer-core": "^25.10.0"
