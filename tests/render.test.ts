@@ -7,6 +7,7 @@ import { detectBrowserExecutable } from "../src/browserLaunch.js";
 import { containsUnsafeHtml, generateHtml } from "../src/render.js";
 import type { StartedServer } from "../src/server.js";
 import { startServer } from "../src/server.js";
+import { THEMES } from "../src/themes.js";
 
 // NOTE on the ".js" import extension above: this project uses TypeScript's
 // NodeNext module resolution (see src/index.ts, which imports "./render.js"
@@ -737,12 +738,17 @@ describe("generateHtml — themed notes panel", () => {
 		// The .notes rule text itself is identical between themes (it always
 		// references the same var() names) -- it's the surrounding :root
 		// block's variable *values* that must differ per theme for the panel
-		// to actually look different on screen.
+		// to actually look different on screen. --nh-code-bg/--nh-border are
+		// blended from each theme's own bg/fg (see CODE_BG_FG_BLEND_PERCENT/
+		// BORDER_FG_BLEND_PERCENT in render.ts), not copied from `muted`/
+		// `line`, so these two dark themes -- which share an identical
+		// `muted` value with `line` (dracula) but differ in bg/fg -- still
+		// resolve to genuinely different, theme-derived hex values here.
 		expect(notesRule(draculaHtml)).toBe(notesRule(nordHtml));
-		expect(draculaHtml).toContain("--nh-code-bg: #6272a4");
-		expect(nordHtml).toContain("--nh-code-bg: #616e88");
-		expect(draculaHtml).toContain("--nh-border: #6272a4");
-		expect(nordHtml).toContain("--nh-border: #4c566a");
+		expect(draculaHtml).toContain("--nh-code-bg: #3d3f49");
+		expect(nordHtml).toContain("--nh-code-bg: #3f4551");
+		expect(draculaHtml).toContain("--nh-border: #9a9b9d");
+		expect(nordHtml).toContain("--nh-border: #8c929d");
 		expect(draculaHtml).not.toBe(nordHtml);
 	});
 });
@@ -797,4 +803,110 @@ describe("generateHtml — inline code contrast inside the section layout", () =
 		},
 		STYLE_TEST_TIMEOUT_MS,
 	);
+});
+
+describe("generateHtml — theme code-bg/border WCAG contrast (regression: collapsed --nh-code-bg/--nh-muted made the presentation counter invisible)", () => {
+	// Real WCAG 2.x relative-luminance / contrast-ratio math
+	// (https://www.w3.org/TR/WCAG21/#dfn-relative-luminance), run against
+	// each shipped theme's actually-*resolved* colors via a real browser's
+	// getComputedStyle() -- not eyeballed, and not asserted against
+	// hand-copied hex literals that could silently drift from
+	// beautiful-mermaid's own palette values (imported live from
+	// ../src/themes.js below instead).
+	function parseRgbChannels(value: string): [number, number, number] {
+		const match = value.match(/rgba?\((\d+),\s*(\d+),\s*(\d+)/);
+		if (!match) {
+			throw new Error(
+				`unparseable color value from getComputedStyle: ${value}`,
+			);
+		}
+		return [Number(match[1]), Number(match[2]), Number(match[3])];
+	}
+
+	function relativeLuminance([r, g, b]: [number, number, number]): number {
+		const channel = (c: number) => {
+			const s = c / 255;
+			return s <= 0.03928 ? s / 12.92 : ((s + 0.055) / 1.055) ** 2.4;
+		};
+		return 0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b);
+	}
+
+	function contrastRatio(colorA: string, colorB: string): number {
+		const l1 = relativeLuminance(parseRgbChannels(colorA));
+		const l2 = relativeLuminance(parseRgbChannels(colorB));
+		const lighter = Math.max(l1, l2);
+		const darker = Math.min(l1, l2);
+		return (lighter + 0.05) / (darker + 0.05);
+	}
+
+	const DECK = "# Heading\n\nSome text with `inline code` in it.";
+
+	async function openPresentingPage(html: string) {
+		activeServer = await startServer(html, 0);
+		const executablePath = detectBrowserExecutable();
+		activeBrowser = await puppeteer.launch({ executablePath, headless: true });
+		const page = await activeBrowser.newPage();
+		await page.goto(`${activeServer.url}/?present`, { waitUntil: "load" });
+		return page;
+	}
+
+	async function themeContrastColors(
+		page: Awaited<ReturnType<typeof openPresentingPage>>,
+	) {
+		return page.evaluate(() => {
+			const code = document.querySelector("code");
+			const heading = document.querySelector("h1");
+			const counter = document.querySelector(".presentation-counter");
+			if (!code || !heading || !counter) return null;
+			const codeStyle = getComputedStyle(code);
+			const headingStyle = getComputedStyle(heading);
+			const bodyStyle = getComputedStyle(document.body);
+			const counterStyle = getComputedStyle(counter);
+			return {
+				codeForeground: codeStyle.color,
+				codeBackground: codeStyle.backgroundColor,
+				headingBorder: headingStyle.borderBottomColor,
+				bodyBackground: bodyStyle.backgroundColor,
+				counterForeground: counterStyle.color,
+				counterBackground: counterStyle.backgroundColor,
+			};
+		});
+	}
+
+	for (const [themeName, theme] of Object.entries(THEMES)) {
+		it(
+			`gives the "${themeName}" theme a --nh-code-bg/--nh-fg pair meeting WCAG AA (>=4.5:1), a --nh-border/--nh-bg pair meeting the 3:1 UI-boundary minimum, and a presentation counter that is no longer invisible against its own background`,
+			async () => {
+				const html = generateHtml(DECK, "sample", undefined, theme.colors);
+				const page = await openPresentingPage(html);
+
+				const colors = await themeContrastColors(page);
+				expect(colors).not.toBeNull();
+				if (!colors) return;
+
+				// (a) inline <code>'s own foreground (--nh-fg) vs background
+				// (--nh-code-bg) -- the most-visible real manifestation of this
+				// pair -- must meet WCAG AA for normal text (>=4.5:1).
+				expect(colors.codeForeground).not.toBe(colors.codeBackground);
+				expect(
+					contrastRatio(colors.codeForeground, colors.codeBackground),
+				).toBeGreaterThanOrEqual(4.5);
+
+				// (b) --nh-border (h1's border-bottom) against --nh-bg (the
+				// page background) must meet the 3:1 non-text/UI-boundary
+				// contrast minimum.
+				expect(
+					contrastRatio(colors.headingBorder, colors.bodyBackground),
+				).toBeGreaterThanOrEqual(3);
+
+				// (c) the presentation counter's own live-resolved background
+				// (--nh-code-bg) and text color (--nh-muted) must never
+				// collapse to the exact same value -- that collapse is what
+				// made the counter render completely invisible against its
+				// own background under every one of these 4 shipped themes.
+				expect(colors.counterForeground).not.toBe(colors.counterBackground);
+			},
+			STYLE_TEST_TIMEOUT_MS,
+		);
+	}
 });

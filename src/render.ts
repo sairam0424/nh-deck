@@ -182,6 +182,76 @@ function transitionToCssBlock(name: TransitionName): string {
     }`;
 }
 
+// Percentage of --nh-fg blended into --nh-bg to derive --nh-code-bg and
+// --nh-border independently of a theme's `line`/`muted` colors below.
+// `line`/`muted` are tuned for mermaid diagram roles (edge/connector color,
+// secondary diagram-label text) -- not for a UI element's background or
+// border -- and for all 4 shipped themes, `muted` happens to be the exact
+// hex beautiful-mermaid also uses for `line` (dracula) or is otherwise
+// untuned for contrast against `bg`/`fg` in a UI context. That mismatch is
+// what let --nh-code-bg collapse to the exact same hex as --nh-muted (the
+// Nord theme, notably), and let --nh-border fall under WCAG's 3:1 minimum
+// against --nh-bg for every shipped theme except dracula.
+//
+// Verified with the real WCAG 2.x contrast-ratio formula against all 4
+// shipped themes' actual resolved colors (see the
+// "theme code-bg/border WCAG contrast" describe block in
+// tests/render.test.ts, which checks this live via getComputedStyle rather
+// than by inspecting these hex constants):
+//   - CODE_BG_FG_BLEND_PERCENT (10%) keeps --nh-fg vs --nh-code-bg contrast
+//     >= 7.1:1 for every shipped theme (WCAG AA for normal text requires
+//     >= 4.5:1) -- comfortable margin because a small blend toward --nh-fg
+//     barely moves --nh-code-bg away from --nh-bg, and --nh-fg already has
+//     high contrast against --nh-bg in all 4 shipped themes.
+//   - BORDER_FG_BLEND_PERCENT (55%) keeps --nh-border vs --nh-bg contrast
+//     >= 3.6:1 for every shipped theme (WCAG's 3:1 non-text/UI-boundary
+//     minimum). This needs to be a much larger blend than
+//     CODE_BG_FG_BLEND_PERCENT because sRGB's gamma curve makes contrast
+//     rise slowly near white: the light theme (white --nh-bg) needs >=
+//     ~48% blended in before it clears 3:1 at all.
+const CODE_BG_FG_BLEND_PERCENT = 10;
+const BORDER_FG_BLEND_PERCENT = 55;
+
+/**
+ * Splits a "#rrggbb" string into its three 0-255 channel values.
+ */
+function hexToRgbChannels(hex: string): [number, number, number] {
+	const normalized = hex.replace("#", "");
+	return [
+		Number.parseInt(normalized.slice(0, 2), 16),
+		Number.parseInt(normalized.slice(2, 4), 16),
+		Number.parseInt(normalized.slice(4, 6), 16),
+	];
+}
+
+/**
+ * Blends `toColor` into `fromColor` by `weightPercent` (0-100), interpolating
+ * each RGB channel linearly in gamma-encoded sRGB space -- the same
+ * approach CSS's `color-mix(in srgb, ...)` uses, and the one
+ * beautiful-mermaid's own theme system already uses internally for its
+ * derived diagram colors (see its `MIX`-weighted `color-mix()` rules in
+ * node_modules/beautiful-mermaid/src/theme.ts). Implemented here as a
+ * plain hex computation -- rather than emitting a `color-mix()` CSS
+ * function -- so nh-deck's `--nh-*` variables keep resolving to concrete
+ * hex values, as every other theme variable already does.
+ *
+ * Assumes both inputs are "#rrggbb" hex strings, which holds for every
+ * ThemeColors value in practice (themes.ts re-exports beautiful-mermaid's
+ * own hex palettes; see themes.ts's docstring).
+ */
+function blendHexColors(
+	fromColor: string,
+	toColor: string,
+	weightPercent: number,
+): string {
+	const from = hexToRgbChannels(fromColor);
+	const to = hexToRgbChannels(toColor);
+	const weight = weightPercent / 100;
+	const toHexByte = (channel: number) =>
+		Math.round(channel).toString(16).padStart(2, "0");
+	return `#${from.map((channel, i) => toHexByte(channel + (to[i] - channel) * weight)).join("")}`;
+}
+
 /**
  * Maps a theme's {bg, fg, line, accent, muted} onto nh-deck's own CSS
  * custom-property names, with fallback chains for themes that omit some
@@ -190,9 +260,13 @@ function transitionToCssBlock(name: TransitionName): string {
  * see docs/specs/theme-system-design.md §7).
  */
 function themeToCssVarBlock(colors: ThemeColors): string {
-	const border = colors.line ?? colors.muted ?? colors.fg;
 	const muted = colors.muted ?? colors.line ?? colors.fg;
-	const codeBg = colors.muted ?? colors.line ?? colors.bg;
+	// --nh-border and --nh-code-bg are UI-chrome roles (a UI-boundary line,
+	// a code block's own background) -- deliberately derived straight from
+	// bg/fg rather than from muted/line (diagram-label/edge-connector
+	// colors), see CODE_BG_FG_BLEND_PERCENT/BORDER_FG_BLEND_PERCENT above.
+	const codeBg = blendHexColors(colors.bg, colors.fg, CODE_BG_FG_BLEND_PERCENT);
+	const border = blendHexColors(colors.bg, colors.fg, BORDER_FG_BLEND_PERCENT);
 	const accent = colors.accent ?? colors.fg;
 	return `
     :root {
