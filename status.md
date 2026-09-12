@@ -81,8 +81,11 @@ shapes the Known Security Considerations.
    were refreshed in PR #8 to cover KaTeX/Mermaid/png/`--watch`/`--css`.
 5. Automated cross-browser PDF-export visual-fidelity check (Context.md
    Roadmap item 7) — not yet started.
-6. Full theme, template, and transition system (Context.md Roadmap item 11)
-   — deliberately deferred pending its own design pass.
+6. ~~Full theme, template, and transition system (Context.md Roadmap item 11).~~
+   Done — theme portion shipped earlier (`docs/adr/0008-named-theme-system.md`);
+   templates (4 fixed per-slide layouts) and transitions (deck-wide fade/slide,
+   scoped to a new opt-in presentation mode) shipped in this PR — see
+   `docs/adr/0009-templates-transitions-presentation-mode.md`.
 
 ## Risks & Blockers
 
