@@ -10,22 +10,49 @@ import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
 import type { TransitionName } from "./transitions.js";
 
+/**
+ * Deliberately NOT `position: fixed` at the base -- the default
+ * continuous-scroll view has no single "current slide" concept, so a
+ * fixed bottom overlay would unhide and stack EVERY slide's note at the
+ * identical screen position the moment `?notes` reveals them all at once
+ * (a real shipped bug, verified via getComputedStyle() in
+ * tests/render.test.ts's "presenter notes reveal" describe block, not a
+ * hypothetical). A revealed note here stays in normal document flow
+ * (`position: static`, the CSS default) as a bordered inline box
+ * immediately after its own slide's content, since
+ * `<aside class="notes">` is emitted inside that same slide's `<section>`
+ * (see generateHtml below).
+ *
+ * `body.presenting .notes` below re-applies the fixed bottom-overlay
+ * behavior, but scoped to real presentation mode, where
+ * `body.presenting .slide.is-active` (PRESENTATION_STYLE) guarantees
+ * exactly one slide -- and therefore at most one revealed note -- is ever
+ * visible at a time.
+ */
 const NOTES_STYLE = `
     .notes {
       display: none;
+      background: var(--nh-code-bg);
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      color: var(--nh-fg);
+      padding: 1rem 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .notes:not([hidden]) {
+      display: block;
+    }
+    body.presenting .notes {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: var(--nh-code-bg);
+      margin-top: 0;
+      border: none;
       border-top: 2px solid var(--nh-border);
-      color: var(--nh-fg);
-      padding: 1rem 1.5rem;
+      border-radius: 0;
       max-height: 30vh;
       overflow-y: auto;
-    }
-    .notes:not([hidden]) {
-      display: block;
     }
     @media print {
       .notes {

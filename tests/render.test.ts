@@ -595,6 +595,91 @@ describe("generateHtml — presenter notes", () => {
 	});
 });
 
+describe("generateHtml — presenter notes reveal (?notes) rendering scope", () => {
+	// Regression coverage for a real bug: `.notes` was unconditionally
+	// `position: fixed; bottom: 0; left: 0; right: 0`, so revealing notes via
+	// `?notes` in the default continuous-scroll view (which has no single
+	// "current slide" concept) unhid EVERY slide's <aside class="notes"> at
+	// once, and all of them stacked at the exact same fixed screen position.
+	// The fix scopes the fixed bottom-overlay behavior to `body.presenting
+	// .notes` (real presentation mode, where there genuinely is one active
+	// slide) and leaves the default view's revealed notes in normal document
+	// flow, immediately after their own slide's content.
+	const TWO_SLIDE_DECK_WITH_NOTES =
+		"# Slide 1\n\nFirst slide body.\n\n<!-- note for slide one -->\n\n---\n\n# Slide 2\n\nSecond slide body.\n\n<!-- note for slide two -->\n";
+
+	async function openNotesPage(html: string, path = "/?notes") {
+		activeServer = await startServer(html, 0);
+		const executablePath = detectBrowserExecutable();
+		activeBrowser = await puppeteer.launch({ executablePath, headless: true });
+		const page = await activeBrowser.newPage();
+		await page.goto(`${activeServer.url}${path}`, { waitUntil: "load" });
+		return page;
+	}
+
+	async function noteBoundingBoxes(
+		page: Awaited<ReturnType<typeof openNotesPage>>,
+	) {
+		return page.evaluate(() =>
+			Array.from(document.querySelectorAll(".notes")).map((el) => {
+				const rect = el.getBoundingClientRect();
+				return { top: rect.top, left: rect.left };
+			}),
+		);
+	}
+
+	it(
+		"renders each slide's revealed note at its own bounding-box position in the default continuous-scroll view, not stacked on top of each other",
+		async () => {
+			const html = generateHtml(TWO_SLIDE_DECK_WITH_NOTES);
+			const page = await openNotesPage(html);
+
+			const boxes = await noteBoundingBoxes(page);
+
+			expect(boxes).toHaveLength(2);
+			// Two notes belonging to two different slides that stack vertically
+			// in the default continuous-scroll view must land at different top
+			// offsets if each renders in-flow next to its own slide. Under the
+			// bug, both were `position: fixed; bottom: 0`, so both boxes
+			// resolved to the identical {top, left} pair.
+			expect(boxes[0].top).not.toBe(boxes[1].top);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"keeps the revealed note in normal document flow (not fixed) outside presentation mode",
+		async () => {
+			const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+			const page = await openNotesPage(html);
+
+			const position = await page.evaluate(() => {
+				const notes = document.querySelector(".notes");
+				return notes ? getComputedStyle(notes).position : null;
+			});
+
+			expect(position).not.toBe("fixed");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"still overlays the revealed note fixed to the bottom of the screen inside presentation mode",
+		async () => {
+			const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+			const page = await openNotesPage(html, "/?present&notes");
+
+			const position = await page.evaluate(() => {
+				const notes = document.querySelector(".notes");
+				return notes ? getComputedStyle(notes).position : null;
+			});
+
+			expect(position).toBe("fixed");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
 describe("generateHtml — PDF pagination", () => {
 	it("includes a print-media rule that breaks after each slide", () => {
 		const html = generateHtml("# Slide 1\n\n---\n\n# Slide 2");
