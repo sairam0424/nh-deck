@@ -4,8 +4,11 @@ import markedKatex from "marked-katex-extension";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
+import { PRESENTATION_SCRIPT } from "./presentationScript.js";
 import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
+import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
+import type { TransitionName } from "./transitions.js";
 
 const NOTES_STYLE = `
     .notes {
@@ -35,6 +38,133 @@ const PRINT_PAGINATION_STYLE = `
         break-after: page;
       }
     }`;
+
+const LAYOUT_STYLE = `
+    .slide.layout-title {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .slide.layout-title h1 {
+      font-size: 3rem;
+      border-bottom: none;
+    }
+    .slide.layout-title p:first-of-type {
+      color: var(--nh-muted);
+      font-size: 1.25rem;
+    }
+    .slide.layout-section {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .slide.layout-section h1,
+    .slide.layout-section h2 {
+      font-size: 2.5rem;
+      border-bottom: none;
+    }
+    .slide.layout-section p,
+    .slide.layout-section ul,
+    .slide.layout-section ol {
+      color: var(--nh-muted);
+      font-size: 1rem;
+    }
+    .slide.layout-two-column {
+      column-count: 2;
+      column-gap: 2rem;
+    }
+    .slide.layout-two-column h1,
+    .slide.layout-two-column h2,
+    .slide.layout-two-column h3 {
+      break-after: avoid;
+    }
+    .slide.layout-two-column pre,
+    .slide.layout-two-column table,
+    .slide.layout-two-column img {
+      break-inside: avoid;
+    }
+    .slide.layout-quote {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      min-height: 60vh;
+      text-align: center;
+    }
+    .slide.layout-quote p {
+      font-size: 1.75rem;
+      font-style: italic;
+    }
+    .slide.layout-quote p:last-of-type {
+      font-size: 1rem;
+      font-style: normal;
+      color: var(--nh-muted);
+    }`;
+
+const PRESENTATION_STYLE = `
+    body.presenting .slide {
+      display: none;
+    }
+    body.presenting .slide.is-active {
+      display: block;
+    }
+    body.presenting .presentation-counter {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      background: var(--nh-code-bg);
+      color: var(--nh-muted);
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }`;
+
+/**
+ * Overrides PRESENTATION_STYLE's plain display:none/block toggle with an
+ * animatable version for the given transition: both the active and
+ * inactive slide stay display:block (position:absolute, stacked), so
+ * opacity/transform can transition smoothly between them. Suppressible
+ * by --css, unlike PRESENTATION_STYLE itself -- see the plan's Global
+ * Constraints for why the split is drawn there.
+ */
+function transitionToCssBlock(name: TransitionName): string {
+	if (name === "fade") {
+		return `
+    body.presenting .slide {
+      display: block;
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s ease;
+    }
+    body.presenting .slide.is-active {
+      opacity: 1;
+      pointer-events: auto;
+    }`;
+	}
+	return `
+    body.presenting .slide {
+      display: block;
+      position: absolute;
+      inset: 0;
+      transform: translateX(100%);
+      opacity: 0;
+      pointer-events: none;
+      transition: transform 0.3s ease, opacity 0.3s ease;
+    }
+    body.presenting .slide.is-active {
+      transform: translateX(0);
+      opacity: 1;
+      pointer-events: auto;
+    }`;
+}
 
 /**
  * Maps a theme's {bg, fg, line, accent, muted} onto nh-deck's own CSS
@@ -130,17 +260,22 @@ export function generateHtml(
 	title?: string,
 	customCss?: string,
 	themeColors?: ThemeColors,
+	transitionName?: TransitionName,
 ): string {
 	currentMermaidColors = themeColors;
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
 		.map((slideTokens) => {
-			const notesHtml = extractNotes(slideTokens)
+			const { layout, tokens: filteredTokens } =
+				extractSlideLayout(slideTokens);
+			const { name: layoutName } = resolveLayoutName(layout);
+			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
+			const notesHtml = extractNotes(filteredTokens)
 				.map(
 					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
 				)
 				.join("\n");
-			return `<section class="slide">\n${marked.parser(slideTokens)}${notesHtml}</section>`;
+			return `<section class="slide${layoutClass}">\n${marked.parser(filteredTokens)}${notesHtml}</section>`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -155,6 +290,9 @@ export function generateHtml(
 		: "";
 	const themeOverride =
 		!customCss && themeColors ? themeToCssVarBlock(themeColors) : "";
+	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
+	const transitionStyle =
+		!customCss && transitionName ? transitionToCssBlock(transitionName) : "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -258,6 +396,9 @@ ${
     ${katexStyle}
     ${NOTES_STYLE}
     ${PRINT_PAGINATION_STYLE}
+    ${PRESENTATION_STYLE}
+    ${layoutOverride}
+    ${transitionStyle}
   </style>
 </head>
 <body>
@@ -269,6 +410,7 @@ ${slidesHtml}
       });
     }
   </script>
+  ${PRESENTATION_SCRIPT}
 </body>
 </html>
 `;

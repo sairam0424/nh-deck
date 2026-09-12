@@ -134,6 +134,132 @@ describe("generateHtml", () => {
 
 		expect(withUndefinedTheme).toBe(withoutTheme);
 	});
+
+	it("applies a layout CSS class from a slide's layout marker comment", () => {
+		const html = generateHtml(
+			"<!-- layout: title -->\n\n# Big Heading\n\nSubtitle text.",
+		);
+
+		expect(html).toContain('<section class="slide layout-title">');
+	});
+
+	it("renders a slide with no layout marker exactly as before -- no layout class", () => {
+		const html = generateHtml("# Big Heading\n\nSubtitle text.");
+
+		// LAYOUT_STYLE's CSS (like NOTES_STYLE/PRINT_PAGINATION_STYLE) is
+		// injected unconditionally -- it's scoped entirely to
+		// ".slide.layout-*" selectors, so it has zero effect on a <section>
+		// that never gets a layout-* class. The precise check for "no
+		// layout class applied" is this exact section-tag substring: a
+		// section with a layout class would render
+		// `class="slide layout-title"`, which would not match.
+		expect(html).toContain('<section class="slide">');
+	});
+
+	it("excludes a layout marker comment from both the rendered notes and the raw output", () => {
+		const html = generateHtml("<!-- layout: title -->\n\n# Heading\n");
+
+		expect(html).not.toContain("layout:");
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("silently ignores an unrecognized layout name -- no class applied, no crash", () => {
+		const html = generateHtml("<!-- layout: nonexistent -->\n\n# Heading\n");
+
+		expect(html).toContain('<section class="slide">');
+		expect(html).not.toContain("layout-nonexistent");
+	});
+
+	it("still treats a layout marker comment as an already-reviewed comment, not raw HTML", () => {
+		expect(containsUnsafeHtml("<!-- layout: title -->\n\n# Heading\n")).toBe(
+			false,
+		);
+	});
+
+	it("does not apply LAYOUT_STYLE's CSS when a custom --css is given", () => {
+		const html = generateHtml("# Heading", "sample", ".slide { color: red; }");
+
+		expect(html).not.toContain(".slide.layout-title");
+	});
+
+	it("embeds the presentation-mode script unconditionally, inert without ?present", () => {
+		const html = generateHtml(fixtureMarkdown, "sample");
+
+		expect(html).toContain('has("present")');
+	});
+
+	it("adds transition CSS when a transition name is given", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			"fade",
+		);
+
+		expect(html).toContain("transition: opacity");
+	});
+
+	it("adds a different transition's CSS for the slide transition", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			"slide",
+		);
+
+		expect(html).toContain("transform: translateX");
+	});
+
+	it("adds no transition animation CSS when no transition name is given", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(html).not.toContain("transform: translateX");
+		expect(html).not.toContain("transition: opacity");
+	});
+
+	it("does not apply transition CSS when a custom --css is given, even with a transition name", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			".slide { color: red; }",
+			undefined,
+			"fade",
+		);
+
+		expect(html).not.toContain("transition: opacity");
+	});
+
+	it("still applies presentation mode's base show/hide CSS even with a custom --css", () => {
+		const html = generateHtml("# Slide", "sample", ".slide { color: red; }");
+
+		expect(html).toContain("body.presenting .slide.is-active");
+	});
+
+	it("produces byte-identical output with no transition argument (regression guard)", () => {
+		const withoutArg = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+		);
+		const withUndefinedTransition = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedTransition).toBe(withoutArg);
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {

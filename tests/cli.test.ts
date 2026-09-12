@@ -1383,3 +1383,259 @@ describe("CLI: theme selection", () => {
 		TEST_TIMEOUT_MS,
 	);
 });
+
+describe("CLI: transition selection", () => {
+	it(
+		"applies a transition's CSS via the --transition flag on render",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--transition",
+					"fade",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain("transition: opacity");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a deck's own frontmatter transition: value when no --transition flag is given",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-transition-frontmatter-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ntransition: slide\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain("transform: translateX");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets a --transition flag override a conflicting frontmatter transition: value",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-transition-override-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ntransition: fade\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+					"--transition",
+					"slide",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain("transform: translateX");
+			expect(body).not.toContain("transition: opacity");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets --css win over a --transition flag, with a stderr note and no transition applied",
+		async () => {
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-transition-css-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css",
+					cssPath,
+					"--transition",
+					"fade",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(stderr).toContain("nh-deck: note:");
+			expect(stderr).toContain("--css overrides the requested transition");
+
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			const body = await fetchBody(url);
+			expect(body).not.toContain("transition: opacity");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(cssPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"falls back to no transition with a warning for an unrecognized --transition name",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--transition",
+					"nonexistent",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(stderr).toContain("nh-deck: warning:");
+			expect(stderr).toContain("unknown transition");
+
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			const body = await fetchBody(url);
+			expect(body).not.toContain("transform: translateX");
+			expect(body).not.toContain("transition: opacity");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"rejects --transition as an unknown option on the pdf subcommand",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-no-transition-test-${randomUUID()}.pdf`,
+			);
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--transition",
+					"fade",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).not.toBe(0);
+			expect(stderr).toContain("unknown option");
+			expect(existsSync(outputPath)).toBe(false);
+		},
+		EXIT_TIMEOUT_MS + 5_000,
+	);
+});
