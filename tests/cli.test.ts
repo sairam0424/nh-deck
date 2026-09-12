@@ -1105,6 +1105,53 @@ describe("CLI: nh-deck render --watch", () => {
 		},
 		WATCH_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"re-applies a deck's own updated frontmatter theme: value on a debounced re-render",
+		async () => {
+			const dir = mkdtempSync(path.join(tmpdir(), "nh-deck-watch-theme-"));
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "---\ntheme: light\n---\n# Slide one\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const initialBody = await fetchBody(url);
+			expect(initialBody).toContain("--nh-bg: #ffffff"); // light theme
+
+			// Edit the deck's frontmatter to a different theme, then wait for
+			// the debounced re-render to pick it up.
+			writeFileSync(deckPath, "---\ntheme: dark\n---\n# Slide one\n");
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const updatedBody = await fetchBody(url);
+			expect(updatedBody).toContain("--nh-bg: #0d1117"); // dark theme (github-dark)
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: theme selection", () => {

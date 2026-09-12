@@ -60,42 +60,44 @@ function formatActionError(error: unknown, file: string): string {
 }
 
 /**
- * Resolves the effective theme colors for a render/pdf/png invocation,
+ * Computes the effective theme colors for a render/pdf/png invocation,
  * handling frontmatter/--theme precedence and --css mutual exclusivity.
- * Prints any resulting stderr note/warning as a side effect (matching
- * this file's existing UNSAFE_HTML_WARNING pattern: non-fatal, stderr,
- * never touches process.exitCode). See
- * docs/specs/theme-system-design.md §3.5/§4 for the exact precedence
- * rules this implements.
+ * Pure -- no side effects -- so callers can print any resulting
+ * warning/note explicitly (and skip printing it on a silent
+ * recomputation, e.g. a --watch debounced re-render, matching this
+ * file's existing "warn once, not on every re-render" precedent for
+ * UNSAFE_HTML_WARNING). See docs/specs/theme-system-design.md §3.5/§4
+ * for the exact precedence rules this implements.
  *
- * Returns undefined when no theme should be applied (customCss given,
- * or nothing was requested).
+ * Returns colors: undefined when no theme should be applied (customCss
+ * given, or nothing was requested).
  */
-function resolveEffectiveTheme(
+function computeEffectiveTheme(
 	frontmatterTheme: string | undefined,
 	flagTheme: string | undefined,
 	customCss: string | undefined,
-): ThemeColors | undefined {
+): { colors: ThemeColors | undefined; message?: string } {
 	const requested = flagTheme ?? frontmatterTheme;
 
 	if (customCss) {
 		if (requested) {
-			process.stderr.write(
-				`nh-deck: note: --css overrides the requested theme '${requested}'; it was not applied.\n`,
-			);
+			return {
+				colors: undefined,
+				message: `nh-deck: note: --css overrides the requested theme '${requested}'; it was not applied.\n`,
+			};
 		}
-		return undefined;
+		return { colors: undefined };
 	}
 
 	if (!requested) {
-		return undefined;
+		return { colors: undefined };
 	}
 
 	const { name, warning } = resolveThemeName(requested);
-	if (warning) {
-		process.stderr.write(`${warning}\n`);
-	}
-	return THEMES[name].colors;
+	return {
+		colors: THEMES[name].colors,
+		message: warning ? `${warning}\n` : undefined,
+	};
 }
 
 const program = new Command();
@@ -144,11 +146,11 @@ program
 					process.stderr.write(UNSAFE_HTML_WARNING);
 				}
 				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
-				const themeColors = resolveEffectiveTheme(
-					frontmatter.theme,
-					options.theme,
-					customCss,
-				);
+				const { colors: themeColors, message: themeMessage } =
+					computeEffectiveTheme(frontmatter.theme, options.theme, customCss);
+				if (themeMessage) {
+					process.stderr.write(themeMessage);
+				}
 				const html = generateHtml(markdown, file, customCss, themeColors);
 				const { url, updateHtml, server } = await startServer(
 					html,
@@ -164,10 +166,20 @@ program
 					const rerender = debounce(() => {
 						try {
 							const updatedRawMarkdown = readFileSync(file, "utf8");
-							const { body: updatedMarkdown } =
+							const { frontmatter: updatedFrontmatter, body: updatedMarkdown } =
 								parseFrontmatter(updatedRawMarkdown);
+							const { colors: updatedThemeColors } = computeEffectiveTheme(
+								updatedFrontmatter.theme,
+								options.theme,
+								customCss,
+							);
 							updateHtml(
-								generateHtml(updatedMarkdown, file, customCss, themeColors),
+								generateHtml(
+									updatedMarkdown,
+									file,
+									customCss,
+									updatedThemeColors,
+								),
 							);
 						} catch {
 							// A transient read failure (e.g. mid-save) is not fatal — the
@@ -214,11 +226,11 @@ program
 					process.stderr.write(UNSAFE_HTML_WARNING);
 				}
 				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
-				const themeColors = resolveEffectiveTheme(
-					frontmatter.theme,
-					options?.theme,
-					customCss,
-				);
+				const { colors: themeColors, message: themeMessage } =
+					computeEffectiveTheme(frontmatter.theme, options?.theme, customCss);
+				if (themeMessage) {
+					process.stderr.write(themeMessage);
+				}
 				const html = generateHtml(markdown, file, customCss, themeColors);
 				const outputPath = resolveOutputPath(file, output);
 
@@ -257,11 +269,11 @@ program
 					process.stderr.write(UNSAFE_HTML_WARNING);
 				}
 				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
-				const themeColors = resolveEffectiveTheme(
-					frontmatter.theme,
-					options?.theme,
-					customCss,
-				);
+				const { colors: themeColors, message: themeMessage } =
+					computeEffectiveTheme(frontmatter.theme, options?.theme, customCss);
+				if (themeMessage) {
+					process.stderr.write(themeMessage);
+				}
 				const html = generateHtml(markdown, file, customCss, themeColors);
 				const outputPath = resolveOutputPath(file, output, "png");
 

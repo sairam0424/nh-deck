@@ -61,6 +61,16 @@ function themeToCssVarBlock(colors: ThemeColors): string {
 
 marked.use(markedKatex({ throwOnError: false }));
 
+// Set at the top of generateHtml (below) and read inside the code()
+// renderer override's mermaid branch. Safe despite being module-level
+// mutable state: generateHtml is fully synchronous end to end (no
+// `await` anywhere in its call chain), and marked.use() registers this
+// renderer once at module load -- it has no other way to receive
+// per-call data, since it isn't invoked as part of a per-call closure.
+// Node's single-threaded execution model guarantees no other
+// generateHtml() call can interleave and observe a stale value here.
+let currentMermaidColors: ThemeColors | undefined;
+
 marked.use({
 	useNewRenderer: true,
 	renderer: {
@@ -68,7 +78,7 @@ marked.use({
 			const langString = (lang ?? "").match(/^\S*/)?.[0];
 
 			if (langString === "mermaid") {
-				return renderMermaidDiagram(text);
+				return renderMermaidDiagram(text, currentMermaidColors);
 			}
 
 			// Everything below exactly replicates marked@13.0.3's own default
@@ -122,6 +132,7 @@ export function generateHtml(
 	customCss?: string,
 	themeColors?: ThemeColors,
 ): string {
+	currentMermaidColors = themeColors;
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
 		.map((slideTokens) => {

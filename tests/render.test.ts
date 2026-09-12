@@ -97,6 +97,43 @@ describe("generateHtml", () => {
 		expect(withoutTheme).toContain("#e6e6e6");
 		expect(withoutTheme).toContain("#121212");
 	});
+
+	it("recolors Mermaid diagrams to match the active theme", () => {
+		const deckWithDiagram = "```mermaid\nflowchart TD\n  A --> B\n```\n";
+
+		const lightHtml = generateHtml(deckWithDiagram, "sample", undefined, {
+			bg: "#ffffff",
+			fg: "#1f2328",
+		});
+		const darkHtml = generateHtml(deckWithDiagram, "sample", undefined, {
+			bg: "#0d1117",
+			fg: "#e6edf3",
+		});
+
+		expect(lightHtml).not.toBe(darkHtml);
+		// The dark theme's bg should actually appear somewhere in the rendered
+		// Mermaid SVG (fill/background attribute), not just in the CSS
+		// custom-property block generated for the base deck.
+		const svgOnly = darkHtml.slice(
+			darkHtml.indexOf("<svg"),
+			darkHtml.indexOf("</svg>") + "</svg>".length,
+		);
+		expect(svgOnly).toContain("#0d1117");
+	});
+
+	it("renders Mermaid diagrams identically to today when no theme is active", () => {
+		const deckWithDiagram = "```mermaid\nflowchart TD\n  A --> B\n```\n";
+
+		const withoutTheme = generateHtml(deckWithDiagram, "sample");
+		const withUndefinedTheme = generateHtml(
+			deckWithDiagram,
+			"sample",
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedTheme).toBe(withoutTheme);
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {
