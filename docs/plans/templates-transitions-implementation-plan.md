@@ -1543,8 +1543,15 @@ describe("presentation mode", () => {
 	it(
 		"does not advance when clicking a link inside slide content",
 		async () => {
+			// A same-page anchor href, not a real external URL: the click
+			// handler deliberately never calls preventDefault() for a link
+			// click (links inside slide content are meant to keep working
+			// normally, per the design), so an external URL here would
+			// genuinely navigate the page away -- this only needs to prove
+			// that clicking a link never ALSO calls goTo(), which a same-page
+			// hash change proves without leaving the page.
 			const deckWithLink =
-				"# Slide 1\n\n[a link](https://example.com)\n\n---\n\n# Slide 2\n\nSecond.";
+				"# Slide 1\n\n[a link](#somewhere)\n\n---\n\n# Slide 2\n\nSecond.";
 			const page = await openPresentationPage(generateHtml(deckWithLink));
 
 			await page.click(".slide.is-active a");
