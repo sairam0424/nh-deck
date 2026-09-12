@@ -56,12 +56,22 @@ describe("exportToPng — post-launch export failure", () => {
 	});
 
 	it("wraps a screenshot failure after a successful launch in a friendly error and still closes the browser (no orphaned process)", async () => {
+		// Built via node:path's own join/dirname (not a hardcoded POSIX
+		// literal) so the expected mock-call path matches pngExport.ts's
+		// real platform-specific separator on Windows too.
+		const outputPath = join(tmpdir(), "nh-deck-does-not-exist", "deck.png");
+		const firstSlidePath = join(
+			tmpdir(),
+			"nh-deck-does-not-exist",
+			"deck-1.png",
+		);
+
 		const closeBrowser = vi.fn().mockResolvedValue(undefined);
 		const screenshot = vi
 			.fn()
 			.mockRejectedValue(
 				new Error(
-					"ENOENT: no such file or directory, open '/tmp/nh-deck-does-not-exist/deck-1.png'",
+					`ENOENT: no such file or directory, open '${firstSlidePath}'`,
 				),
 			);
 
@@ -82,17 +92,13 @@ describe("exportToPng — post-launch export failure", () => {
 		const { exportToPng } = await import("../src/pngExport.js");
 
 		await expect(
-			exportToPng(
-				"<html></html>",
-				"/tmp/nh-deck-does-not-exist/deck.png",
-				"/fake/override/chrome",
-			),
+			exportToPng("<html></html>", outputPath, "/fake/override/chrome"),
 		).rejects.toThrow(
 			/Failed to export PNG using \/fake\/override\/chrome: ENOENT/,
 		);
 
 		expect(screenshot).toHaveBeenCalledWith({
-			path: "/tmp/nh-deck-does-not-exist/deck-1.png",
+			path: firstSlidePath,
 		});
 		// The browser must still be closed via the `finally` block even though
 		// the failure happened after a successful launch -- this is what
