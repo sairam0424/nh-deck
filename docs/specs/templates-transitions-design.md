@@ -44,13 +44,12 @@ export type LayoutName = (typeof LAYOUTS)[number];
 
 export function resolveLayoutName(requested: string | undefined): {
   name?: LayoutName;
-  warning?: string;
 };
 ```
 
-Unknown requested name → `{name: undefined, warning: "..."}`, same fallback+warning shape as `resolveThemeName`.
+**Revised during implementation planning:** unlike theme names, an unrecognized layout name has no clean way to surface a warning — layout markers are discovered *inside* `generateHtml`'s own marked-lexing pipeline (per slide), not up front from simple frontmatter like a theme name. Surfacing a warning here would require either changing `generateHtml`'s return type from a plain string (a real breaking change touching every existing test that calls it) or a circular import between `render.ts` and `slideLayouts.ts`. Decision: **unrecognized layout names are a silent no-op** — no CSS class is applied at all, identical to no marker being present. `resolveLayoutName` therefore has no `warning` field; unknown input simply returns `{}`.
 
-Also exports `isLayoutMarkerComment(text: string): boolean` and `extractSlideLayout(tokens: Token[]): { layout?: string; tokens: Token[] }` — the latter scans a slide's token array for the first `html`-type token matching `/^layout:\s*(\S+)/` (after the shared `HTML_COMMENT_PATTERN` unwrap already defined in `presenterNotes.ts`), returning the extracted name and the token array with that comment token removed. If more than one layout comment appears on a slide, the first one found wins; the rest are ignored silently.
+Also exports `extractSlideLayout(tokens: Token[]): { layout?: string; tokens: Token[] }`, which scans a slide's token array for a standalone `<!-- layout: name -->` comment (after the same `HTML_COMMENT_PATTERN` unwrap `presenterNotes.ts` already uses), returning the *raw* requested name (not yet validated — callers pass it through `resolveLayoutName`) and the token array with **every** matching layout-marker comment removed. If more than one layout comment appears on a slide, the first one found wins the `layout` field, but all of them are removed from the returned tokens — this is what keeps a layout marker from ever being rendered as a presenter note (see §3.4 below), without needing any change to `presenterNotes.ts` itself.
 
 ### 3.2 New file: `src/transitions.ts`
 
@@ -75,15 +74,15 @@ Exports a single string constant, `PRESENTATION_SCRIPT`, containing the client-s
 - Listens for `ArrowRight`/`Space` (advance) and `ArrowLeft` (back) `keydown` events, and `click` on the document body **except** when the click target is or is inside an `<a>` element (so links inside slide content keep working).
 - On every navigation, updates `location.hash` to the new index (survives `--watch`'s `location.reload()`, since the hash is not part of what a reload discards) and re-applies the `hidden` toggling.
 
-### 3.4 `presenterNotes.ts` changes
+### 3.4 `presenterNotes.ts` — no changes needed
 
-`extractNotes` gains a one-line exclusion: any comment token recognized by the new `isLayoutMarkerComment` (from `slideLayouts.ts`) is skipped, so a `<!-- layout: title -->` marker is never also swept up and rendered as a presenter note. `isPresenterNoteComment`'s own matching is unchanged — it still recognizes the layout-marker comment as a comment (needed for the existing `containsUnsafeHtml` exemption), it just isn't also treated as note *content*.
+**Revised during implementation planning:** the collision between a layout marker and presenter-note extraction is resolved entirely by *ordering* in `render.ts`'s per-slide loop (§3.5) — `extractSlideLayout` runs first and removes every layout-marker comment from the token array, and only the *filtered* array is ever passed to `extractNotes`. Since `extractNotes` never sees a layout-marker token in the first place, it needs no modification at all; its own matching logic (and `isPresenterNoteComment`'s) stays exactly as-is.
 
 ### 3.5 `render.ts` changes
 
-- New `LAYOUT_STYLE` constant (alongside the existing `NOTES_STYLE`/`PRINT_PAGINATION_STYLE`) defining the 4 layouts' CSS: `title` centers content vertically with a larger first heading; `section` is a minimal big-heading divider; `quote` centers text with the last paragraph styled as a smaller attribution line; `two-column` uses `column-count: 2` to auto-flow the slide's existing content — no new Markdown split-syntax.
+- New `LAYOUT_STYLE` constant (alongside the existing `NOTES_STYLE`/`PRINT_PAGINATION_STYLE`) defining the 4 layouts' CSS: `title` centers content vertically with a larger first heading; `section` is a minimal big-heading divider that de-emphasizes (not hides — hiding user-written content would be editorializing) body text below the heading; `quote` centers text with the last paragraph styled as a smaller attribution line; `two-column` uses `column-count: 2` to auto-flow the slide's existing content — no new Markdown split-syntax.
 - New transition CSS block, generated from the resolved `transitionName`: `fade` animates `opacity` on the `hidden`-attribute toggle presentation mode already does; `slide` animates a `transform: translateX(...)`.
-- Per-slide rendering loop calls `extractSlideLayout` before `extractNotes`, applying the resolved layout name as an additional CSS class on that slide's `<section class="slide">` wrapper (`<section class="slide layout-title">`).
+- Per-slide rendering loop calls `extractSlideLayout(slideTokens)` **before** `extractNotes`, passing the returned filtered token array to both `extractNotes` and `marked.parser` (not the original `slideTokens`), and applies the resolved layout name as an additional CSS class on that slide's `<section class="slide">` wrapper (`<section class="slide layout-title">`).
 - `generateHtml` gains a 5th optional positional parameter, `transitionName?: TransitionName`, continuing the existing pattern (`themeColors` was added as the 4th). `PRESENTATION_SCRIPT` is always embedded (inert without `?present`, same as the existing `?notes` script).
 - Both `LAYOUT_STYLE` and the transition CSS block are omitted when `customCss` is set, matching how `themeOverride` is already omitted — `--css` replaces everything.
 
@@ -96,17 +95,16 @@ Exports a single string constant, `PRESENTATION_SCRIPT`, containing the client-s
 
 ## 4. Error handling summary
 
-- Unknown `--transition`/frontmatter `transition:` name → falls back to no transition, one-time stderr warning (same shape as the theme system's unknown-name handling).
-- Unknown `layout:` marker name → falls back to no layout, one-time stderr warning, same pattern.
-- Two conflicting layout comments on one slide → first found wins, rest silently ignored (matches how a `--theme`-vs-frontmatter conflict already resolves: first-applicable-wins, not an error).
+- Unknown `--transition`/frontmatter `transition:` name → falls back to no transition, one-time stderr warning (same shape as the theme system's unknown-name handling; resolved up front from frontmatter, same as themes, so the warning-printing mechanism poses no problem here).
+- Unknown `layout:` marker name → silent no-op, no CSS class applied, no warning (see §3.1's revision — `generateHtml` has no clean way to surface a per-slide warning without a breaking API change).
+- Two conflicting layout comments on one slide → first found wins the applied name, but every matching comment is removed from the token stream regardless (matches how a `--theme`-vs-frontmatter conflict already resolves: first-applicable-wins, not an error).
 - A layout-marker comment is still a valid, "already reviewed" comment for `containsUnsafeHtml`'s purposes — it does not trip the raw-HTML warning, same as a presenter note.
 
 ## 5. Testing plan
 
-- `tests/slideLayouts.test.ts` — `resolveLayoutName`'s known/unknown/case-insensitivity behavior; `extractSlideLayout`'s comment-matching and multi-comment-first-wins behavior.
+- `tests/slideLayouts.test.ts` — `resolveLayoutName`'s known/unknown(silent)/case-insensitivity behavior; `extractSlideLayout`'s comment-matching, multi-comment-first-wins behavior, and that a plain presenter note is never mistaken for a layout marker.
 - `tests/transitions.test.ts` — `resolveTransitionName`'s known/unknown/case-insensitivity behavior.
-- `tests/presenterNotes.test.ts` — extended: a layout-marker comment is excluded from `extractNotes`'s output but still recognized by `isPresenterNoteComment`.
-- `tests/render.test.ts` — extended: each layout applies its CSS class; a slide with no layout marker renders byte-identical to today (regression guard, mirroring the theme system's own precedent); transition CSS block presence/absence matches the resolved transition name; `--css` suppresses both layout and transition CSS.
+- `tests/render.test.ts` — extended: each layout applies its CSS class; a slide with no layout marker renders byte-identical to today (regression guard, mirroring the theme system's own precedent); a layout-marker comment is excluded from both the rendered notes and the raw HTML output; transition CSS block presence/absence matches the resolved transition name; `--css` suppresses both layout and transition CSS.
 - `tests/cli.test.ts` — extended: `--transition` flag, frontmatter `transition:` key, flag-wins-over-frontmatter precedence, `--css`-wins-over-transition, unknown-transition-name warning; `pdf`/`png` reject or ignore `--transition` (no such flag exists on those subcommands).
 - `tests/presentationMode.test.ts` (new) — real, unmocked browser test via the existing `detectBrowserExecutable()` helper (same philosophy as `pdfExport.test.ts`/`pngExport.test.ts`): launches a real browser against a served `?present` URL, dispatches real `ArrowRight`/`ArrowLeft`/click `keydown`/`click` events, and asserts on DOM state (which `.slide` is visible, `location.hash` value) and that a reload preserves the current slide via the hash.
 
