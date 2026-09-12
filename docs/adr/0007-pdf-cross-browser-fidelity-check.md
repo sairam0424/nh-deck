@@ -242,22 +242,21 @@ Consequences below.
   against two genuinely different real browser builds enough times to
   build a track record. Revisit the threshold, not the overall approach, if
   either failure mode shows up in practice.
-- **The CI job's exact behavior has not yet been observed on a live GitHub
-  Actions run.** This ADR's second-browser-detection reasoning was verified
-  against primary sources (`actions/runner-images`' own
-  `install-google-chrome.sh` build script, and `browser-actions/setup-chrome`'s
-  own README and `action.yml`) and the pixel-diff/page-count comparison
-  logic itself was verified empirically end-to-end on this development
-  machine (comparing the same real local Chrome install against itself via
-  `exportToPng()`/`exportToPdf()` with `executablePathOverride`, which
-  produced the expected 0% pixel difference and matching PDF page counts)
-  -- but this development environment has only one detectable browser, so
-  the specific "does `CHROME_PATH` plus the runner's pre-installed Chrome
-  actually yield 2 distinct `chrome-launcher` detections on a real
-  `ubuntu-latest` runner" claim is verified by source inspection, not by an
-  actual CI run, as of this ADR. Confirm on the first real PR that triggers
-  the `pdf-fidelity-check` job, and correct this ADR if the runner behaves
-  differently than reasoned here.
+- **The CI job's behavior has now been confirmed on live `ubuntu-latest`
+  GitHub Actions runs** (first observed on the run for PR #17, and
+  reconfirmed on multiple `main` runs since, e.g. run `34686464947` on
+  2026-09-12). The predicted 2-browser detection holds exactly as reasoned:
+  `chrome-launcher` finds both `browser-actions/setup-chrome`'s install
+  (`Browser A: /opt/hostedtoolcache/setup-chrome/chrome/.../chrome`) and the
+  runner image's pre-installed system Chrome via `CHROME_PATH`
+  (`Browser B: /usr/bin/google-chrome-stable`). Every observed run has
+  printed `PNG pixel-diff: 0.000% (tolerance 2%) -- PASS` and a matching
+  PDF page count -- i.e. two genuinely different Chrome builds, not two
+  paths to the same binary, comparing byte-for-byte identical on this
+  deck's rendering path so far. The 2% tolerance therefore remains
+  unexercised in the sense that no observed run has ever produced a
+  nonzero diff; the note above about revisiting the threshold if that
+  changes still applies.
 
 ## Confirmation
 
