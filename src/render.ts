@@ -359,6 +359,7 @@ ${
     code {
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       background: var(--nh-code-bg);
+      color: var(--nh-fg);
       padding: 0.15em 0.35em;
       border-radius: 4px;
       font-size: 0.9em;
