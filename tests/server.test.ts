@@ -126,4 +126,104 @@ describe("startServer — watch mode", () => {
 
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
+
+	/**
+	 * Connects a raw http.get() SSE client to the reload endpoint and
+	 * resolves once headers arrive (registration on the server's
+	 * sseClients array happens synchronously before headers are flushed,
+	 * matching the reasoning in the single-client reload test above).
+	 * Returns both the request (so a test can later req.destroy() it to
+	 * simulate a dropped connection) and a promise for the first message
+	 * chunk it receives.
+	 */
+	function connectSseClient(
+		url: string,
+	): Promise<{ req: http.ClientRequest; messagePromise: Promise<string> }> {
+		return new Promise((resolveConnect, rejectConnect) => {
+			const req = http.get(`${url}/__nh-deck-reload`, (res) => {
+				const messagePromise = new Promise<string>(
+					(resolveMessage, rejectMessage) => {
+						res.on("data", (chunk: Buffer) => resolveMessage(chunk.toString()));
+						res.on("error", rejectMessage);
+					},
+				);
+				resolveConnect({ req, messagePromise });
+			});
+			req.on("error", rejectConnect);
+		});
+	}
+
+	it("pushes a reload event to every connected SSE client, not just one", async () => {
+		const { server, url, updateHtml } = await startServer("<p>v1</p>", 0, {
+			watch: true,
+		});
+
+		const clientA = await connectSseClient(url);
+		const clientB = await connectSseClient(url);
+
+		updateHtml("<p>v2</p>");
+
+		const [messageA, messageB] = await Promise.all([
+			clientA.messagePromise,
+			clientB.messagePromise,
+		]);
+		expect(messageA).toContain("data: reload");
+		expect(messageB).toContain("data: reload");
+
+		clientA.req.destroy();
+		clientB.req.destroy();
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("does not crash or block delivery to other SSE clients when one client's connection is destroyed", async () => {
+		// NOTE ON SCOPE: this test proves the broadcast loop is resilient to a
+		// dead socket -- it does NOT prove the server.ts `req.on("close", ...)`
+		// splice-cleanup logic actually ran. `sseClients` is a private closure
+		// variable with no accessor on `StartedServer`, so this suite has no
+		// way to observe its length from outside and cannot assert that a
+		// destroyed client was removed from it. Node's `res.write()` on an
+		// already-destroyed `http.ServerResponse` returns `false` silently
+		// rather than throwing or emitting an `error` event, so this
+		// broadcast would still reach clientB and still not crash even if the
+		// splice never ran. Treat dead-socket *cleanup* (the leak-prevention
+		// concern -- an unbounded `sseClients` array from tabs that were
+		// closed without a graceful disconnect) as behaviorally unverified by
+		// this suite until `StartedServer` exposes something to inspect it.
+		const { server, url, updateHtml } = await startServer("<p>v1</p>", 0, {
+			watch: true,
+		});
+
+		const clientA = await connectSseClient(url);
+		const clientB = await connectSseClient(url);
+
+		// clientA's own message promise never resolves once its connection is
+		// destroyed below -- mark it handled so the abort surfaces as neither
+		// an unhandled rejection nor a false test failure.
+		clientA.messagePromise.catch(() => {});
+
+		// Simulate a dropped connection (closed tab, lost network) by
+		// destroying the socket directly rather than a graceful req.end(). A
+		// promise on the destroyed request's own "close" event (rather than a
+		// fixed sleep) waits for the client side to observe the disconnect
+		// before the next broadcast, with no arbitrary delay needed.
+		const clientAClosed = new Promise<void>((resolve) =>
+			clientA.req.once("close", resolve),
+		);
+		clientA.req.destroy();
+		await clientAClosed;
+
+		updateHtml("<p>v2</p>");
+
+		// The remaining client must still receive the reload event, and the
+		// broadcast loop must not throw partway through iterating a client
+		// list that still contains (or has already dropped) clientA's dead
+		// response object.
+		const message = await clientB.messagePromise;
+		expect(message).toContain("data: reload");
+
+		clientB.req.destroy();
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
 });

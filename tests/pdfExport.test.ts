@@ -3,7 +3,8 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import puppeteer from "puppeteer-core";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportToPdf } from "../src/pdfExport.js";
 import { generateHtml } from "../src/render.js";
 
@@ -74,6 +75,102 @@ describe("exportToPdf", () => {
 				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
 			).length;
 			expect(pageCount).toBe(3);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+// Cross-platform check for whether an OS process is still alive. Signal 0
+// sends no actual signal -- per Node's docs, it's the standard portable way
+// to test for a process's existence, including on Windows (part of this
+// project's own CI matrix).
+function isProcessRunning(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (error) {
+		// ESRCH ("no such process") is the only case that proves the process is
+		// actually gone. Any other failure (e.g. EPERM) means the process still
+		// exists but we can't signal it -- treat that as "still running" rather
+		// than risk a false "closed cleanly".
+		return (error as NodeJS.ErrnoException).code !== "ESRCH";
+	}
+}
+
+describe("exportToPdf — export failure after a successful browser launch", () => {
+	afterEach(() => {
+		vi.restoreAllMocks();
+	});
+
+	it(
+		"wraps the error in a clear message and leaves no orphaned browser process behind",
+		async () => {
+			const html = generateHtml(fixtureMarkdown, "sample");
+
+			// A path inside a directory that was never created. Unlike
+			// pdfExport.launchFailure.test.ts (which mocks puppeteer.launch()
+			// itself to reject, so `browser` stays undefined and the finally
+			// block's `await browser?.close()` is a no-op), this lets
+			// puppeteer.launch() succeed normally -- a real browser process
+			// starts up -- and it's page.pdf() that fails afterward, because its
+			// output directory doesn't exist. This is the realistic failure case
+			// that actually exercises `browser.close()` against a live handle.
+			const outputDir = path.join(
+				tmpdir(),
+				`nh-deck-pdf-export-missing-dir-${randomUUID()}`,
+			);
+			const outputPath = path.join(outputDir, "deck.pdf");
+
+			// Spy (not mock) on the real puppeteer-core launch call, capturing
+			// the real Browser instance it resolves to, so the test can inspect
+			// the real OS process behind it without faking any part of the
+			// export path itself. `.mockImplementation` still calls through to
+			// the original launch -- it only adds the capture.
+			type LaunchFn = typeof puppeteer.launch;
+			const originalLaunch: LaunchFn = puppeteer.launch.bind(puppeteer);
+			let launchedBrowser: Awaited<ReturnType<LaunchFn>> | undefined;
+			const launchSpy = vi
+				.spyOn(puppeteer, "launch")
+				.mockImplementation(async (...args: Parameters<LaunchFn>) => {
+					const browser = await originalLaunch(...args);
+					launchedBrowser = browser;
+					return browser;
+				});
+
+			try {
+				// The thrown error must match exportToPdf's catch-block format
+				// (`Failed to export PDF using ${executablePath}: ${message}`) --
+				// a clear, actionable message, not a raw Puppeteer/Node stack trace
+				// leaking out of the try block.
+				await expect(exportToPdf(html, outputPath)).rejects.toThrow(
+					/^Failed to export PDF using .+: /,
+				);
+
+				expect(launchSpy).toHaveBeenCalledTimes(1);
+
+				const browserProcess = launchedBrowser?.process() ?? null;
+				expect(browserProcess).not.toBeNull();
+
+				const pid = browserProcess?.pid;
+				if (typeof pid !== "number") {
+					throw new Error(
+						"Expected the real puppeteer.launch() call to return a browser with a live process pid",
+					);
+				}
+
+				// exportToPdf() has already rejected by this point, so its finally
+				// block's `await browser?.close()` has already run to completion --
+				// @puppeteer/browsers' close() only resolves once the underlying
+				// child process's real "exit" event has fired. Asserting the OS-level
+				// pid is actually gone (not just that puppeteer's CDP session
+				// disconnected) proves browser.close() ran against a real, live
+				// browser and didn't leave an orphaned process behind.
+				expect(isProcessRunning(pid)).toBe(false);
+
+				expect(existsSync(outputPath)).toBe(false);
+			} finally {
+				rmSync(outputDir, { recursive: true, force: true });
+			}
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);

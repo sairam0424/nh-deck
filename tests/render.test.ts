@@ -1,8 +1,12 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import puppeteer from "puppeteer-core";
+import { afterEach, describe, expect, it } from "vitest";
+import { detectBrowserExecutable } from "../src/browserLaunch.js";
 import { containsUnsafeHtml, generateHtml } from "../src/render.js";
+import type { StartedServer } from "../src/server.js";
+import { startServer } from "../src/server.js";
 
 // NOTE on the ".js" import extension above: this project uses TypeScript's
 // NodeNext module resolution (see src/index.ts, which imports "./render.js"
@@ -13,6 +17,45 @@ import { containsUnsafeHtml, generateHtml } from "../src/render.js";
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
 const fixturePath = path.join(repoRoot, "fixtures", "sample.md");
 const fixtureMarkdown = readFileSync(fixturePath, "utf8");
+
+// The quote-layout CSS specificity bug (a lone paragraph is trivially also
+// :last-of-type) can only be proven wrong -- or proven fixed -- by asking a
+// real browser to resolve the cascade via getComputedStyle(); a string
+// assertion on the CSS text can't tell you which rule actually won. This
+// launches a real, unmocked browser via the same detectBrowserExecutable()
+// helper presentationMode.test.ts/pdfExport.test.ts already use. Budgeted
+// generously (matching those tests' own timeout) for the same reason.
+const STYLE_TEST_TIMEOUT_MS = 60_000;
+
+let activeServer: StartedServer | undefined;
+let activeBrowser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
+
+afterEach(async () => {
+	await activeBrowser?.close();
+	activeBrowser = undefined;
+	activeServer?.server.close();
+	activeServer = undefined;
+});
+
+async function openHtmlPage(html: string) {
+	activeServer = await startServer(html, 0);
+	const executablePath = detectBrowserExecutable();
+	activeBrowser = await puppeteer.launch({ executablePath, headless: true });
+	const page = await activeBrowser.newPage();
+	await page.goto(activeServer.url, { waitUntil: "load" });
+	return page;
+}
+
+async function quoteParagraphStyles(
+	page: Awaited<ReturnType<typeof openHtmlPage>>,
+) {
+	return page.evaluate(() =>
+		Array.from(document.querySelectorAll(".slide.layout-quote p")).map((p) => {
+			const computed = getComputedStyle(p);
+			return { fontSize: computed.fontSize, fontStyle: computed.fontStyle };
+		}),
+	);
+}
 
 describe("generateHtml", () => {
 	it("renders a complete, self-contained HTML document", () => {
@@ -566,5 +609,140 @@ describe("containsUnsafeHtml", () => {
 				"# Slide One\n\nFirst slide body.\n\n<!-- remember to smile -->\n\n---\n\n# Slide Two\n\nSecond slide body.\n\n<!-- pause for questions -->\n",
 			),
 		).toBe(false);
+	});
+});
+
+describe("generateHtml — quote layout single-paragraph bug", () => {
+	it(
+		"renders a single-paragraph quote as large italic text, not small muted text",
+		async () => {
+			const html = generateHtml(
+				"<!-- layout: quote -->\n\nJust one paragraph of quote text.",
+			);
+			const page = await openHtmlPage(html);
+
+			const styles = await quoteParagraphStyles(page);
+
+			expect(styles).toHaveLength(1);
+			expect(styles[0].fontStyle).toBe("italic");
+			expect(styles[0].fontSize).toBe("28px");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"renders a two-paragraph quote's attribution line as small, muted, non-italic text, and the quote itself as large italic text",
+		async () => {
+			const html = generateHtml(
+				"<!-- layout: quote -->\n\nThe quote itself.\n\n— Attribution",
+			);
+			const page = await openHtmlPage(html);
+
+			const styles = await quoteParagraphStyles(page);
+
+			expect(styles).toHaveLength(2);
+			expect(styles[0].fontStyle).toBe("italic");
+			expect(styles[0].fontSize).toBe("28px");
+			expect(styles[1].fontStyle).toBe("normal");
+			expect(styles[1].fontSize).toBe("16px");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("generateHtml — two-column layout break-inside protection", () => {
+	it("includes svg alongside pre/table/img in the two-column break-inside:avoid selector list", () => {
+		const html = generateHtml("<!-- layout: two-column -->\n\nSome text.");
+
+		expect(html).toMatch(
+			/\.slide\.layout-two-column pre,\s*\n?\s*\.slide\.layout-two-column table,\s*\n?\s*\.slide\.layout-two-column img,\s*\n?\s*\.slide\.layout-two-column svg\s*\{\s*\n?\s*break-inside:\s*avoid;/,
+		);
+	});
+
+	it("protects a Mermaid diagram's raw <svg> output on a two-column slide from a mid-diagram page break", () => {
+		const html = generateHtml(
+			"<!-- layout: two-column -->\n\n```mermaid\nflowchart TD\n  A --> B\n```",
+		);
+
+		// renderMermaidDiagram() returns a bare <svg>, not wrapped in
+		// pre/table/img -- without the fix, this diagram would have no
+		// break-inside protection at all inside a two-column layout.
+		expect(html).toContain("<svg");
+		expect(html).toMatch(
+			/\.slide\.layout-two-column svg\s*\{\s*\n?\s*break-inside:\s*avoid;/,
+		);
+	});
+});
+
+describe("generateHtml — themed notes panel", () => {
+	const DRACULA_COLORS = {
+		bg: "#282a36",
+		fg: "#f8f8f2",
+		line: "#6272a4",
+		accent: "#bd93f9",
+		muted: "#6272a4",
+	};
+	const NORD_COLORS = {
+		bg: "#2e3440",
+		fg: "#d8dee9",
+		line: "#4c566a",
+		accent: "#88c0d0",
+		muted: "#616e88",
+	};
+
+	function notesRule(html: string): string {
+		const match = html.match(/\.notes\s*\{[^}]*\}/);
+		if (!match) {
+			throw new Error("no .notes rule found in generated HTML");
+		}
+		return match[0];
+	}
+
+	it("no longer hardcodes the old cream/gold hex colors in the .notes rule", () => {
+		const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+		const rule = notesRule(html);
+
+		expect(rule).not.toContain("#fffbe6");
+		expect(rule).not.toContain("#e0c46c");
+	});
+
+	it("styles the notes panel via the ambient theme's CSS custom properties, not fixed colors", () => {
+		const html = generateHtml(
+			"# Slide\n\n<!-- a note -->\n",
+			"sample",
+			undefined,
+			DRACULA_COLORS,
+		);
+		const rule = notesRule(html);
+
+		expect(rule).toContain("var(--nh-code-bg)");
+		expect(rule).toContain("var(--nh-border)");
+		expect(rule).toContain("var(--nh-fg)");
+	});
+
+	it("resolves to genuinely different colors for two different dark themes, proving the panel is theme-derived rather than a fixed color that happens to look neutral", () => {
+		const draculaHtml = generateHtml(
+			"# Slide\n\n<!-- a note -->\n",
+			"sample",
+			undefined,
+			DRACULA_COLORS,
+		);
+		const nordHtml = generateHtml(
+			"# Slide\n\n<!-- a note -->\n",
+			"sample",
+			undefined,
+			NORD_COLORS,
+		);
+
+		// The .notes rule text itself is identical between themes (it always
+		// references the same var() names) -- it's the surrounding :root
+		// block's variable *values* that must differ per theme for the panel
+		// to actually look different on screen.
+		expect(notesRule(draculaHtml)).toBe(notesRule(nordHtml));
+		expect(draculaHtml).toContain("--nh-code-bg: #6272a4");
+		expect(nordHtml).toContain("--nh-code-bg: #616e88");
+		expect(draculaHtml).toContain("--nh-border: #6272a4");
+		expect(nordHtml).toContain("--nh-border: #4c566a");
+		expect(draculaHtml).not.toBe(nordHtml);
 	});
 });

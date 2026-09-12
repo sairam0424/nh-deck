@@ -407,6 +407,46 @@ describe("CLI: nh-deck render — error handling", () => {
 	);
 
 	it(
+		"omits both --open and --no-open and still fails via the same clean ENOENT error path, confirming --open's default never diverts Commander's parsing before the open() call it would otherwise gate",
+		async () => {
+			// Every other render test in this file passes --no-open explicitly,
+			// so this is the only place Commander's negatable `--no-open` flag
+			// is ever left completely unset on the command line -- exercising
+			// its true default (`options.open === true`) for the first time.
+			// A deliberately-missing input file makes the action throw (and
+			// print the ENOENT-derived error) at the `readFileSync(file, ...)`
+			// call, well before the `if (options.open) await open(url)` line
+			// src/index.ts's render action reaches last -- so this can never
+			// launch a real OS browser. What it does prove: with `--no-open`
+			// completely absent from argv, Commander still parses the command
+			// line cleanly and the action reaches the exact same "could not
+			// find file" branch (same message, same exit code) as the
+			// already-covered explicit-`--no-open` case above -- i.e. leaving
+			// `--open` at its default has no different or broken parsing path.
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "render", "does-not-exist.md"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(stderr).toBe("nh-deck: could not find file 'does-not-exist.md'\n");
+			expect(stderr).not.toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
 		"rejects a non-numeric --port with a clear error before starting the server",
 		async () => {
 			const child = spawn(
@@ -1152,6 +1192,122 @@ describe("CLI: nh-deck render --watch", () => {
 		},
 		WATCH_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"survives a transient read failure during a debounced re-render and keeps serving",
+		async () => {
+			const dir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-watch-read-failure-"),
+			);
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "# Original\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const initialBody = await fetchBody(url);
+			expect(initialBody).toContain("Original");
+
+			// Delete the watched file right as a change event fires, so the
+			// debounced re-render's readFileSync hits ENOENT mid-"save" -- the
+			// exact transient-failure shape the empty catch in the --watch
+			// rerender closure (src/index.ts) exists to survive.
+			rmSync(deckPath, { force: true });
+			// Wait comfortably past the 100ms debounce window so the failed
+			// re-render attempt actually runs before asserting survival.
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			// The process must not have crashed from the uncaught read failure.
+			expect(child.exitCode).toBeNull();
+			expect(child.signalCode).toBeNull();
+
+			// The server must still be serving the last successfully rendered
+			// HTML -- the failed read must not have torn anything down.
+			const bodyAfterFailure = await fetchBody(url);
+			expect(bodyAfterFailure).toContain("Original");
+
+			// A subsequent valid save must still be picked up: this proves the
+			// watcher/server genuinely survived (retried on the next change
+			// event), not merely that it hadn't crashed yet.
+			writeFileSync(deckPath, "# Recovered\n");
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const recoveredBody = await fetchBody(url);
+			expect(recoveredBody).toContain("Recovered");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"re-applies a deck's own updated frontmatter transition: value on a debounced re-render",
+		async () => {
+			const dir = mkdtempSync(path.join(tmpdir(), "nh-deck-watch-transition-"));
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "---\ntransition: fade\n---\n# Slide one\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const initialBody = await fetchBody(url);
+			expect(initialBody).toContain("transition: opacity"); // fade transition
+
+			// Edit the deck's frontmatter to a different transition, then wait
+			// for the debounced re-render to pick it up.
+			writeFileSync(deckPath, "---\ntransition: slide\n---\n# Slide one\n");
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const updatedBody = await fetchBody(url);
+			expect(updatedBody).toContain("transform: translateX"); // slide transition
+			expect(updatedBody).not.toContain("transition: opacity");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: theme selection", () => {
@@ -1381,6 +1537,444 @@ describe("CLI: theme selection", () => {
 			await waitForExit(child, EXIT_TIMEOUT_MS);
 		},
 		TEST_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: theme selection — pdf", () => {
+	// pdf writes a binary PDF file rather than serving HTML, so unlike the
+	// render-command tests above there is no response body to curl for a
+	// "--nh-bg: #..." CSS variable. Chromium's print-to-PDF renders a
+	// <style> tag's effect (glyph positions, fill colors), not its source
+	// text -- see the "custom --css file" pdf test's own comment for the
+	// same reasoning. Instead, each test here verifies the same
+	// stderr warning/note computeEffectiveTheme() prints on pdf (identical
+	// wiring to render, per src/index.ts) plus confirms the export itself
+	// still succeeds (exit 0, a real PDF file with the correct magic bytes).
+
+	it(
+		"applies a named theme via the --theme flag on the pdf subcommand",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-theme-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown theme/i);
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a deck's own frontmatter theme: value on the pdf subcommand when no --theme flag is given",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-pdf-theme-frontmatter-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ntheme: dracula\n---\n# Slide\n");
+			const outputPath = path.join(tempDir, "deck.pdf");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "pdf", tempFile, outputPath],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown theme/i);
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"lets --css win over a --theme flag on the pdf subcommand, with a stderr note and a successful export",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-theme-css-test-${randomUUID()}.pdf`,
+			);
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-theme-css-file-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					cssPath,
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toContain("nh-deck: note:");
+			expect(stderr).toContain("--css overrides the requested theme");
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+			rmSync(cssPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"falls back to the default theme with a warning on the pdf subcommand for an unrecognized --theme name",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-theme-unknown-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--theme",
+					"totally-not-a-theme",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toMatch(/unknown theme/i);
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: theme selection — png", () => {
+	// Same reasoning as "CLI: theme selection — pdf" above: png writes
+	// binary PNG files rather than serving HTML, so each test here verifies
+	// the same stderr warning/note plus a successful export (exit 0, a
+	// real PNG file with the correct magic bytes) instead of curling a
+	// response body.
+
+	it(
+		"applies a named theme via the --theme flag on the png subcommand",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-theme-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown theme/i);
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			for (let n = 1; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a deck's own frontmatter theme: value on the png subcommand when no --theme flag is given",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-png-theme-frontmatter-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ntheme: dracula\n---\n# Slide\n");
+			const outputPath = path.join(tempDir, "deck.png");
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "png", tempFile, outputPath],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown theme/i);
+			expect(stdout).toContain(
+				`Wrote 1 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"lets --css win over a --theme flag on the png subcommand, with a stderr note and a successful export",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-theme-css-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-png-theme-css-file-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					cssPath,
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toContain("nh-deck: note:");
+			expect(stderr).toContain("--css overrides the requested theme");
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			for (let n = 1; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+			rmSync(cssPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"falls back to the default theme with a warning on the png subcommand for an unrecognized --theme name",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-theme-unknown-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--theme",
+					"totally-not-a-theme",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toMatch(/unknown theme/i);
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			for (let n = 1; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+		},
+		PDF_EXPORT_TIMEOUT_MS,
 	);
 });
 
@@ -1614,6 +2208,45 @@ describe("CLI: transition selection", () => {
 					"tsx",
 					"src/index.ts",
 					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--transition",
+					"fade",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).not.toBe(0);
+			expect(stderr).toContain("unknown option");
+			expect(existsSync(outputPath)).toBe(false);
+		},
+		EXIT_TIMEOUT_MS + 5_000,
+	);
+
+	it(
+		"rejects --transition as an unknown option on the png subcommand",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-no-transition-test-${randomUUID()}.png`,
+			);
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
 					"fixtures/sample.md",
 					outputPath,
 					"--transition",

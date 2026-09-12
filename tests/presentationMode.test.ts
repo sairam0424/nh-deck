@@ -77,6 +77,42 @@ describe("presentation mode", () => {
 	);
 
 	it(
+		"stays on the last slide when ArrowRight is pressed past the end, and on the first slide when ArrowLeft is pressed before the start",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			// Advance past the last slide (2 presses reaches slide 3, a 3rd
+			// exercises goTo()'s `index >= slides.length` guard) -- no test
+			// previously pressed ArrowRight enough times to reach the end and
+			// go one step further.
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+
+			const activeCountAtEnd = await page.evaluate(
+				() => document.querySelectorAll(".slide.is-active").length,
+			);
+			expect(activeCountAtEnd).toBe(1);
+
+			// Now walk back to the first slide and go one step further, to
+			// exercise the `index < 0` half of the same guard.
+			await page.keyboard.press("ArrowLeft");
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			const activeCountAtStart = await page.evaluate(
+				() => document.querySelectorAll(".slide.is-active").length,
+			);
+			expect(activeCountAtStart).toBe(1);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"advances on a click that is not on a link",
 		async () => {
 			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));

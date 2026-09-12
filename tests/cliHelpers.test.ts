@@ -101,6 +101,15 @@ describe("resolveOutputPath", () => {
 	it("still defaults to .pdf when no extension is given (backward compatibility)", () => {
 		expect(resolveOutputPath("deck.md")).toBe("deck.pdf");
 	});
+
+	it("treats a case-insensitive .MD extension as a clean swap, not an append", () => {
+		// Case-insensitive filesystems (macOS, Windows — both in this
+		// project's own CI matrix) allow a source file named with a capital
+		// .MD extension. The extension check must not be case-sensitive, or
+		// this falls through to the append branch and produces a doubled
+		// extension ("deck.MD.pdf") instead of the clean swap ("deck.pdf").
+		expect(resolveOutputPath("deck.MD")).toBe("deck.pdf");
+	});
 });
 
 describe("debounce", () => {
