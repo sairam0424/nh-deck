@@ -17,8 +17,9 @@ const NOTES_STYLE = `
       bottom: 0;
       left: 0;
       right: 0;
-      background: #fffbe6;
-      border-top: 2px solid #e0c46c;
+      background: var(--nh-code-bg);
+      border-top: 2px solid var(--nh-border);
+      color: var(--nh-fg);
       padding: 1rem 1.5rem;
       max-height: 30vh;
       overflow-y: auto;
@@ -85,7 +86,8 @@ const LAYOUT_STYLE = `
     }
     .slide.layout-two-column pre,
     .slide.layout-two-column table,
-    .slide.layout-two-column img {
+    .slide.layout-two-column img,
+    .slide.layout-two-column svg {
       break-inside: avoid;
     }
     .slide.layout-quote {
@@ -100,7 +102,7 @@ const LAYOUT_STYLE = `
       font-size: 1.75rem;
       font-style: italic;
     }
-    .slide.layout-quote p:last-of-type {
+    .slide.layout-quote p:not(:only-of-type):last-of-type {
       font-size: 1rem;
       font-style: normal;
       color: var(--nh-muted);
