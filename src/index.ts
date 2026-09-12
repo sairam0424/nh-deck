@@ -17,6 +17,8 @@ import { containsUnsafeHtml, generateHtml } from "./render.js";
 import { startServer } from "./server.js";
 import type { ThemeColors } from "./themes.js";
 import { resolveThemeName, THEMES } from "./themes.js";
+import type { TransitionName } from "./transitions.js";
+import { resolveTransitionName, TRANSITIONS } from "./transitions.js";
 
 /**
  * Non-fatal stderr warning printed once, on the first read of a deck's
@@ -100,6 +102,43 @@ function computeEffectiveTheme(
 	};
 }
 
+/**
+ * Computes the effective transition name for a render invocation,
+ * handling frontmatter/--transition precedence and --css mutual
+ * exclusivity -- mirrors computeEffectiveTheme's exact shape and
+ * precedence rules. Pure -- no side effects -- so callers can print any
+ * resulting warning/note explicitly and skip printing it on a silent
+ * recomputation (a --watch debounced re-render), matching this file's
+ * "warn once, not on every re-render" precedent.
+ */
+function computeEffectiveTransition(
+	frontmatterTransition: string | undefined,
+	flagTransition: string | undefined,
+	customCss: string | undefined,
+): { name: TransitionName | undefined; message?: string } {
+	const requested = flagTransition ?? frontmatterTransition;
+
+	if (customCss) {
+		if (requested) {
+			return {
+				name: undefined,
+				message: `nh-deck: note: --css overrides the requested transition '${requested}'; it was not applied.\n`,
+			};
+		}
+		return { name: undefined };
+	}
+
+	if (!requested) {
+		return { name: undefined };
+	}
+
+	const { name, warning } = resolveTransitionName(requested);
+	return {
+		name,
+		message: warning ? `${warning}\n` : undefined,
+	};
+}
+
 const program = new Command();
 
 program
@@ -126,6 +165,10 @@ program
 		"--theme <name>",
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
+	.option(
+		"--transition <name>",
+		`transition effect between slides in presentation mode (${TRANSITIONS.join(", ")}); overrides a deck's own frontmatter "transition:" value`,
+	)
 	.action(
 		async (
 			file: string,
@@ -135,6 +178,7 @@ program
 				watch?: boolean;
 				css?: string;
 				theme?: string;
+				transition?: string;
 			},
 		) => {
 			try {
@@ -151,7 +195,22 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
-				const html = generateHtml(markdown, file, customCss, themeColors);
+				const { name: transitionName, message: transitionMessage } =
+					computeEffectiveTransition(
+						frontmatter.transition,
+						options.transition,
+						customCss,
+					);
+				if (transitionMessage) {
+					process.stderr.write(transitionMessage);
+				}
+				const html = generateHtml(
+					markdown,
+					file,
+					customCss,
+					themeColors,
+					transitionName,
+				);
 				const { url, updateHtml, server } = await startServer(
 					html,
 					options.port,
@@ -173,12 +232,19 @@ program
 								options.theme,
 								customCss,
 							);
+							const { name: updatedTransitionName } =
+								computeEffectiveTransition(
+									updatedFrontmatter.transition,
+									options.transition,
+									customCss,
+								);
 							updateHtml(
 								generateHtml(
 									updatedMarkdown,
 									file,
 									customCss,
 									updatedThemeColors,
+									updatedTransitionName,
 								),
 							);
 						} catch {
