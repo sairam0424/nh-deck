@@ -92,6 +92,13 @@ nh-deck/
     pdfExport.ts                               — exportToPdf(html, outputPath): puppeteer-core + chrome-launcher
     pngExport.ts                                 — exportToPng(html, outputPath): puppeteer-core + chrome-launcher,
                                                     screenshots each slide to its own PNG
+    slideLayouts.ts             — LAYOUTS/resolveLayoutName/extractSlideLayout: the fixed
+                                  4-layout registry (title/section/two-column/quote) and
+                                  per-slide <!-- layout: name --> marker extraction
+    transitions.ts                — TRANSITIONS/resolveTransitionName: the fixed
+                                     2-transition registry (fade/slide)
+    presentationScript.ts           — PRESENTATION_SCRIPT: client-side one-slide-at-a-time
+                                       navigation for the opt-in ?present presentation mode
   dist/                           — tsc build output (gitignored, npm bin entry lives here)
   fixtures/
     sample.md                      — sample deck used by both render.test.ts and cli.test.ts
@@ -133,6 +140,10 @@ nh-deck/
     pngExport.launchFailure.test.ts                           — mocks puppeteer-core's launch() to reject;
                                                                  asserts exportToPng() surfaces a clear
                                                                  error, not a raw stack trace
+    slideLayouts.test.ts                                         — unit tests for resolveLayoutName/extractSlideLayout, including the presenter-note-collision guard
+    transitions.test.ts                                           — unit tests for resolveTransitionName, including the case-insensitive and unknown-name-warning cases
+    presentationScript.test.ts                                     — string-assertion tests for PRESENTATION_SCRIPT's contents (present-param gating, keys, hash persistence, link-click exclusion)
+    presentationMode.test.ts                                        — real, unmocked browser test for ?present navigation (keyboard/click advance, link-click exclusion, hash persistence across reload)
   .github/workflows/
     ci.yml                             — 9-combination matrix (3 OS x 3 Node versions) build+test+pack-smoke-test job
 ```
