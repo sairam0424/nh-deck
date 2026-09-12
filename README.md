@@ -4,18 +4,16 @@ nh-deck is a local-first CLI tool for writing, presenting, and exporting Markdow
 
 ## Installation
 
-Once published:
-
 ```bash
 npx nh-deck <command>
 # or
 npm install -g nh-deck
 ```
 
-nh-deck is currently a walking skeleton and has not been published yet. For now, run it from a local clone:
+To build and run from source instead:
 
 ```bash
-git clone <this-repo-url>
+git clone https://github.com/sairam0424/nh-deck.git
 cd nh-deck
 npm install
 npm run build
@@ -48,6 +46,16 @@ nh-deck png deck.md
 
 PDF export works by launching a Chrome/Chromium/Edge/Brave binary that's already installed on your machine (via `puppeteer-core` + `chrome-launcher`) — nh-deck never downloads or bundles a browser itself.
 
+Add presenter notes to any slide with a standalone HTML comment — they're hidden by default and shown by adding `?notes` to the served URL:
+
+```markdown
+# Slide title
+
+<!-- remember to slow down here -->
+
+Slide content...
+```
+
 ## Themes
 
 nh-deck ships 4 fixed, named color themes — `light`, `dark`, `dracula`, and `nord` — that recolor the base deck (background, text, borders, code blocks), KaTeX math, and Mermaid diagrams consistently. A deck with no theme requested renders exactly as it always has. Explicitly requesting the `light` theme is close, but not identical, to that default — code-block backgrounds in particular differ noticeably (see `docs/adr/0008-named-theme-system.md`).
@@ -73,13 +81,39 @@ If both are given, `--theme` wins over the frontmatter value. An unrecognized th
 
 `--css <path>` always wins over any requested theme (flag or frontmatter) — the two are mutually exclusive, with no CSS-cascade layering. If you pass both, nh-deck prints a stderr note and uses your custom stylesheet, not the theme's colors. See `docs/adr/0008-named-theme-system.md` for the full design rationale.
 
+## Layouts
+
+4 fixed, opt-in per-slide layouts — `title`, `section`, `two-column`, and `quote` — for slides that need a different structure than the default. Select one per slide with a standalone HTML comment:
+
+```markdown
+<!-- layout: title -->
+
+# My Presentation
+
+A subtitle for the opening slide.
+```
+
+A slide with no marker renders exactly as it always has. Layouts apply everywhere — `render`, `pdf`, and `png` — since they change slide structure, not just the live-presenting view. An unrecognized layout name is silently ignored (no class applied, no warning).
+
+## Presentation mode & transitions
+
+Add `?present` to the URL `render` serves to switch from the default continuous-scroll view to one-slide-at-a-time presentation mode: advance with the right arrow key, `Space`, or a click (links inside slide content still work normally); go back with the left arrow key. Your position survives a `--watch` reload via the URL's hash.
+
+Animate the transition between slides with `--transition <name>` (`fade` or `slide`), or a `transition:` key in frontmatter:
+
+```bash
+nh-deck render deck.md --transition fade
+```
+
+Transitions only apply inside presentation mode on `render` — `pdf` and `png` never read the flag, since a static export has no discrete slide changes to animate between. `--css` wins over both layout and transition CSS, same as it wins over themes. See `docs/adr/0009-templates-transitions-presentation-mode.md` for the full design rationale.
+
 ## Current limitations
 
-This is an early walking skeleton, not a feature-complete tool. The following are deliberate, tracked fast-follows rather than oversights:
-
-- **Templates and transitions** — no per-slide layout system or live-presenting animation yet; themes (see above) are the only visual-customization system shipped so far beyond the `--css` flag (which lets you replace the default stylesheet outright).
-- **PDF export fidelity across browsers** — the full 3-OS × multi-Node CI matrix confirms PDF export *works* on Chrome/Chromium across Linux, macOS, and Windows, but visual-fidelity differences between Chrome vs. Edge vs. Brave (whichever `chrome-launcher` detects on a given machine) haven't been characterized yet.
+- **The 4 themes, 4 layouts, and 2 transitions are fixed sets, not user-extensible** — `--css` is the only escape hatch beyond them (a full stylesheet replacement, not a per-color or per-layout override).
+- **Presentation mode is keyboard/click only** — no touch/swipe navigation, and no in-UI control to exit `?present` (removing it from the URL is the only way back to the continuous-scroll view).
+- **Cross-browser PDF-export visual fidelity is checked in CI, not guaranteed on every machine** — a dedicated CI job compares pixel output between two distinct Chrome-family browsers on every PR (see `docs/adr/0007-pdf-cross-browser-fidelity-check.md`), but which specific browser `chrome-launcher` finds on your own machine (Chrome vs. Edge vs. Brave) can still vary.
+- **PPTX export is out of scope** — PDF and per-slide PNG are the only export formats.
 
 KaTeX (math rendering) and Mermaid (diagrams) are both supported today, CDN-free — see `AGENTS.md`'s Known Gotchas for how.
 
-nh-deck never phones home and the rendered HTML never depends on a CDN for correctness — that local-first constraint is absolute, even while the features above are still catching up.
+nh-deck never phones home and the rendered HTML never depends on a CDN for correctness — that local-first constraint is absolute.

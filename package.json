@@ -1,9 +1,18 @@
 {
 	"name": "nh-deck",
-	"version": "0.1.0",
+	"version": "1.0.0",
 	"type": "module",
 	"license": "Apache-2.0",
 	"description": "A local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks.",
+	"keywords": [
+		"cli",
+		"markdown",
+		"slides",
+		"presentation",
+		"slideshow",
+		"pdf",
+		"local-first"
+	],
 	"bin": {
 		"nh-deck": "dist/index.js"
 	},
