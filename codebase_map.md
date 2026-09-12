@@ -2,8 +2,12 @@
 
 A literal, navigable tour of this repo only. This does not cover nh-skills,
 daily-dose, or Not-Humans-Lab — each is its own repo/doc set. Reflects the
-current on-disk layout — every file listed below already exists in this
-repo (verified against `src/`, `tests/`, and `fixtures/` directly).
+current on-disk layout as of 2026-09-12 — every file listed below already
+exists in this repo (verified against `src/`, `tests/`, and `fixtures/`
+directly). This file had drifted badly out of date once before (missing
+5 `src/` modules and 6 `tests/` files entirely, and a stale `generateHtml`
+signature) — an end-to-end audit workflow caught it; keep it in sync with
+`AGENTS.md`'s own Directory Map whenever either changes.
 
 ## Bird's-eye view
 
@@ -18,10 +22,15 @@ nh-deck/
 ├── tsconfig.json                  tsc-only build config (no bundler)
 ├── src/
 │   ├── index.ts                   CLI entry — Commander setup, subcommand dispatch (render/pdf/png)
-│   ├── render.ts                  generateHtml(markdown, title?, customCss?) -> HTML string, via `marked`
+│   ├── render.ts                  generateHtml(markdown, title?, customCss?, themeColors?, transitionName?) -> HTML string, via `marked`
+│   ├── frontmatter.ts             parseFrontmatter(markdown) — splits an optional "---\nkey: value\n---" block from the body
+│   ├── themes.ts                  THEMES/resolveThemeName — fixed 4-theme registry (light/dark/dracula/nord)
+│   ├── slideLayouts.ts            LAYOUTS/resolveLayoutName/extractSlideLayout — fixed 4-layout registry (title/section/two-column/quote) + per-slide marker extraction
+│   ├── transitions.ts             TRANSITIONS/resolveTransitionName — fixed 2-transition registry (fade/slide)
+│   ├── presentationScript.ts      PRESENTATION_SCRIPT — client-side one-slide-at-a-time nav for the opt-in ?present mode
 │   ├── htmlEscape.ts              escapeHtml(value) -> string, shared HTML-escaping helper
 │   ├── katexAssets.ts             getEmbeddedKatexCss() — KaTeX stylesheet with fonts embedded as base64
-│   ├── mermaidRenderer.ts         renderMermaidDiagram(code) — CDN-free Mermaid SVG via `beautiful-mermaid`
+│   ├── mermaidRenderer.ts         renderMermaidDiagram(code, colors?) — CDN-free, theme-recolorable Mermaid SVG via `beautiful-mermaid`
 │   ├── presenterNotes.ts          extractNotes(tokens) — pulls speaker notes out of HTML-comment tokens
 │   ├── server.ts                  local node:http dev server (ephemeral port, --no-open, --watch live reload)
 │   ├── cliHelpers.ts              parsePort/resolveOutputPath/debounce/file-watch helpers used by index.ts
@@ -31,6 +40,12 @@ nh-deck/
 ├── tests/
 │   ├── render.test.ts              unit tests for generateHtml
 │   ├── cli.test.ts                 integration test: spawns the CLI, asserts stdout
+│   ├── frontmatter.test.ts         unit tests for parseFrontmatter
+│   ├── themes.test.ts              unit tests for THEMES/resolveThemeName
+│   ├── slideLayouts.test.ts        unit tests for resolveLayoutName/extractSlideLayout
+│   ├── transitions.test.ts         unit tests for resolveTransitionName
+│   ├── presentationScript.test.ts  string-assertion tests for PRESENTATION_SCRIPT's contents
+│   ├── presentationMode.test.ts    real, unmocked browser test for ?present navigation
 │   ├── cliHelpers.test.ts          unit tests for cliHelpers.ts
 │   ├── htmlEscape.test.ts          unit tests for htmlEscape.ts
 │   ├── katexAssets.test.ts         unit tests for katexAssets.ts
@@ -60,10 +75,15 @@ directly as a shell step ("Packaging smoke test") inside
 | Path | What it is | Notes |
 |---|---|---|
 | `src/index.ts` | CLI entrypoint. Sets up Commander, defines the `render`, `pdf`, and `png` subcommands and their flags (e.g. `--no-open`, `--watch`, `--css`), and dispatches to `render.ts`, `server.ts`, `pdfExport.ts`, `pngExport.ts`, and `cliHelpers.ts`. | The only file that touches `process.argv` or owns top-level error handling/exit codes. |
-| `src/render.ts` | The render module. Exports `generateHtml(markdown, title?): string`, converting a deck's Markdown source into a self-contained HTML string via `marked`. | Pure function, no filesystem or network I/O — this is what makes it the wide base of the test pyramid (see `TESTING.md`). Both KaTeX math (via `marked-katex-extension`) and Mermaid diagram rendering (via a `marked` renderer override) have landed here. |
+| `src/render.ts` | The render module. Exports `generateHtml(markdown, title?, customCss?, themeColors?, transitionName?): string`, converting a deck's Markdown source into a self-contained HTML string via `marked`. | Pure function, no filesystem or network I/O — this is what makes it the wide base of the test pyramid (see `TESTING.md`). KaTeX math, theme-recolorable Mermaid diagrams, per-slide layouts, presentation mode, and transitions have all landed here. |
+| `src/frontmatter.ts` | Exports `parseFrontmatter(markdown): { frontmatter, body }` — splits an optional `---\nkey: value\n---` block (deliberately narrow: flat key:value only) from the deck body. | Falls back to treating the whole file as body if anything about the block doesn't parse cleanly, so a deck opening with a stylistic `---` horizontal rule is never misread as frontmatter. |
+| `src/themes.ts` | Exports `THEMES` (the fixed `light`/`dark`/`dracula`/`nord` registry, re-exporting `beautiful-mermaid`'s own palettes) and `resolveThemeName(requested)`. | See `docs/adr/0008-named-theme-system.md`. |
+| `src/slideLayouts.ts` | Exports `LAYOUTS` (the fixed `title`/`section`/`two-column`/`quote` registry), `resolveLayoutName(requested)`, and `extractSlideLayout(tokens)` — extracts a `<!-- layout: name -->` marker from a slide's token array and removes it (so it's never also rendered as a presenter note). | Unrecognized layout names are a silent no-op (no warning) — see `docs/adr/0009-templates-transitions-presentation-mode.md` for why that differs from theme/transition's warn-and-fallback behavior. |
+| `src/transitions.ts` | Exports `TRANSITIONS` (the fixed `fade`/`slide` registry) and `resolveTransitionName(requested)`. | Only ever visually meaningful inside presentation mode; `pdf`/`png` never read it at all. |
+| `src/presentationScript.ts` | Exports `PRESENTATION_SCRIPT` — the client-side JS (as a `<script>`-wrapped string) for the opt-in `?present` one-slide-at-a-time navigation mode. | Entirely inert unless `?present` is in the URL; keyboard/click nav, `location.hash` persistence across `--watch` reloads. |
 | `src/htmlEscape.ts` | Shared `escapeHtml(value: string): string` HTML-escaping helper. | Extracted out of `render.ts` so `mermaidRenderer.ts` can reuse it without a circular import. |
 | `src/katexAssets.ts` | Exports `getEmbeddedKatexCss(): string` — KaTeX's stylesheet with every `@font-face` rewritten to a base64 `data:` URI, memoized. | No CDN fallback path at all; see `docs/adr/0004-katex-local-embedded-math.md`. |
-| `src/mermaidRenderer.ts` | Exports `renderMermaidDiagram(code: string): string` — renders Mermaid source to a CDN-free SVG string via `beautiful-mermaid`, or an escaped error box on invalid syntax. | Strips a real Google Fonts CDN `@import` that `beautiful-mermaid` bakes into its own default output; see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`. |
+| `src/mermaidRenderer.ts` | Exports `renderMermaidDiagram(code: string, colors?: ThemeColors): string` — renders Mermaid source to a CDN-free, theme-recolorable SVG string via `beautiful-mermaid`, or an escaped error box on invalid syntax. | Strips a real Google Fonts CDN `@import` that `beautiful-mermaid` bakes into its own default output; see `docs/adr/0005-mermaid-local-cdn-import-stripped.md`. |
 | `src/server.ts` | The local dev server. A plain `node:http` server (no framework) that serves the rendered HTML on an ephemeral port, prints the serving URL to stdout, and honors `--no-open`. | No routing, no middleware — it serves exactly one already-rendered HTML string per invocation. |
 | `src/pdfExport.ts` | The PDF export module. Uses `chrome-launcher` to detect a local Chrome-family browser, then drives it via `puppeteer-core` to print the rendered HTML to a PDF file. | Must fail with a clear, non-crashing error (not a stack-trace crash) if no local browser is found — no auto-download fallback in this skeleton. |
 | `src/cliHelpers.ts` | Shared CLI-support helpers: `parsePort` (Commander custom option-parser for `--port`), `resolveOutputPath` (derives a PDF/PNG output path from the input file, guarding against overwriting the source), `debounce`, `watchFileForChanges`, and `closeWatcherOnServerClose`. | `watchFileForChanges` watches the containing directory rather than the file itself, so it survives atomic-save renames (Vim/Neovim and similar editors). |
@@ -85,7 +105,10 @@ directly as a shell step ("Packaging smoke test") inside
 | I want to... | Go to |
 |---|---|
 | Add or change a CLI subcommand or flag | `src/index.ts` |
-| Change how Markdown becomes HTML (KaTeX math and Mermaid diagrams both already added) | `src/render.ts` |
+| Change how Markdown becomes HTML (KaTeX math, Mermaid diagrams, layouts, transitions, presentation mode all already added) | `src/render.ts` |
+| Change frontmatter parsing (`theme:`/`transition:` keys) | `src/frontmatter.ts` |
+| Change the fixed theme/layout/transition sets | `src/themes.ts` / `src/slideLayouts.ts` / `src/transitions.ts` |
+| Change presentation-mode navigation (keyboard/click, hash persistence) | `src/presentationScript.ts` |
 | Change how the local dev server behaves (port selection, `--no-open`, stdout message) | `src/server.ts` |
 | Change how PDF export works (print options, page-count/pagination) | `src/pdfExport.ts` |
 | Change how PNG export works (per-slide screenshot, output filename derivation) | `src/pngExport.ts` |
@@ -121,13 +144,20 @@ directly as a shell step ("Packaging smoke test") inside
 ## Cross-module dependency notes
 
 - `src/index.ts` imports `src/render.ts`, `src/server.ts`, `src/pdfExport.ts`,
-  `src/pngExport.ts`, and `src/cliHelpers.ts` — it is the only module that
-  imports all five.
+  `src/pngExport.ts`, `src/cliHelpers.ts`, `src/frontmatter.ts`,
+  `src/themes.ts`, and `src/transitions.ts` — it is the only module that
+  imports all eight.
 - `src/render.ts` imports `src/htmlEscape.ts`, `src/katexAssets.ts`,
-  `src/mermaidRenderer.ts`, and `src/presenterNotes.ts`. `generateHtml` is
+  `src/mermaidRenderer.ts`, `src/presenterNotes.ts`, `src/slideLayouts.ts`,
+  and `src/presentationScript.ts` (plus the `ThemeColors`/`TransitionName`
+  types from `src/themes.ts`/`src/transitions.ts`). `generateHtml` is
   still independently unit-testable without spinning up a server or a
-  browser — none of those four are I/O-bound at call time (the fonts
+  browser — none of those are I/O-bound at call time (the fonts
   `katexAssets.ts` embeds are read once and memoized).
+- `src/index.ts` also imports `src/frontmatter.ts`, `src/themes.ts`, and
+  `src/transitions.ts` directly, to resolve the effective theme/transition
+  (flag vs. frontmatter vs. `--css` precedence) before calling
+  `generateHtml`.
 - `src/mermaidRenderer.ts` imports `src/htmlEscape.ts` (to build its escaped
   error-box fallback on invalid Mermaid syntax) — this is why `htmlEscape.ts`
   was extracted out of `render.ts` in the first place, so both modules could
@@ -140,8 +170,11 @@ directly as a shell step ("Packaging smoke test") inside
   Chrome-family browser binary (via `chrome-launcher`) — this dependency is
   environmental, not an npm package, and its absence must be handled as a
   clear error, not a crash.
-- `src/server.ts`, `src/cliHelpers.ts`, `src/katexAssets.ts`, and
-  `src/presenterNotes.ts` have no dependency on any other `src/` module.
+- `src/server.ts`, `src/cliHelpers.ts`, `src/katexAssets.ts`,
+  `src/presenterNotes.ts`, `src/frontmatter.ts`, `src/themes.ts`,
+  `src/slideLayouts.ts`, `src/transitions.ts`, and
+  `src/presentationScript.ts` have no dependency on any other `src/`
+  module.
 - `tests/render.test.ts` depends only on `src/render.ts` and `fixtures/`.
   `tests/cli.test.ts` depends on the built or source CLI entrypoint and
   spawns it as a real process. The packaging/e2e smoke test is not a Vitest

@@ -212,6 +212,17 @@ which named theme (if any) is active.** This is recorded here rather than
 silently glossed over — see Consequences below and `Context.md`'s Open
 risks for the tracked follow-up.
 
+> **Update (2026-09-12):** Fixed. `generateHtml` now sets a module-level
+> "current call" variable (`currentMermaidColors`) at the top of its body,
+> and the `code()` renderer's Mermaid branch reads it — safe despite being
+> module-level mutable state because `generateHtml` is fully synchronous
+> end to end, so no other call can interleave and observe a stale value.
+> See `tests/render.test.ts`'s `recolors Mermaid diagrams to match the
+> active theme` regression test. This ADR's own historical analysis above
+> is left unchanged as the record of what was true at the time it was
+> written; only this note and the corresponding Consequences bullet below
+> reflect the fix.
+
 ## Consequences
 
 **Good:**
@@ -224,8 +235,8 @@ risks for the tracked follow-up.
   argument" case) written and passing against the pre-refactor code
   *before* the refactor, and re-verified passing after.
 - Reusing `beautiful-mermaid`'s own palettes means zero new color-design
-  work and, once the gap above is closed, zero fragile SVG-output
-  post-processing for Mermaid theming.
+  work and, now that Mermaid theming (below) is wired in, zero fragile
+  SVG-output post-processing.
 - The frontmatter/slide-separator collision is resolved safely: any deck
   that opens with a bare `---` horizontal rule but has no valid trailing
   `key: value` block (or no closing `---` at all) falls all the way back
@@ -247,16 +258,16 @@ risks for the tracked follow-up.
   an escape hatch (full replacement, not a per-color override) — this was
   a deliberate KISS/YAGNI tradeoff, not an oversight, but it is a real
   limitation until/unless a future design pass revisits it.
-- **Mermaid diagrams do not yet actually change color with the active
+- ~~**Mermaid diagrams do not yet actually change color with the active
   theme, despite the original design intent and this ADR's own Decision
-  Drivers naming them in scope.** See the verified-gap subsection above.
-  The plumbing (`renderMermaidDiagram`'s `colors` parameter) exists and is
-  tested in isolation, but `generateHtml` never calls it with the active
-  theme's colors. A dark-themed deck with a Mermaid diagram will show that
-  diagram in its default (light, `beautiful-mermaid`-chosen) colors,
-  which will look visually inconsistent against the rest of the themed
-  slide. Tracked as an open item in `Context.md`'s Open risks rather than
-  silently claimed as done.
+  Drivers naming them in scope.** The plumbing (`renderMermaidDiagram`'s
+  `colors` parameter) exists and is tested in isolation, but
+  `generateHtml` never calls it with the active theme's colors. A
+  dark-themed deck with a Mermaid diagram will show that diagram in its
+  default (light, `beautiful-mermaid`-chosen) colors, which will look
+  visually inconsistent against the rest of the themed slide.~~
+  **Fixed (2026-09-12)** — see the Update note in the verified-gap
+  subsection above.
 - **Themes only affect color, not font choice or spacing.** This matches
   the explicit design scope (`docs/specs/theme-system-design.md` §2's
   "base deck (background/text/fonts/code blocks)" line is, on inspection
@@ -303,8 +314,8 @@ This decision is confirmed as implemented by:
 - `docs/specs/theme-system-design.md` — the full design spec this ADR's
   Decision Drivers and Considered Options are drawn from, including the
   live brainstorming session's turn-by-turn decisions.
-- `Context.md`'s Roadmap, item 11, and its Open risks section for the
-  tracked Mermaid-theming gap named above.
+- `Context.md`'s Roadmap, item 11, for the now-resolved Mermaid-theming
+  gap named above.
 - `docs/adr/0004-katex-local-embedded-math.md` and
   `docs/adr/0005-mermaid-local-cdn-import-stripped.md` — the local-first
   precedent this ADR's "no CDN, no bundled fonts per theme" constraint
