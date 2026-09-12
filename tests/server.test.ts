@@ -176,7 +176,20 @@ describe("startServer — watch mode", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
-	it("keeps broadcasting to remaining SSE clients after one client's connection is destroyed", async () => {
+	it("does not crash or block delivery to other SSE clients when one client's connection is destroyed", async () => {
+		// NOTE ON SCOPE: this test proves the broadcast loop is resilient to a
+		// dead socket -- it does NOT prove the server.ts `req.on("close", ...)`
+		// splice-cleanup logic actually ran. `sseClients` is a private closure
+		// variable with no accessor on `StartedServer`, so this suite has no
+		// way to observe its length from outside and cannot assert that a
+		// destroyed client was removed from it. Node's `res.write()` on an
+		// already-destroyed `http.ServerResponse` returns `false` silently
+		// rather than throwing or emitting an `error` event, so this
+		// broadcast would still reach clientB and still not crash even if the
+		// splice never ran. Treat dead-socket *cleanup* (the leak-prevention
+		// concern -- an unbounded `sseClients` array from tabs that were
+		// closed without a graceful disconnect) as behaviorally unverified by
+		// this suite until `StartedServer` exposes something to inspect it.
 		const { server, url, updateHtml } = await startServer("<p>v1</p>", 0, {
 			watch: true,
 		});
@@ -190,12 +203,10 @@ describe("startServer — watch mode", () => {
 		clientA.messagePromise.catch(() => {});
 
 		// Simulate a dropped connection (closed tab, lost network) by
-		// destroying the socket directly rather than a graceful req.end() --
-		// this is what actually fires the server's req.on("close", ...)
-		// handler that splices the client out of sseClients. A promise on
-		// the destroyed request's own "close" event (rather than a fixed
-		// sleep) waits for exactly that cleanup to run before the next
-		// broadcast, with no arbitrary delay needed.
+		// destroying the socket directly rather than a graceful req.end(). A
+		// promise on the destroyed request's own "close" event (rather than a
+		// fixed sleep) waits for the client side to observe the disconnect
+		// before the next broadcast, with no arbitrary delay needed.
 		const clientAClosed = new Promise<void>((resolve) =>
 			clientA.req.once("close", resolve),
 		);
@@ -204,10 +215,10 @@ describe("startServer — watch mode", () => {
 
 		updateHtml("<p>v2</p>");
 
-		// The remaining client must still receive the reload event. If the
-		// disconnected client had NOT been spliced out of sseClients, this
-		// broadcast would attempt to write to its dead socket -- proving
-		// that didn't crash the server or block delivery to clientB.
+		// The remaining client must still receive the reload event, and the
+		// broadcast loop must not throw partway through iterating a client
+		// list that still contains (or has already dropped) clientA's dead
+		// response object.
 		const message = await clientB.messagePromise;
 		expect(message).toContain("data: reload");
 
