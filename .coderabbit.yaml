@@ -1,0 +1,32 @@
+language: en-US
+tone_instructions: "Direct and pragmatic. This is a solo-maintained project - skip stylistic bikeshedding."
+enable_free_tier: true
+
+reviews:
+  profile: quiet
+  request_changes_workflow: false
+  auto_review:
+    enabled: true
+    drafts: false
+    ignore_usernames: ["dependabot[bot]"]
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 5
+  path_filters:
+    - "!dist/**"
+    - "!bin/**"
+    - "!*.lock"
+    - "!**/*.generated.*"
+  path_instructions:
+    - path: "src/**/*.ts"
+      instructions: "Flag any unhandled promise rejection or missing input validation."
+    - path: "tests/**"
+      instructions: "Check test names are descriptive and edge cases (empty input, malformed markdown, case-sensitivity) are covered."
+  tools:
+    eslint:
+      enabled: true
+    gitleaks:
+      enabled: true
+
+knowledge_base:
+  learnings:
+    scope: local

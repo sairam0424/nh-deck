@@ -746,3 +746,55 @@ describe("generateHtml — themed notes panel", () => {
 		expect(draculaHtml).not.toBe(nordHtml);
 	});
 });
+
+describe("generateHtml — inline code contrast inside the section layout", () => {
+	// --nh-muted and --nh-code-bg both fall back to a theme's own `muted`
+	// color first (themeToCssVarBlock), which is true for every one of the
+	// 4 shipped themes -- so the two variables always resolve to the exact
+	// same value whenever a theme is active. The section layout separately
+	// sets `color: var(--nh-muted)` on its paragraphs to de-emphasize body
+	// text. Inline <code> has no color of its own, so it inherits that
+	// de-emphasized color from its parent <p> -- and combined with code's
+	// own `background: var(--nh-code-bg)`, text and background become
+	// identical, making the code text invisible. Only a real browser's
+	// resolved (not just cascaded-in-isolation) color can prove this --
+	// found live via Playwright MCP against a running dev server, not by
+	// this suite's own prior string-assertion tests.
+	const DRACULA_COLORS = {
+		bg: "#282a36",
+		fg: "#f8f8f2",
+		line: "#6272a4",
+		accent: "#bd93f9",
+		muted: "#6272a4",
+	};
+
+	async function inlineCodeColors(
+		page: Awaited<ReturnType<typeof openHtmlPage>>,
+	) {
+		return page.evaluate(() => {
+			const code = document.querySelector(".slide.layout-section code");
+			if (!code) return null;
+			const computed = getComputedStyle(code);
+			return { color: computed.color, background: computed.backgroundColor };
+		});
+	}
+
+	it(
+		"keeps inline code legible (not the same color as its own background) inside a themed section-layout slide",
+		async () => {
+			const html = generateHtml(
+				"<!-- layout: section -->\n\n# Heading\n\nSome text with `inline code` in it.",
+				"sample",
+				undefined,
+				DRACULA_COLORS,
+			);
+			const page = await openHtmlPage(html);
+
+			const colors = await inlineCodeColors(page);
+
+			expect(colors).not.toBeNull();
+			expect(colors?.color).not.toBe(colors?.background);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
