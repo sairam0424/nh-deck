@@ -20,7 +20,7 @@
 // shell globbing) so this also runs identically on Windows, where the
 // default `npm run` shell does not expand `*.ts` for external commands.
 import { spawnSync } from "node:child_process";
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,13 +46,32 @@ const files = [
 	...collectTsFiles(path.join(repoRoot, "tests")),
 ];
 
-const tscBin = require.resolve("typescript/bin/tsc");
+// typescript's package.json "exports" map does not list "./bin/tsc" as a
+// subpath (only "bin.tsc" -- the npm CLI-binary field, resolved via PATH,
+// not Node's module resolution), so require.resolve("typescript/bin/tsc")
+// throws ERR_PACKAGE_PATH_NOT_EXPORTED. Resolving "typescript/package.json"
+// (which the exports map does list) and reading its own "bin.tsc" field
+// gets to the same file without relying on an unexported subpath.
+const typescriptPackageJsonPath = require.resolve("typescript/package.json");
+const typescriptPackageJson = JSON.parse(
+	readFileSync(typescriptPackageJsonPath, "utf8"),
+);
+const tscBin = path.join(
+	path.dirname(typescriptPackageJsonPath),
+	typescriptPackageJson.bin.tsc,
+);
 
 // Kept in sync by hand with tsconfig.json's compilerOptions (minus
 // rootDir/outDir/declaration, which are meaningless for a file-list,
 // noEmit invocation like this one).
 const args = [
 	tscBin,
+	// Newer tsc versions error (TS5112) rather than silently ignore
+	// tsconfig.json when files are also passed on the command line, which
+	// is exactly this script's own file-list-bypasses-rootDir design (see
+	// the file header comment) -- --ignoreConfig is tsc's own documented
+	// way to confirm that's intentional.
+	"--ignoreConfig",
 	"--noEmit",
 	"--strict",
 	"--target",
