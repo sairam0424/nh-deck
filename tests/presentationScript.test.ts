@@ -15,6 +15,18 @@ describe("PRESENTATION_SCRIPT", () => {
 		expect(PRESENTATION_SCRIPT).toContain("ArrowLeft");
 	});
 
+	it("listens for Home, End, and Escape", () => {
+		expect(PRESENTATION_SCRIPT).toContain('"Home"');
+		expect(PRESENTATION_SCRIPT).toContain('"End"');
+		expect(PRESENTATION_SCRIPT).toContain('"Escape"');
+	});
+
+	it("exits presentation mode via a clearly-named, composable function rather than inline Escape logic", () => {
+		expect(PRESENTATION_SCRIPT).toContain("exitPresentationMode");
+		expect(PRESENTATION_SCRIPT).toContain('params.delete("present")');
+		expect(PRESENTATION_SCRIPT).toContain("history.replaceState");
+	});
+
 	it("persists the current slide via location.hash", () => {
 		expect(PRESENTATION_SCRIPT).toContain("location.hash");
 	});

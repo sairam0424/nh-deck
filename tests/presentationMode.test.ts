@@ -160,6 +160,34 @@ describe("presentation mode", () => {
 	);
 
 	it(
+		"jumps directly to the first slide on Home and the last slide on End",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			await page.keyboard.press("End");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+
+			await page.keyboard.press("Home");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			// Home/End land on a valid slide even when already there --
+			// re-pressing must not throw goTo()'s bounds guard off or drop
+			// the active slide entirely.
+			await page.keyboard.press("Home");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			const activeCount = await page.evaluate(
+				() => document.querySelectorAll(".slide.is-active").length,
+			);
+			expect(activeCount).toBe(1);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"advances on a click that is not on a link",
 		async () => {
 			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
@@ -300,6 +328,79 @@ describe("presentation mode", () => {
 			await page.keyboard.press("ArrowRight");
 			expect(await activeSlideHeading(page)).toBe("Slide 3");
 			expect(await progressWidth()).toBe("100%");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"exits presentation mode on Escape: clears the presenting class and removes ?present from the URL (preserving other params) without a full page reload",
+		async () => {
+			const page = await openPresentationPage(
+				generateHtml(THREE_SLIDE_DECK),
+				"/?present&notes",
+			);
+
+			const isPresentingBefore = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresentingBefore).toBe(true);
+
+			// A marker that only survives if the page never actually
+			// reloads/navigates -- history.replaceState must not trigger one.
+			await page.evaluate(() => {
+				(window as unknown as Record<string, unknown>).__nhDeckNoReloadMarker =
+					true;
+			});
+
+			await page.keyboard.press("Escape");
+
+			const isPresentingAfter = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresentingAfter).toBe(false);
+
+			const searchParamsAfter = await page.evaluate(() => {
+				const params = new URLSearchParams(location.search);
+				return {
+					hasPresent: params.has("present"),
+					hasNotes: params.has("notes"),
+				};
+			});
+			expect(searchParamsAfter.hasPresent).toBe(false);
+			expect(searchParamsAfter.hasNotes).toBe(true);
+
+			const survivedReload = await page.evaluate(
+				() =>
+					(window as unknown as Record<string, unknown>)
+						.__nhDeckNoReloadMarker === true,
+			);
+			expect(survivedReload).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"hides the presentation counter and progress bar once Escape exits presentation mode",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("Escape");
+
+			const chromeDisplay = await page.evaluate(() => {
+				const counter = document.querySelector(".presentation-counter");
+				const progress = document.querySelector(".presentation-progress");
+				return {
+					counterDisplay: counter
+						? getComputedStyle(counter).display
+						: "missing",
+					progressDisplay: progress
+						? getComputedStyle(progress).display
+						: "missing",
+				};
+			});
+
+			expect(chromeDisplay.counterDisplay).toBe("none");
+			expect(chromeDisplay.progressDisplay).toBe("none");
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);

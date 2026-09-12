@@ -159,7 +159,11 @@ const PRESENTATION_STYLE = `
     body.presenting .slide.is-active {
       display: block;
     }
+    .presentation-counter {
+      display: none;
+    }
     body.presenting .presentation-counter {
+      display: block;
       position: fixed;
       bottom: 1rem;
       right: 1rem;
@@ -182,7 +186,11 @@ const PRESENTATION_STYLE = `
  * but a decorative progress bar has no such requirement.
  */
 const PRESENTATION_PROGRESS_STYLE = `
+    .presentation-progress {
+      display: none;
+    }
     body.presenting .presentation-progress {
+      display: block;
       position: fixed;
       bottom: 0;
       left: 0;
