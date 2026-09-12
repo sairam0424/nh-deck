@@ -31,8 +31,8 @@ export function resolveOutputPath(
 ): string {
 	const outputPath =
 		output ??
-		(extname(file) === ".md"
-			? file.replace(/\.md$/, `.${extension}`)
+		(extname(file).toLowerCase() === ".md"
+			? file.replace(/\.md$/i, `.${extension}`)
 			: `${file}.${extension}`);
 
 	if (resolve(outputPath) === resolve(file)) {
