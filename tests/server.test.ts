@@ -155,6 +155,63 @@ describe("startServer — gzip compression", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
+	it("serves an uncompressed response for an explicit empty Accept-Encoding header", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, { "Accept-Encoding": "" });
+
+		expect(res.headers["content-encoding"]).toBeUndefined();
+		expect(body.toString("utf8")).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("clamps an out-of-range q-value (gzip;q=2) rather than treating it as a valid positive preference", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip;q=2",
+		});
+
+		// q=2 is malformed per RFC 7231's 0-1 range, but it is still a positive
+		// number, not NaN -- gzip is clamped to fully acceptable (q=1), not
+		// rejected outright, since the client did express *some* preference
+		// for it. The regression this guards is treating clamping as
+		// optional and passing the literal out-of-range value through.
+		expect(res.headers["content-encoding"]).toBe("gzip");
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("does not treat a non-finite q-value (gzip;q=Infinity) as a valid positive preference", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip;q=Infinity",
+		});
+
+		expect(res.headers["content-encoding"]).toBe("gzip");
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("clamps a negative q-value (gzip;q=-1) down to 0, disallowing gzip", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip;q=-1",
+		});
+
+		expect(res.headers["content-encoding"]).toBeUndefined();
+		expect(body.toString("utf8")).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
 	it("still gzip-compresses the reload-injected HTML in watch mode", async () => {
 		const html = "<!DOCTYPE html><html><body><p>v1</p></body></html>";
 		const { server, url } = await startServer(html, 0, { watch: true });
