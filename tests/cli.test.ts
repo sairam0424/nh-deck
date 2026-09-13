@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -333,9 +334,14 @@ describe("CLI: nh-deck init", () => {
 			// .worktrees/ is already gitignored for exactly this "real nested
 			// directory under repoRoot, safe to leave stray" use case (see
 			// .gitignore), so a crash before the rmSync cleanup below still
-			// can't taint `git status`.
+			// can't taint `git status`. A fresh CI checkout never has this
+			// directory on disk (it is gitignored, so nothing creates it before
+			// this test runs) -- mkdtempSync requires its parent to already
+			// exist, so it must be created here rather than assumed present.
+			const worktreesDir = path.join(repoRoot, ".worktrees");
+			mkdirSync(worktreesDir, { recursive: true });
 			const tempDir = mkdtempSync(
-				path.join(repoRoot, ".worktrees", "nh-deck-init-default-"),
+				path.join(worktreesDir, "nh-deck-init-default-"),
 			);
 			const defaultFile = path.join(tempDir, "deck.md");
 
