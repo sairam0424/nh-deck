@@ -43,6 +43,22 @@
  * delta must clear both a minimum-distance threshold and a "more horizontal
  * than vertical" check before it counts as a swipe, so ordinary vertical
  * scrolling is never hijacked -- see the touchend listener below.
+ *
+ * "?" opens a full-screen keyboard-shortcuts help overlay (`.presentation-help`,
+ * shown/hidden via a `.help-open` class on <body> -- the same class-toggle
+ * pattern "o"'s `.overview` class above already uses), and closes it again on
+ * a second "?" or Escape. A hidden keybinding by itself only relocates the
+ * discoverability problem rather than solving it, so an always-visible
+ * "? controls" hint button (created alongside the slide counter, wrapped
+ * together in the `.presentation-chrome` row render.ts's HELP_STYLE
+ * positions) opens the exact same overlay on click -- see
+ * openHelp()/closeHelp() below. Help composes with the grid overview the
+ * same "check the innermost open thing first" way overview composes with
+ * exitPresentationMode: help can be opened ON TOP of an already-open
+ * overview (openHelp()/closeHelp() never touch overviewOpen), so the
+ * keydown listener's Escape/"?" branches both check helpOpen BEFORE
+ * overviewOpen -- see that listener's own precedence comment for the full
+ * reasoning.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -56,13 +72,56 @@ export const PRESENTATION_SCRIPT = `<script>
     return;
   }
 
+  // Wraps the slide counter together with the "? controls" hint button
+  // (below) in a single flex row, positioned via render.ts's
+  // .presentation-chrome rule -- rather than making the counter and the
+  // hint button two independently "position: fixed" siblings and
+  // hand-tuning a "right" offset wide enough to clear the counter's own
+  // variable-width "N / M" text, the wrapper makes this layout self-sizing
+  // regardless of how wide that text ends up being.
+  const chromeRow = document.createElement("div");
+  chromeRow.className = "presentation-chrome";
+  document.body.appendChild(chromeRow);
+
   const counter = document.createElement("div");
   counter.className = "presentation-counter";
-  document.body.appendChild(counter);
+  chromeRow.appendChild(counter);
+
+  // The actual discoverability fix -- see this file's own module docstring
+  // above and render.ts's HELP_STYLE docstring: a hidden "?" keybinding
+  // alone just relocates the secret, so this button is always visible
+  // (whenever presenting) and opens the exact same overlay openHelp() does.
+  const helpHint = document.createElement("button");
+  helpHint.type = "button";
+  helpHint.className = "presentation-help-hint";
+  helpHint.textContent = "? controls";
+  helpHint.setAttribute("aria-label", "Show keyboard shortcuts");
+  chromeRow.appendChild(helpHint);
 
   const progress = document.createElement("div");
   progress.className = "presentation-progress";
   document.body.appendChild(progress);
+
+  // Full-screen keyboard-shortcuts overlay, opened by "?" (see the keydown
+  // listener below) or a helpHint click, and closed the same two ways.
+  // Grouped into "Navigate" (the keys/gestures that move between slides)
+  // and "View" (the keys that change which mode is showing) -- matching how
+  // this file's own module docstring already separates those two concerns.
+  const help = document.createElement("div");
+  help.className = "presentation-help";
+  help.innerHTML =
+    '<div class="presentation-help-panel">' +
+    "<h2>Keyboard shortcuts</h2>" +
+    "<dl>" +
+    "<dt>Navigate</dt>" +
+    "<dd>→ / Space / ← / Home / End / click / swipe</dd>" +
+    "<dt>View</dt>" +
+    "<dd>O — overview</dd>" +
+    "<dd>? — this help</dd>" +
+    "<dd>Esc — exit or close</dd>" +
+    "</dl>" +
+    "</div>";
+  document.body.appendChild(help);
 
   const parseHashIndex = () => {
     const n = parseInt(location.hash.slice(1), 10);
@@ -72,6 +131,7 @@ export const PRESENTATION_SCRIPT = `<script>
   let current = parseHashIndex();
   let overviewOpen = false;
   let indexBeforeOverview = current;
+  let helpOpen = false;
 
   const render = () => {
     slides.forEach((slide, i) => {
@@ -126,6 +186,29 @@ export const PRESENTATION_SCRIPT = `<script>
     goTo(indexBeforeOverview, false);
   };
 
+  // Opens the keyboard-shortcuts help overlay. Deliberately never touches
+  // overviewOpen (unlike openOverview, which records indexBeforeOverview) --
+  // help has no "current slide" concept of its own to preserve, and, more
+  // importantly, this is what lets help be opened ON TOP of an already-open
+  // grid overview (via "?" or a helpHint click) without disturbing it. See
+  // the keydown listener's own precedence comment below for how this
+  // composes with overviewOpen.
+  const openHelp = () => {
+    if (helpOpen) {
+      return;
+    }
+    helpOpen = true;
+    document.body.classList.add("help-open");
+  };
+
+  // Closes JUST the help overlay -- like openHelp() above, this never
+  // touches overviewOpen, so closing help while the grid overview happens to
+  // also be open leaves that overview exactly as it was.
+  const closeHelp = () => {
+    helpOpen = false;
+    document.body.classList.remove("help-open");
+  };
+
   // Exits presentation mode entirely, back to the normal continuous-scroll
   // document view -- WITHOUT a full page reload. Kept as its own
   // clearly-named function (rather than inlined into the Escape branch
@@ -160,17 +243,51 @@ export const PRESENTATION_SCRIPT = `<script>
     if (!document.body.classList.contains("presenting")) {
       return;
     }
-    // Escape and "o" both need the "is overview open" precedence check
-    // BEFORE anything else runs: Escape must close an open overview instead
-    // of also exiting presentation mode in the same keypress (see
-    // exitPresentationMode's docstring), and "o" toggles the overview open
-    // or closed depending on that same state.
+    // Precedence across this script's three modal-ish states -- help open,
+    // overview open, and plain presenting -- is checked in a fixed order so
+    // a single keypress never does two things at once:
+    //
+    // 1. Escape and "?" BOTH check "is help open" first, ahead of "is
+    //    overview open". Help can be opened via "?" (or a helpHint click)
+    //    WHILE the grid overview is already open -- openHelp()/closeHelp()
+    //    never touch overviewOpen (see their own docstrings above), so the
+    //    two states can be stacked with help on top of overview. Escape
+    //    must therefore close only the topmost layer: if help is open,
+    //    close JUST help, leaving overviewOpen -- and
+    //    closeOverviewToPreviousSlide's own indexBeforeOverview bookkeeping
+    //    -- completely untouched. A SECOND Escape, pressed once help is
+    //    confirmed closed, is what falls through to the pre-existing
+    //    overview-vs-exit precedence below.
+    // 2. Once help is confirmed not open, "o" and Escape's fallback are
+    //    completely unchanged from before this feature existed: they
+    //    resolve purely between overviewOpen and exitPresentationMode, per
+    //    exitPresentationMode's own docstring.
+    // 3. "o" and all slide-to-slide navigation (arrows/Home/End/Space) are
+    //    BOTH suppressed while help is open, not just navigation -- letting
+    //    "o" open the grid overview underneath a still-open help modal
+    //    would silently do a second thing on top of whatever "?" or the
+    //    helpHint click already did, which is exactly the
+    //    one-keypress-one-effect rule this whole ordering exists to
+    //    preserve.
     if (event.key === "Escape") {
-      if (overviewOpen) {
+      if (helpOpen) {
+        closeHelp();
+      } else if (overviewOpen) {
         closeOverviewToPreviousSlide();
       } else {
         exitPresentationMode();
       }
+      return;
+    }
+    if (event.key === "?") {
+      if (helpOpen) {
+        closeHelp();
+      } else {
+        openHelp();
+      }
+      return;
+    }
+    if (helpOpen) {
       return;
     }
     if (event.key === "o" || event.key === "O") {
@@ -207,6 +324,22 @@ export const PRESENTATION_SCRIPT = `<script>
     // call goTo(current + 1, false), advancing a "current slide" concept
     // that page no longer has.
     if (!document.body.classList.contains("presenting")) {
+      return;
+    }
+    // Mirrors the keydown listener's own "help open" precedence: a helpHint
+    // click must be handled before anything else below, including the
+    // overview-click branch, since (per openHelp()'s own docstring) it's
+    // meant to work even while the grid overview is already open.
+    if (event.target.closest(".presentation-help-hint")) {
+      openHelp();
+      return;
+    }
+    // Suppressed while the help overlay is open, for the same reason the
+    // keydown listener's own helpOpen early-return suppresses
+    // arrow/Home/End/Space and "o": clicking anywhere on the page --
+    // including on the dimmed slide underneath the modal-ish help overlay --
+    // must not silently advance to the next slide behind it.
+    if (helpOpen) {
       return;
     }
     if (overviewOpen) {
@@ -263,14 +396,19 @@ export const PRESENTATION_SCRIPT = `<script>
 
   document.addEventListener("touchend", (event) => {
     // Guards mirror the keydown listener's own: suppressed while the grid
-    // overview is open (same "no single active slide to move between"
-    // rationale as arrow/Home/End above), and inert once
+    // overview OR the help overlay is open (same "no single active slide to
+    // move between"/modal-overlay rationale as arrow/Home/End and the click
+    // listener's own helpOpen guard above), and inert once
     // exitPresentationMode() has removed body.presenting -- this listener,
     // like every listener in this script, is attached once and never
     // detached, so without this check a swipe on the normal
     // continuous-scroll view (reached via Escape, without a page reload)
     // would still hijack vertical scrolling.
-    if (overviewOpen || !document.body.classList.contains("presenting")) {
+    if (
+      helpOpen ||
+      overviewOpen ||
+      !document.body.classList.contains("presenting")
+    ) {
       return;
     }
     const touch = event.changedTouches[0];

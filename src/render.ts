@@ -182,9 +182,6 @@ const PRESENTATION_STYLE = `
     }
     body.presenting .presentation-counter {
       display: block;
-      position: fixed;
-      bottom: 1rem;
-      right: 1rem;
       background: var(--nh-code-bg);
       color: var(--nh-muted);
       padding: 0.25rem 0.6rem;
@@ -254,6 +251,101 @@ const OVERVIEW_STYLE = `
     }
     body.overview .notes {
       display: none !important;
+    }`;
+
+/**
+ * Discoverability chrome for presentation mode's keyboard shortcuts: a
+ * small, always-visible "? controls" hint button (`.presentation-help-hint`,
+ * wrapped together with the pre-existing `.presentation-counter` in a new
+ * `.presentation-chrome` flex row -- PRESENTATION_SCRIPT creates both inside
+ * that shared wrapper -- so the two sit visibly next to each other instead of
+ * the counter alone occupying that bottom-right corner) plus the full-screen
+ * shortcut-list overlay (`.presentation-help`) that both the hint button and
+ * PRESENTATION_SCRIPT's own "?" keydown handling open. This is the piece
+ * that actually solves discoverability: a "?" keybinding alone (like "o" for
+ * overview before it) is still a secret unless something on screen tells a
+ * first-time viewer it exists.
+ *
+ * Deliberately NOT gated behind `!customCss`, for the same reason
+ * OVERVIEW_STYLE above is not: this is core interactive presentation-mode
+ * chrome (the discoverability mechanism itself), not a suppressible
+ * decorative flourish, so a custom --css should not be able to silently
+ * hide the one thing that tells a viewer these shortcuts even exist.
+ *
+ * `.presentation-help`'s `z-index: 1000` is what lets it always render above
+ * every other piece of presentation-mode chrome -- the slide grid under
+ * `body.overview`, the counter/hint row, the progress bar -- without an
+ * `!important` fight: PRESENTATION_SCRIPT's own keydown-listener precedence
+ * comment explains why `body.overview` and `body.help-open` can both be on
+ * `<body>` at once (help can be opened via "?" or the hint button while the
+ * grid overview is already open, stacking help on top of it) -- this
+ * z-index is what makes that stacking actually render help on top, rather
+ * than underneath the grid's own thumbnails.
+ */
+const HELP_STYLE = `
+    .presentation-chrome {
+      position: fixed;
+      bottom: 1rem;
+      right: 1rem;
+      display: none;
+    }
+    body.presenting .presentation-chrome {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .presentation-help-hint {
+      display: none;
+    }
+    body.presenting .presentation-help-hint {
+      display: inline-flex;
+      align-items: center;
+      background: var(--nh-code-bg);
+      color: var(--nh-muted);
+      border: 1px solid var(--nh-border);
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      cursor: pointer;
+    }
+    .presentation-help {
+      display: none;
+    }
+    body.help-open .presentation-help {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.6);
+    }
+    .presentation-help-panel {
+      background: var(--nh-bg);
+      color: var(--nh-fg);
+      border: 1px solid var(--nh-border);
+      border-radius: 8px;
+      padding: 1.5rem 2rem;
+      max-width: 28rem;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    }
+    .presentation-help-panel h2 {
+      margin-top: 0;
+      font-size: 1.1rem;
+    }
+    .presentation-help-panel dt {
+      font-weight: 600;
+      margin-top: 0.75rem;
+    }
+    .presentation-help-panel dt:first-child {
+      margin-top: 0;
+    }
+    .presentation-help-panel dd {
+      margin: 0.25rem 0 0;
+      color: var(--nh-muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
     }`;
 
 /**
@@ -671,6 +763,7 @@ ${
     ${PRINT_PAGINATION_STYLE}
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}
+    ${HELP_STYLE}
     ${progressStyle}
     ${layoutOverride}
     ${transitionStyle}

@@ -703,3 +703,187 @@ describe("presentation mode — slide overview (grid view)", () => {
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
 });
+
+describe("presentation mode — keyboard-shortcuts help overlay", () => {
+	async function isHelpOpen(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => document.body.classList.contains("help-open"));
+	}
+
+	async function isOverviewOpen(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => document.body.classList.contains("overview"));
+	}
+
+	async function isPresenting(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => document.body.classList.contains("presenting"));
+	}
+
+	it(
+		'opening the help overlay via "?" shows the grouped shortcut list without exiting presentation mode',
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("?");
+
+			expect(await isHelpOpen(page)).toBe(true);
+
+			const helpDisplay = await page.evaluate(() => {
+				const el = document.querySelector(".presentation-help");
+				return el ? getComputedStyle(el).display : "missing";
+			});
+			expect(helpDisplay).not.toBe("none");
+
+			const helpText = await page.evaluate(
+				() => document.querySelector(".presentation-help")?.textContent ?? "",
+			);
+			expect(helpText).toContain("Navigate");
+			expect(helpText).toContain("View");
+			expect(helpText).toContain("swipe");
+			expect(helpText).toContain("overview");
+
+			expect(await isPresenting(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"closes the help overlay on Escape without exiting presentation mode",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			expect(await isHelpOpen(page)).toBe(false);
+			expect(await isPresenting(page)).toBe(true);
+			const hasPresentParam = await page.evaluate(() =>
+				new URLSearchParams(location.search).has("present"),
+			);
+			expect(hasPresentParam).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		'closes the help overlay on a second "?" press, without exiting presentation mode',
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			await page.keyboard.press("?");
+
+			expect(await isHelpOpen(page)).toBe(false);
+			expect(await isPresenting(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"suppresses slide navigation (arrows, Space, End) while the help overlay is open, and does not close it either",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			await page.keyboard.press("End");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			await page.keyboard.press(" ");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			expect(await isHelpOpen(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows an always-visible hint button next to the counter that also opens the help overlay on click",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			const hintDisplay = await page.evaluate(() => {
+				const el = document.querySelector(".presentation-help-hint");
+				return el ? getComputedStyle(el).display : "missing";
+			});
+			expect(hintDisplay).not.toBe("none");
+
+			const hintIsVisible = await page.evaluate(() => {
+				const el = document.querySelector(
+					".presentation-help-hint",
+				) as HTMLElement | null;
+				return el !== null && el.offsetParent !== null;
+			});
+			expect(hintIsVisible).toBe(true);
+
+			await page.click(".presentation-help-hint");
+
+			expect(await isHelpOpen(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"closing the help overlay while the grid overview is also open leaves the overview untouched (regression: a single Escape must never close two things at once)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			await page.keyboard.press("o");
+			expect(await isOverviewOpen(page)).toBe(true);
+
+			// Opens help ON TOP of the already-open overview.
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			// Help closed; overview and presentation mode both untouched.
+			expect(await isHelpOpen(page)).toBe(false);
+			expect(await isOverviewOpen(page)).toBe(true);
+			expect(await isPresenting(page)).toBe(true);
+
+			// A second Escape (help now closed) falls through to the
+			// pre-existing overview-close behavior, returning to slide 2.
+			await page.keyboard.press("Escape");
+			expect(await isOverviewOpen(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"hides the help overlay and hint button once Escape exits presentation mode entirely",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("Escape");
+
+			const chromeDisplay = await page.evaluate(() => {
+				const help = document.querySelector(".presentation-help");
+				const hint = document.querySelector(".presentation-help-hint");
+				return {
+					helpDisplay: help ? getComputedStyle(help).display : "missing",
+					hintDisplay: hint ? getComputedStyle(hint).display : "missing",
+				};
+			});
+			expect(chromeDisplay.helpDisplay).toBe("none");
+			expect(chromeDisplay.hintDisplay).toBe("none");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
