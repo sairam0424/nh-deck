@@ -772,6 +772,22 @@ marked.use({
  * above) -- `mermaid` fenced code blocks render as CDN-free SVG diagrams via
  * `renderMermaidDiagram`, while every other language renders exactly as
  * marked's own default code renderer would.
+ *
+ * `cssVars`, when given (and `customCss` is not), is a small raw CSS
+ * snippet -- typically a single `:root { --nh-accent: #...; }`-shaped block
+ * overriding a subset of the 6 `--nh-*` custom properties -- concatenated
+ * verbatim immediately after `themeOverride` and before the baseline `body
+ * { ... }` rule. This is the exact same "later `:root` block at equal
+ * specificity wins" mechanism `themeOverride` itself already uses to sit on
+ * top of the baseline/dark-mode `:root` blocks (see docs/adr/0008's
+ * "Baseline stylesheet refactor mechanism" decision) -- `cssVars` is not a
+ * new cascade concept, just one more block placed later in the same
+ * `:root`-block chain, so it composes with an active theme rather than
+ * replacing it. See docs/specs/css-vars-override-design.md for why this is
+ * a distinct, narrower mechanism than `customCss` (which replaces this
+ * entire `<style>` block wholesale) rather than a reopening of
+ * docs/specs/theme-system-design.md §2's "no CSS-cascade-layering
+ * complexity" decision for `--css` itself.
  */
 export function generateHtml(
 	markdown: string,
@@ -779,6 +795,7 @@ export function generateHtml(
 	customCss?: string,
 	themeColors?: ThemeColors,
 	transitionName?: TransitionName,
+	cssVars?: string,
 ): string {
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
@@ -832,6 +849,16 @@ export function generateHtml(
 		: "";
 	const themeOverride =
 		!customCss && themeColors ? themeToCssVarBlock(themeColors) : "";
+	// Gated the same way themeOverride/layoutOverride/transitionStyle/
+	// progressStyle already are: a full --css replacement (customCss) makes a
+	// small vars overlay meaningless on top of it, since customCss becomes the
+	// entire <style> block's content below, not a layer within it. index.ts's
+	// own computeEffectiveCssVars already enforces this same mutual exclusion
+	// one level up (with a stderr note) before ever calling generateHtml, but
+	// this repeats the check here too -- the same defense-in-depth every other
+	// customCss-gated override in this function already has, and what lets a
+	// caller (e.g. a direct unit test) pass both arguments together safely.
+	const cssVarsOverride = !customCss && cssVars ? cssVars : "";
 	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
 	const transitionStyle =
 		!customCss && transitionName ? transitionToCssBlock(transitionName) : "";
@@ -876,6 +903,7 @@ ${
       }
     }
     ${themeOverride}
+    ${cssVarsOverride}
     body {
       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
       line-height: 1.6;

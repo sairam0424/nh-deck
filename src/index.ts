@@ -160,6 +160,40 @@ function computeEffectiveTransition(
 	};
 }
 
+/**
+ * Computes the effective --css-vars overlay content for a render/pdf/png
+ * invocation, handling --css mutual exclusivity -- mirrors
+ * computeEffectiveTheme/computeEffectiveTransition's exact shape (a pure
+ * function returning `{ value, message? }` so callers can print any
+ * resulting note explicitly) and the identical "one wins, the other is
+ * dropped with a stderr note" precedent those two functions already
+ * establish for --css. Unlike --theme/--transition, --css-vars has no
+ * frontmatter counterpart and no name to validate against a fixed registry
+ * -- it is raw CSS file content read straight from `--css-vars <path>`, so
+ * there is no "unknown value, fall back with a warning" case here, only the
+ * mutual-exclusivity one. See docs/specs/css-vars-override-design.md for why
+ * --css-vars (a small variable overlay that composes with --theme) is a
+ * distinct, narrower mechanism than --css (a full stylesheet replacement,
+ * for which a layering scheme was already considered and rejected -- see
+ * docs/specs/theme-system-design.md §2).
+ */
+function computeEffectiveCssVars(
+	cssVars: string | undefined,
+	customCss: string | undefined,
+): { cssVars: string | undefined; message?: string } {
+	if (!cssVars) {
+		return { cssVars: undefined };
+	}
+	if (customCss) {
+		return {
+			cssVars: undefined,
+			message:
+				"nh-deck: note: --css overrides --css-vars; it was not applied.\n",
+		};
+	}
+	return { cssVars };
+}
+
 // Read directly from package.json rather than a hardcoded string literal --
 // this exact CLI shipped `--version` reporting "0.1.0" through the entire
 // 1.0.0 release, since a literal is never touched by a version bump unless
@@ -200,6 +234,10 @@ program
 		"path to a custom CSS file that fully replaces the default stylesheet",
 	)
 	.option(
+		"--css-vars <path>",
+		"path to a small CSS file overlaying specific --nh-* custom properties (e.g. --nh-accent) on top of the active theme; composes with --theme, mutually exclusive with --css",
+	)
+	.option(
 		"--theme <name>",
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
@@ -215,6 +253,7 @@ program
 				port?: number;
 				watch?: boolean;
 				css?: string;
+				cssVars?: string;
 				theme?: string;
 				transition?: string;
 			},
@@ -223,6 +262,14 @@ program
 				const customCss = options.css
 					? readFileSync(options.css, "utf8")
 					: undefined;
+				const cssVarsContent = options.cssVars
+					? readFileSync(options.cssVars, "utf8")
+					: undefined;
+				const { cssVars: effectiveCssVars, message: cssVarsMessage } =
+					computeEffectiveCssVars(cssVarsContent, customCss);
+				if (cssVarsMessage) {
+					process.stderr.write(cssVarsMessage);
+				}
 				const rawMarkdown = readFileSync(file, "utf8");
 				if (containsUnsafeHtml(rawMarkdown)) {
 					process.stderr.write(UNSAFE_HTML_WARNING);
@@ -248,6 +295,7 @@ program
 					customCss,
 					themeColors,
 					transitionName,
+					effectiveCssVars,
 				);
 				const { url, updateHtml, server } = await startServer(
 					html,
@@ -285,6 +333,7 @@ program
 									customCss,
 									updatedThemeColors,
 									updatedTransitionName,
+									effectiveCssVars,
 								),
 							);
 						} catch {
@@ -316,6 +365,10 @@ program
 		"path to a custom CSS file that fully replaces the default stylesheet",
 	)
 	.option(
+		"--css-vars <path>",
+		"path to a small CSS file overlaying specific --nh-* custom properties (e.g. --nh-accent) on top of the active theme; composes with --theme, mutually exclusive with --css",
+	)
+	.option(
 		"--theme <name>",
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
@@ -323,12 +376,20 @@ program
 		async (
 			file: string,
 			output?: string,
-			options?: { css?: string; theme?: string },
+			options?: { css?: string; cssVars?: string; theme?: string },
 		) => {
 			try {
 				const customCss = options?.css
 					? readFileSync(options.css, "utf8")
 					: undefined;
+				const cssVarsContent = options?.cssVars
+					? readFileSync(options.cssVars, "utf8")
+					: undefined;
+				const { cssVars: effectiveCssVars, message: cssVarsMessage } =
+					computeEffectiveCssVars(cssVarsContent, customCss);
+				if (cssVarsMessage) {
+					process.stderr.write(cssVarsMessage);
+				}
 				const rawMarkdown = readFileSync(file, "utf8");
 				if (containsUnsafeHtml(rawMarkdown)) {
 					process.stderr.write(UNSAFE_HTML_WARNING);
@@ -339,7 +400,14 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
-				const html = generateHtml(markdown, file, customCss, themeColors);
+				const html = generateHtml(
+					markdown,
+					file,
+					customCss,
+					themeColors,
+					undefined,
+					effectiveCssVars,
+				);
 				const outputPath = resolveOutputPath(file, output);
 
 				await exportToPdf(html, outputPath);
@@ -363,6 +431,10 @@ program
 		"path to a custom CSS file that fully replaces the default stylesheet",
 	)
 	.option(
+		"--css-vars <path>",
+		"path to a small CSS file overlaying specific --nh-* custom properties (e.g. --nh-accent) on top of the active theme; composes with --theme, mutually exclusive with --css",
+	)
+	.option(
 		"--theme <name>",
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
@@ -370,12 +442,20 @@ program
 		async (
 			file: string,
 			output?: string,
-			options?: { css?: string; theme?: string },
+			options?: { css?: string; cssVars?: string; theme?: string },
 		) => {
 			try {
 				const customCss = options?.css
 					? readFileSync(options.css, "utf8")
 					: undefined;
+				const cssVarsContent = options?.cssVars
+					? readFileSync(options.cssVars, "utf8")
+					: undefined;
+				const { cssVars: effectiveCssVars, message: cssVarsMessage } =
+					computeEffectiveCssVars(cssVarsContent, customCss);
+				if (cssVarsMessage) {
+					process.stderr.write(cssVarsMessage);
+				}
 				const rawMarkdown = readFileSync(file, "utf8");
 				if (containsUnsafeHtml(rawMarkdown)) {
 					process.stderr.write(UNSAFE_HTML_WARNING);
@@ -386,7 +466,14 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
-				const html = generateHtml(markdown, file, customCss, themeColors);
+				const html = generateHtml(
+					markdown,
+					file,
+					customCss,
+					themeColors,
+					undefined,
+					effectiveCssVars,
+				);
 				const outputPath = resolveOutputPath(file, output, "png");
 
 				const written = await exportToPng(html, outputPath);

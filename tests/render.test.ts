@@ -583,6 +583,127 @@ describe("generateHtml — named themes", () => {
 	});
 });
 
+describe("generateHtml — --css-vars overlay", () => {
+	// Unlike --css (which replaces the entire <style> block wholesale, see
+	// the "custom CSS opt-out" describe block above), --css-vars is designed
+	// to be a small variable overlay that COMPOSES with the rest of
+	// generateHtml's output -- the active theme's own :root block, the fixed
+	// layout/transition/progress-bar CSS, everything --css's own
+	// mutual-exclusivity with LAYOUT_STYLE/transitionStyle/progressStyle
+	// silently drops. See docs/specs/css-vars-override-design.md.
+	const ACCENT_OVERLAY = ":root { --nh-accent: #ff6600; }";
+
+	it("produces byte-identical output with no --css-vars argument (regression guard)", () => {
+		const withoutArg = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+		const withUndefinedCssVars = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedCssVars).toBe(withoutArg);
+	});
+
+	it("overlays a --css-vars custom property on top of the default (no-theme) stylesheet", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain(ACCENT_OVERLAY);
+		// The overlay's own accent value must appear strictly after the
+		// baseline stylesheet's default --nh-accent declaration -- "later in
+		// source wins" is the entire mechanism this feature relies on.
+		expect(html.indexOf(ACCENT_OVERLAY)).toBeGreaterThan(
+			html.indexOf("--nh-accent: #0b5fff"),
+		);
+	});
+
+	it("composes with an active theme, appearing after the theme's own :root override block", () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			{ bg: "#2e3440", fg: "#d8dee9", accent: "#88c0d0" },
+			undefined,
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain("--nh-bg: #2e3440");
+		expect(html).toContain(ACCENT_OVERLAY);
+		expect(html.indexOf(ACCENT_OVERLAY)).toBeGreaterThan(
+			html.indexOf("--nh-bg: #2e3440"),
+		);
+	});
+
+	it("preserves layout and transition CSS alongside a --css-vars overlay (unlike a full --css replacement, which drops both)", () => {
+		const html = generateHtml(
+			"<!-- layout: title -->\n\n# Heading\n",
+			"sample",
+			undefined,
+			undefined,
+			"fade",
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain(ACCENT_OVERLAY);
+		expect(html).toContain(".slide.layout-title");
+		expect(html).toContain("transition: opacity");
+		expect(html).toContain("body.presenting .presentation-progress");
+	});
+
+	it("ignores --css-vars when customCss is also given (mutual exclusivity mirrors --theme's own precedent)", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			"body { color: purple; }",
+			undefined,
+			undefined,
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain("body { color: purple; }");
+		expect(html).not.toContain(ACCENT_OVERLAY);
+	});
+
+	it(
+		"actually changes the computed color of an element styled via var(--nh-accent) in a real browser",
+		async () => {
+			const html = generateHtml(
+				"[a link](https://example.com)",
+				"sample",
+				undefined,
+				undefined,
+				undefined,
+				ACCENT_OVERLAY,
+			);
+			const page = await openHtmlPage(html);
+
+			const color = await page.evaluate(() => {
+				const link = document.querySelector("a");
+				return link ? getComputedStyle(link).color : null;
+			});
+
+			// #ff6600 -> rgb(255, 102, 0)
+			expect(color).toBe("rgb(255, 102, 0)");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
 describe("generateHtml — presenter notes", () => {
 	it("renders a slide's HTML comment as a hidden aside with class notes", () => {
 		const html = generateHtml("# Slide\n\n<!-- speaker note here -->\n");
