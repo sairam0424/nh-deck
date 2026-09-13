@@ -35,6 +35,18 @@ async function openPresentationPage(html: string, path = "/?present") {
 	const executablePath = detectBrowserExecutable();
 	activeBrowser = await puppeteer.launch({ executablePath, headless: true });
 	const page = await activeBrowser.newPage();
+	// Some CI runner images (observed on macOS-14 and windows-latest GitHub
+	// Actions hosts, but not ubuntu-latest) default to an OS-level "reduce
+	// motion" accessibility setting, which headless Chromium surfaces as
+	// prefers-reduced-motion: reduce. render.ts's REDUCED_MOTION_STYLE then
+	// forces `transform: none !important` on every .slide, which silently
+	// zeroes out any test that asserts a specific transform/translateX value
+	// during a transition -- this file's tests are about the normal
+	// (non-reduced-motion) transition path, so every page here explicitly
+	// pins the opposite of that ambient host state rather than inheriting it.
+	await page.emulateMediaFeatures([
+		{ name: "prefers-reduced-motion", value: "no-preference" },
+	]);
 	await page.goto(`${activeServer.url}${path}`, { waitUntil: "load" });
 	return page;
 }
