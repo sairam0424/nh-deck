@@ -44,8 +44,9 @@ tools, both fixed here.
 - `--css-vars <path>` on `render`/`pdf`/`png`: overlay just a few CSS custom
   properties (e.g. `--nh-accent`) without losing all 4 layouts, both
   transitions, and the progress bar the way the existing `--css` flag's full
-  stylesheet replacement does. Mutually exclusive with `--css`, composes
-  with `--theme`. See `docs/specs/css-vars-override-design.md`.
+  stylesheet replacement does. When both are provided, `--css` takes
+  precedence and `--css-vars` is not applied (with a stderr note); `--css-vars`
+  composes with `--theme`. See `docs/specs/css-vars-override-design.md`.
 - PDF exports now include small, centered, muted page numbers by default.
 
 ## [1.1.0] - 2026-09-13
