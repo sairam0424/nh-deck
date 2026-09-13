@@ -35,6 +35,7 @@ describe("exportToPng — no browser installed", () => {
 
 		const launch = vi.fn().mockResolvedValue({
 			newPage: vi.fn().mockResolvedValue({
+				setViewport: vi.fn().mockResolvedValue(undefined),
 				setContent: vi.fn().mockResolvedValue(undefined),
 				$$: vi.fn().mockResolvedValue([]),
 				close: vi.fn().mockResolvedValue(undefined),

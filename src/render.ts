@@ -60,10 +60,28 @@ const NOTES_STYLE = `
       }
     }`;
 
+/**
+ * `print-color-adjust: exact` (plus the `-webkit-` prefix Chromium/Safari
+ * still need) stops a browser's print pipeline from silently substituting
+ * background colors for something print-friendlier -- without it, a dark
+ * theme's `--nh-bg` background is dropped entirely when a user prints this
+ * raw `generateHtml()` output directly via the browser's own Ctrl+P dialog.
+ * Scoped to the universal selector (not just `.slide`/`body`) since the
+ * property does not inherit to descendants in every browser implementation,
+ * and any element could carry a theme-derived background (code blocks,
+ * blockquotes, mermaid diagram fills, ...). This is a separate code path
+ * from pdfExport.ts's own `printBackground: true` Puppeteer option, which
+ * only covers the CLI's own `pdf`/`png` export commands, not a raw
+ * browser print of the rendered HTML.
+ */
 const PRINT_PAGINATION_STYLE = `
     @media print {
       .slide {
         break-after: page;
+      }
+      * {
+        print-color-adjust: exact;
+        -webkit-print-color-adjust: exact;
       }
     }`;
 

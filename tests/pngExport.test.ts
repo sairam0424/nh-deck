@@ -1,9 +1,15 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
+import { PNG } from "pngjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportToPng } from "../src/pngExport.js";
 import { generateHtml } from "../src/render.js";
+
+// pngjs is already a devDependency used the same way
+// (`PNG.sync.read(buffer).width`/`.height`) in
+// scripts/check-pdf-fidelity.mjs's cross-browser pixel comparison -- reused
+// here rather than hand-parsing PNG's IHDR chunk.
 
 describe("exportToPng", () => {
 	let dir: string;
@@ -47,6 +53,86 @@ describe("exportToPng", () => {
 			join(dottedDir, "deck-2"),
 		]);
 	}, 30_000);
+
+	it("produces identical PNG dimensions for every slide in one export call", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-test-"));
+		const outputPath = join(dir, "deck.png");
+		// A minimal custom stylesheet (generateHtml's customCss param "fully
+		// replaces the default stylesheet" -- see the CLI's own --css help
+		// text) ties each `.slide`'s box directly to the viewport via vw/vh,
+		// deliberately isolating this assertion from the *default* stylesheet's
+		// own unrelated `.slide:last-of-type` rule (drops padding-bottom/
+		// border-bottom, so under the default stylesheet the last slide of any
+		// deck is intentionally ~33px shorter than the others -- a real,
+		// separate rendering decision about the continuous-scroll view, not a
+		// viewport-locking bug). With the viewport genuinely locked to a fixed
+		// 1280x720 size (this stage's fix), every slide's 50vw x 50vh box
+		// resolves to the exact same 640x360 regardless of position or content.
+		const customCss = `
+      body { margin: 0; }
+      .slide {
+        display: block;
+        width: 50vw;
+        height: 50vh;
+        margin: 0;
+        padding: 0;
+        border: none;
+        box-sizing: border-box;
+        overflow: hidden;
+      }
+    `;
+		const html = generateHtml(
+			"# Slide 1\n\n---\n\n# Slide 2\n\n---\n\n# Slide 3\n\n---\n\n# Slide 4",
+			undefined,
+			customCss,
+		);
+
+		const written = await exportToPng(html, outputPath);
+
+		expect(written).toHaveLength(4);
+		const dimensions = written.map((path) => {
+			const png = PNG.sync.read(readFileSync(path));
+			return { width: png.width, height: png.height };
+		});
+		for (const dimension of dimensions) {
+			expect(dimension).toEqual(dimensions[0]);
+		}
+		// Pinned to the fixed 1280x720 viewport this fix sets (50vw x 50vh of
+		// it), not just "coincidentally equal to each other".
+		expect(dimensions[0]).toEqual({ width: 640, height: 360 });
+	}, 30_000);
+
+	it("zero-pads slide numbers in filenames so they sort lexicographically in slide order", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-test-"));
+		const outputPath = join(dir, "deck.png");
+		const markdown = Array.from(
+			{ length: 12 },
+			(_, i) => `# Slide ${i + 1}`,
+		).join("\n\n---\n\n");
+		const html = generateHtml(markdown);
+
+		const written = await exportToPng(html, outputPath);
+
+		const names = written.map((path) => basename(path));
+		expect(names).toEqual([
+			"deck-01.png",
+			"deck-02.png",
+			"deck-03.png",
+			"deck-04.png",
+			"deck-05.png",
+			"deck-06.png",
+			"deck-07.png",
+			"deck-08.png",
+			"deck-09.png",
+			"deck-10.png",
+			"deck-11.png",
+			"deck-12.png",
+		]);
+		// The actual regression this guards: an unpadded "deck-10.png" would
+		// sort lexicographically before "deck-2.png" in a plain filesystem
+		// listing. Padded names must sort identically to slide order.
+		expect([...names].sort()).toEqual(names);
+	}, 30_000);
 });
 
 describe("exportToPng — post-launch export failure", () => {
@@ -80,6 +166,7 @@ describe("exportToPng — post-launch export failure", () => {
 			default: {
 				launch: vi.fn().mockResolvedValue({
 					newPage: vi.fn().mockResolvedValue({
+						setViewport: vi.fn().mockResolvedValue(undefined),
 						setContent: vi.fn().mockResolvedValue(undefined),
 						$$: vi.fn().mockResolvedValue([{ screenshot }]),
 						close: vi.fn().mockResolvedValue(undefined),

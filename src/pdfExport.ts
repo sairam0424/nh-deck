@@ -2,6 +2,29 @@ import puppeteer from "puppeteer-core";
 import { detectBrowserExecutable } from "./browserLaunch.js";
 
 /**
+ * Small, unobtrusive centered page-number footer injected into every
+ * exported PDF page via Puppeteer's displayHeaderFooter/footerTemplate.
+ * Header/footer templates render in their own isolated document context
+ * (Chromium's print pipeline) with no access to the deck's own <style>
+ * block, so this cannot reference the deck's `var(--nh-muted)` custom
+ * property and instead hardcodes a neutral muted gray matching this
+ * codebase's existing muted-text-color convention (see render.ts's
+ * `.presentation-counter`/`.slide.layout-section p`, which both use
+ * `color: var(--nh-muted)` at a small font-size for the same
+ * unobtrusive-secondary-text role).
+ *
+ * `headerTemplate` is deliberately left unset: verified empirically that
+ * Puppeteer's default (an empty string) renders no header content at all
+ * -- it does not fall back to Chromium's own built-in header (which would
+ * otherwise print the document title/URL/date), so there is nothing to
+ * suppress here.
+ */
+const PDF_FOOTER_TEMPLATE = `
+  <div style="width: 100%; font-size: 8px; text-align: center; color: #888888; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <span class="pageNumber"></span> / <span class="totalPages"></span>
+  </div>`;
+
+/**
  * Renders the given HTML to a PDF at outputPath using a locally-installed
  * Chrome/Chromium/Edge/Brave browser, detected via chrome-launcher.
  *
@@ -48,7 +71,30 @@ export async function exportToPdf(
 		// here, especially given nh-deck's local-first constraint: rendered
 		// decks never depend on a network fetch to finish loading.
 		await page.setContent(html, { waitUntil: "load" });
-		await page.pdf({ path: outputPath, format: "A4", printBackground: true });
+		await page.pdf({
+			path: outputPath,
+			// 13.333in x 7.5in is the standard 16:9 widescreen slide size
+			// (the PowerPoint/Google Slides default), matching this deck's own
+			// on-screen aspect ratio -- deliberately NOT `format: "A4"`
+			// (portrait), which produced narrow, vertically-stacked pages for
+			// 100% of export users.
+			//
+			// Deliberately no `landscape: true` alongside these explicit
+			// width/height values: verified empirically against this installed
+			// puppeteer-core version (probe script, both outputs' /MediaBox
+			// inspected directly) that combining `landscape: true` with an
+			// already-landscape-shaped explicit width/height SWAPS them straight
+			// back to portrait -- Chromium's Page.printToPDF treats `landscape`
+			// as "rotate the given paperWidth/paperHeight", not "this pair is
+			// already rotated". So `landscape` is intentionally omitted here,
+			// not merely forgotten.
+			width: "13.333in",
+			height: "7.5in",
+			printBackground: true,
+			displayHeaderFooter: true,
+			footerTemplate: PDF_FOOTER_TEMPLATE,
+			margin: { top: "0in", bottom: "0.3in", left: "0in", right: "0in" },
+		});
 		await page.close();
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);

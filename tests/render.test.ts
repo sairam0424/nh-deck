@@ -697,6 +697,32 @@ describe("generateHtml — PDF pagination", () => {
 
 		expect(html).toMatch(/@media print[^}]*\.slide[^}]*break-after:\s*page/);
 	});
+
+	it("forces exact background/color printing in print media, so themed backgrounds survive a raw browser Ctrl+P", () => {
+		const html = generateHtml("# Slide 1\n\n---\n\n# Slide 2");
+
+		// Without this, a browser's print pipeline can silently substitute a
+		// dark theme's background for something print-friendlier when the
+		// user prints this raw generateHtml() output directly (e.g. via
+		// Ctrl+P) rather than going through pdfExport.ts's own
+		// `printBackground: true` Puppeteer option, which only covers the
+		// CLI's own `pdf`/`png` export commands.
+		//
+		// Uses indexOf rather than a single `toMatch` regex (unlike the sibling
+		// test above) because PRINT_PAGINATION_STYLE's `@media print` block now
+		// contains two separate rules -- a `[^}]*`-style regex spanning both
+		// would incorrectly require no `}` between them, which no longer holds
+		// now that the `.slide { break-after: page; }` rule's own closing brace
+		// sits in between.
+		const printMediaIndex = html.indexOf("@media print");
+		expect(printMediaIndex).toBeGreaterThan(-1);
+		expect(
+			html.indexOf("print-color-adjust: exact;", printMediaIndex),
+		).toBeGreaterThan(printMediaIndex);
+		expect(
+			html.indexOf("-webkit-print-color-adjust: exact;", printMediaIndex),
+		).toBeGreaterThan(printMediaIndex);
+	});
 });
 
 describe("containsUnsafeHtml", () => {
