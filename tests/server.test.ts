@@ -1,6 +1,22 @@
 import * as http from "node:http";
+import * as zlib from "node:zlib";
 import { describe, expect, it } from "vitest";
 import { startServer } from "../src/server.js";
+
+function getWithHeaders(
+	url: string,
+	headers: http.OutgoingHttpHeaders,
+): Promise<{ res: http.IncomingMessage; body: Buffer }> {
+	return new Promise((resolve, reject) => {
+		const req = http.get(url, { headers }, (res) => {
+			const chunks: Buffer[] = [];
+			res.on("data", (chunk: Buffer) => chunks.push(chunk));
+			res.on("end", () => resolve({ res, body: Buffer.concat(chunks) }));
+			res.on("error", reject);
+		});
+		req.on("error", reject);
+	});
+}
 
 describe("startServer", () => {
 	it("serves the given HTML on the resolved loopback URL", async () => {
@@ -37,6 +53,81 @@ describe("startServer", () => {
 		});
 
 		await new Promise<void>((resolve) => first.server.close(() => resolve()));
+	});
+});
+
+describe("startServer — gzip compression", () => {
+	it("gzip-compresses the response when the client sends Accept-Encoding: gzip", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip",
+		});
+
+		expect(res.headers["content-encoding"]).toBe("gzip");
+		const decompressed = await new Promise<string>((resolve, reject) => {
+			zlib.gunzip(body, (err, result) => {
+				if (err) reject(err);
+				else resolve(result.toString("utf8"));
+			});
+		});
+		expect(decompressed).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("serves an uncompressed response with no Content-Encoding when the client sends no Accept-Encoding header", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, {});
+
+		expect(res.headers["content-encoding"]).toBeUndefined();
+		expect(body.toString("utf8")).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("still gzip-compresses the reload-injected HTML in watch mode", async () => {
+		const html = "<!DOCTYPE html><html><body><p>v1</p></body></html>";
+		const { server, url } = await startServer(html, 0, { watch: true });
+
+		const { res, body } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip",
+		});
+
+		expect(res.headers["content-encoding"]).toBe("gzip");
+		const decompressed = await new Promise<string>((resolve, reject) => {
+			zlib.gunzip(body, (err, result) => {
+				if (err) reject(err);
+				else resolve(result.toString("utf8"));
+			});
+		});
+		expect(decompressed).toContain("<script>");
+		expect(decompressed).toContain("/__nh-deck-reload");
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("never gzip-compresses the SSE reload endpoint itself", async () => {
+		const { server, url } = await startServer("<p>x</p>", 0, { watch: true });
+
+		// The SSE endpoint's connection never ends on its own, so this checks
+		// headers as soon as they arrive rather than waiting for the response
+		// body to finish (getWithHeaders's "end" event would never fire here).
+		const req = http.get(
+			`${url}/__nh-deck-reload`,
+			{ headers: { "Accept-Encoding": "gzip" } },
+			(res) => {
+				expect(res.headers["content-encoding"]).toBeUndefined();
+				req.destroy();
+			},
+		);
+		await new Promise<void>((resolve) => req.once("close", resolve));
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 });
 

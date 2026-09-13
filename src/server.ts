@@ -1,4 +1,5 @@
 import * as http from "node:http";
+import * as zlib from "node:zlib";
 
 export interface StartedServer {
 	server: http.Server;
@@ -32,6 +33,43 @@ function withReloadScript(html: string): string {
 	return html.includes("</body>")
 		? html.replace("</body>", `${RELOAD_SCRIPT}\n</body>`)
 		: `${html}${RELOAD_SCRIPT}`;
+}
+
+/**
+ * Checked against the request itself rather than assumed -- only compress
+ * when the client actually declares gzip support, so a client that can't
+ * decode it keeps getting a plain, uncompressed response.
+ */
+function acceptsGzip(req: http.IncomingMessage): boolean {
+	const header = req.headers["accept-encoding"];
+	return (
+		typeof header === "string" &&
+		header.split(",").some((encoding) => encoding.trim().startsWith("gzip"))
+	);
+}
+
+function sendHtml(
+	req: http.IncomingMessage,
+	res: http.ServerResponse,
+	html: string,
+): void {
+	if (!acceptsGzip(req)) {
+		res.writeHead(200, { "Content-Type": "text/html" });
+		res.end(html);
+		return;
+	}
+	zlib.gzip(html, (err, compressed) => {
+		if (err) {
+			res.writeHead(200, { "Content-Type": "text/html" });
+			res.end(html);
+			return;
+		}
+		res.writeHead(200, {
+			"Content-Type": "text/html",
+			"Content-Encoding": "gzip",
+		});
+		res.end(compressed);
+	});
 }
 
 /**
@@ -71,8 +109,11 @@ export function startServer(
 				return;
 			}
 
-			res.writeHead(200, { "Content-Type": "text/html" });
-			res.end(options.watch ? withReloadScript(currentHtml) : currentHtml);
+			sendHtml(
+				req,
+				res,
+				options.watch ? withReloadScript(currentHtml) : currentHtml,
+			);
 		});
 
 		server.once("error", (err) => {
