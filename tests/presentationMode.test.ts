@@ -887,3 +887,269 @@ describe("presentation mode — keyboard-shortcuts help overlay", () => {
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
 });
+
+describe("presentation mode — fragment (incremental reveal) state machine", () => {
+	// Slide 1 (index 0) has no fragments; slide 2 (index 1) has three,
+	// each marked via its own nested/trailing marker (one per bullet);
+	// slide 3 (index 2) has none. This shape lets forward/backward
+	// navigation into and out of the fragment-bearing slide be exercised
+	// from both directions.
+	const FRAGMENT_DECK =
+		"# Slide 1\n\nIntro, no fragments here.\n\n---\n\n" +
+		"# Slide 2\n\n" +
+		"- Point A\n  <!-- fragment -->\n" +
+		"- Point B\n  <!-- fragment -->\n" +
+		"- Point C\n  <!-- fragment -->\n\n---\n\n" +
+		"# Slide 3\n\nNo fragments here either.";
+
+	async function fragmentStates(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() =>
+			Array.from(document.querySelectorAll(".slide.is-active .fragment")).map(
+				(el) => ({
+					isRevealed: el.classList.contains("is-revealed"),
+					ariaHidden: el.getAttribute("aria-hidden"),
+				}),
+			),
+		);
+	}
+
+	it(
+		"advancing forward reveals one fragment at a time before moving to the next slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+			]);
+
+			// All three now revealed -- the NEXT ArrowRight finally advances
+			// the slide itself, rather than doing nothing or revealing a
+			// fourth (nonexistent) fragment.
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"entering a fragment-bearing slide backward (ArrowLeft from the next slide) shows every fragment already revealed",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			// Reach slide 3 without ever revealing slide 2's own fragments.
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			await page.keyboard.press("End");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+
+			// Slide 3 has no fragments, so this single ArrowLeft falls through
+			// to goTo(1, true) -- entering slide 2 BACKWARD.
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+			]);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"backward navigation conceals fragments in reverse order, one at a time, before moving to the previous slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			// Land on slide 2 with all three fragments already revealed (via
+			// the backward-entry path exercised in the test above).
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("End");
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+			]);
+
+			// Conceals Point C first (the last one revealed).
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			// Then Point B.
+			await page.keyboard.press("ArrowLeft");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			// Then Point A -- now none remain revealed, but ArrowLeft still
+			// has not moved off slide 2.
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			// Only NOW, with nothing left to conceal, does ArrowLeft finally
+			// retreat to the previous slide.
+			await page.keyboard.press("ArrowLeft");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"resets a fragment-bearing slide's reveal state to fully concealed when re-entered forward, even if it was left partially revealed (a direct jump via the overview, not a step-by-step retreat)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			// Reveal 2 of slide 2's 3 fragments, then jump away (End) while
+			// still partially revealed -- a direct jump never resets the
+			// slide being LEFT, only the slide being ENTERED.
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("End");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+
+			// Jump back to slide 2 via the grid overview -- a thumbnail click
+			// always calls goTo(index, false), i.e. a FORWARD entry,
+			// regardless of the click's spatial direction.
+			await page.keyboard.press("o");
+			await page.click(".slide:nth-of-type(2)");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"a click advances fragments one at a time before advancing the slide, same as ArrowRight",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			await page.click("body");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			await page.click("body");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"a deck with no fragments on the current slide navigates exactly as before (no behavior change for fragment-free decks)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			// Slide 1 has zero fragments -- ArrowRight must advance the slide
+			// immediately, on the very first press.
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"the grid overview shows every fragment fully visible regardless of its reveal state",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("ArrowRight");
+			// Exactly one of slide 2's three fragments is now revealed; the
+			// other two are still concealed.
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			await page.keyboard.press("o");
+
+			const opacities = await page.evaluate(() =>
+				Array.from(
+					document.querySelectorAll(".slide:nth-of-type(2) .fragment"),
+				).map((el) => getComputedStyle(el).opacity),
+			);
+			expect(opacities).toEqual(["1", "1", "1"]);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a fast linear opacity transition to a fragment's reveal when prefers-reduced-motion is enabled",
+		async () => {
+			activeServer = await startServer(generateHtml(FRAGMENT_DECK), 0);
+			const executablePath = detectBrowserExecutable();
+			activeBrowser = await puppeteer.launch({
+				executablePath,
+				headless: true,
+			});
+			const page = await activeBrowser.newPage();
+			await page.emulateMediaFeatures([
+				{ name: "prefers-reduced-motion", value: "reduce" },
+			]);
+			await page.goto(`${activeServer.url}/?present`, { waitUntil: "load" });
+
+			await page.keyboard.press("ArrowRight");
+
+			const transition = await page.evaluate(() => {
+				const el = document.querySelector(".fragment");
+				return el ? getComputedStyle(el).transitionDuration : null;
+			});
+
+			expect(transition).toBe("0.2s");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});

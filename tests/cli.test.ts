@@ -1302,8 +1302,16 @@ describe("CLI: nh-deck render --watch", () => {
 			expect(updatedBody).toContain("transform: translateX"); // slide transition
 			// The fade transition's own base rule (0.3s ease) must be gone, even
 			// though the shared prefers-reduced-motion override (0.2s linear) is
-			// present for every transition, "slide" included.
-			expect(updatedBody).not.toContain("transition: opacity 0.3s ease");
+			// present for every transition, "slide" included. Checked via this
+			// exact multi-line combo (rather than the bare "transition: opacity
+			// 0.3s ease" substring) because FRAGMENT_STYLE's own unconditional
+			// body.presenting .fragment rule now legitimately contains that exact
+			// same substring for an unrelated feature -- see render.ts's
+			// FRAGMENT_STYLE docstring. This combo is unique to the fade
+			// transition's own .slide rule.
+			expect(updatedBody).not.toContain(
+				"pointer-events: none;\n      transition: opacity 0.3s ease;",
+			);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2095,8 +2103,12 @@ describe("CLI: transition selection", () => {
 			expect(body).toContain("transform: translateX");
 			// The fade transition's own base rule (0.3s ease) must be gone, even
 			// though the shared prefers-reduced-motion override (0.2s linear) is
-			// present for every transition, "slide" included.
-			expect(body).not.toContain("transition: opacity 0.3s ease");
+			// present for every transition, "slide" included. See the identical
+			// comment above (in the --watch describe block) for why this checks
+			// the fade-specific multi-line combo rather than the bare substring.
+			expect(body).not.toContain(
+				"pointer-events: none;\n      transition: opacity 0.3s ease;",
+			);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2147,7 +2159,13 @@ describe("CLI: transition selection", () => {
 				throw new Error(`Could not extract URL from: ${matchedLine}`);
 			}
 			const body = await fetchBody(url);
-			expect(body).not.toContain("transition: opacity");
+			// "pointer-events: none" (rather than the more generic "transition:
+			// opacity") is the marker checked here: it appears ONLY inside
+			// transitionToCssBlock's fade/slide output, unlike "transition:
+			// opacity", which FRAGMENT_STYLE's own (unconditional, --css-immune)
+			// body.presenting .fragment rule also legitimately uses for an
+			// unrelated feature -- see render.ts's FRAGMENT_STYLE docstring.
+			expect(body).not.toContain("pointer-events: none");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2192,7 +2210,11 @@ describe("CLI: transition selection", () => {
 			}
 			const body = await fetchBody(url);
 			expect(body).not.toContain("transform: translateX");
-			expect(body).not.toContain("transition: opacity");
+			// See the identical comment on the --css test above for why this
+			// checks "pointer-events: none" rather than the more generic
+			// "transition: opacity", which FRAGMENT_STYLE's own unconditional
+			// rule also legitimately contains for an unrelated feature.
+			expect(body).not.toContain("pointer-events: none");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);

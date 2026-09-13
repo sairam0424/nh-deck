@@ -1,6 +1,7 @@
 import type { Token, Tokens } from "marked";
 import { marked } from "marked";
 import markedKatex from "marked-katex-extension";
+import { extractFragments, isFragmentMarkerComment } from "./fragments.js";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
@@ -374,19 +375,70 @@ const PRESENTATION_PROGRESS_STYLE = `
     }`;
 
 /**
- * Appended, unconditionally, to every transitionToCssBlock() return value
- * regardless of which transition (fade/slide) is active -- a user who has
- * prefers-reduced-motion enabled gets a fast opacity-only crossfade instead
- * of either the full slide/fade animation or motion being silently left
- * untouched. Deliberately substitutes a fast crossfade rather than
- * disabling the transition entirely (transition: none): an instant, jarring
- * slide swap with zero visual continuity is its own kind of jolt, and a
- * fast linear opacity fade is the pattern verified against a real
- * competitor's implementation of this same accessibility affordance.
+ * Fragment (incremental bullet/element reveal) visibility rules --
+ * unconditional and not suppressible by a custom --css, the same "core
+ * interactive presentation-mode mechanic, not a decorative flourish"
+ * treatment PRESENTATION_STYLE/OVERVIEW_STYLE already document for
+ * themselves.
+ *
+ * `.fragment` is visible everywhere by default: the continuous-scroll
+ * view, and both PDF/PNG export -- pdfExport.ts/pngExport.ts both load
+ * generateHtml()'s own output directly and never append `?present`, so
+ * this single rule is what keeps every fragment printed/screenshotted,
+ * with zero export-specific code needed anywhere else. Only
+ * `body.presenting` hides an unrevealed fragment; PRESENTATION_SCRIPT's
+ * goTo()/advance()/retreat() toggle `.is-revealed` (and the matching
+ * aria-hidden attribute) on each fragment in turn as navigation moves
+ * through the active slide -- see that file's own fragment-state-machine
+ * docstring.
+ *
+ * `body.overview` forces every fragment back to fully visible regardless
+ * of reveal state (`!important`, matching OVERVIEW_STYLE's own
+ * established use of it against exactly this "beat a contextual
+ * presentation-mode rule with no specificity fight" problem) -- the grid
+ * overview shows each slide's full content at a glance, not whatever
+ * partial reveal state a viewer happened to leave it in. `transition:
+ * none !important` alongside it is what makes that "at a glance" genuinely
+ * instant rather than a 0.3s fade-in: `!important` on `opacity` alone only
+ * wins WHICH value the property animates TOWARD, not whether it animates
+ * at all -- `body.presenting .fragment`'s own `transition: opacity 0.3s
+ * ease` still applies otherwise, exactly the same class of problem
+ * OVERVIEW_STYLE's own `.slide` override already neutralizes the same way
+ * (see that constant's own docstring).
+ */
+const FRAGMENT_STYLE = `
+    .fragment {
+      opacity: 1;
+    }
+    body.presenting .fragment {
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+    body.presenting .fragment.is-revealed {
+      opacity: 1;
+    }
+    body.overview .fragment {
+      opacity: 1 !important;
+      transition: none !important;
+    }`;
+
+/**
+ * Included whenever motion could actually occur: a slide transition is
+ * configured, and/or the deck has at least one fragment-marked element
+ * (see hasFragments/reducedMotionStyle in generateHtml below) -- a user
+ * with prefers-reduced-motion enabled gets a fast opacity-only crossfade
+ * for BOTH the slide-transition swap and a fragment's reveal/conceal,
+ * instead of either the full (slower) animation or motion being silently
+ * left untouched. Deliberately substitutes a fast crossfade rather than
+ * disabling the transition entirely (transition: none) for either case:
+ * an instant, jarring slide swap or fragment pop-in is its own kind of
+ * jolt, and a fast linear opacity fade is the pattern verified against a
+ * real competitor's implementation of this same accessibility affordance.
  */
 const REDUCED_MOTION_STYLE = `
     @media (prefers-reduced-motion: reduce) {
       .slide { transition: opacity 0.2s linear !important; transform: none !important; }
+      .fragment { transition: opacity 0.2s linear !important; }
     }`;
 
 /**
@@ -402,6 +454,12 @@ const REDUCED_MOTION_STYLE = `
  * of navigation (ArrowLeft, or ArrowRight's/click's absence of it), so a
  * backward navigation flips the translateX sign instead of replaying the
  * exact same left-to-right motion forward navigation uses.
+ *
+ * Does NOT append REDUCED_MOTION_STYLE itself (unlike before fragments
+ * existed) -- generateHtml now computes that inclusion centrally
+ * (reducedMotionStyle below), since a deck can need the reduced-motion
+ * accommodation for `.fragment` even with no --transition configured at
+ * all.
  */
 function transitionToCssBlock(name: TransitionName): string {
 	if (name === "fade") {
@@ -417,7 +475,7 @@ function transitionToCssBlock(name: TransitionName): string {
     body.presenting .slide.is-active {
       opacity: 1;
       pointer-events: auto;
-    }${REDUCED_MOTION_STYLE}`;
+    }`;
 	}
 	return `
     body.presenting .slide {
@@ -439,7 +497,7 @@ function transitionToCssBlock(name: TransitionName): string {
     }
     body.presenting.direction-backward .slide.is-active {
       transform: translateX(0);
-    }${REDUCED_MOTION_STYLE}`;
+    }`;
 }
 
 // Percentage of --nh-fg blended into --nh-bg to derive --nh-code-bg and
@@ -559,28 +617,91 @@ let currentMermaidColors: ThemeColors | undefined;
 // lets one diagram's marker definitions leak into another's.
 let mermaidDiagramCounter = 0;
 
+/**
+ * Composes `class="fragment"` into `html`'s outermost opening tag,
+ * appending it to (never replacing) any class attribute that tag already
+ * carries -- Mermaid's own error path emits `<pre class="mermaid-error">`,
+ * so a fragment-marked failed diagram must keep BOTH classes, not lose
+ * "mermaid-error" -- rather than special-casing that one shape, this
+ * inspects the actual rendered tag generically (verified empirically
+ * against renderMermaidDiagram's real output: neither its `<svg ...>`
+ * success path nor its `<pre class="mermaid-error">` error path ever puts
+ * a bare `>` character inside an attribute value before the tag's own
+ * closing `>`, so a simple "first tag" match is safe here). Used by every
+ * fragment-aware renderer override below (code/paragraph/listitem/
+ * blockquote) so the class-composition logic lives in exactly one place.
+ */
+function withFragmentClass(html: string): string {
+	const tagMatch = html.match(/^<([a-zA-Z][\w-]*)((?:\s+[^<>]*)?)>/);
+	if (!tagMatch) {
+		return html;
+	}
+	const [fullMatch, tagName, attrs] = tagMatch;
+	const classMatch = attrs.match(/\sclass="([^"]*)"/);
+	const newAttrs = classMatch
+		? attrs.replace(classMatch[0], ` class="${classMatch[1]} fragment"`)
+		: `${attrs} class="fragment"`;
+	return `<${tagName}${newAttrs}>${html.slice(fullMatch.length)}`;
+}
+
 marked.use({
 	renderer: {
-		code({ text, lang, escaped }: Tokens.Code): string {
+		code({
+			text,
+			lang,
+			escaped,
+			fragment,
+		}: Tokens.Code & { fragment?: boolean }): string {
 			const langString = (lang ?? "").match(/^\S*/)?.[0];
 
 			if (langString === "mermaid") {
-				return renderMermaidDiagram(
+				const svg = renderMermaidDiagram(
 					text,
 					currentMermaidColors,
 					mermaidDiagramCounter++,
 				);
+				return fragment ? withFragmentClass(svg) : svg;
 			}
 
 			// Everything below exactly replicates marked@13.0.3's own default
 			// code() renderer (verified directly against its source) for every
 			// language other than "mermaid" -- this override must not change how
-			// any other fenced code block renders.
+			// any other fenced code block renders, aside from composing in
+			// class="fragment" on <pre> when this block is fragment-marked.
 			const code = `${text.replace(/\n$/, "")}\n`;
-			if (!langString) {
-				return `<pre><code>${escaped ? code : escapeHtml(code)}</code></pre>\n`;
-			}
-			return `<pre><code class="language-${escapeHtml(langString)}">${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+			const html = !langString
+				? `<pre><code>${escaped ? code : escapeHtml(code)}</code></pre>\n`
+				: `<pre><code class="language-${escapeHtml(langString)}">${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+			return fragment ? withFragmentClass(html) : html;
+		},
+		paragraph({
+			tokens,
+			fragment,
+		}: Tokens.Paragraph & { fragment?: boolean }): string {
+			// Exactly replicates marked@13.0.3's own default paragraph()
+			// renderer, aside from composing in class="fragment" when this
+			// paragraph is fragment-marked (see fragments.ts's extractFragments).
+			const html = `<p>${this.parser.parseInline(tokens)}</p>\n`;
+			return fragment ? withFragmentClass(html) : html;
+		},
+		listitem(item: Tokens.ListItem & { fragment?: boolean }): string {
+			// Exactly replicates marked@13.0.3's own default listitem()
+			// renderer -- task-list checkboxes render via item.tokens containing
+			// a "checkbox"-type token that this.parser.parse dispatches to the
+			// (untouched) default checkbox() renderer, so nothing extra is
+			// needed here for that case.
+			const html = `<li>${this.parser.parse(item.tokens)}</li>\n`;
+			return item.fragment ? withFragmentClass(html) : html;
+		},
+		blockquote({
+			tokens,
+			fragment,
+		}: Tokens.Blockquote & { fragment?: boolean }): string {
+			// Exactly replicates marked@13.0.3's own default blockquote()
+			// renderer, aside from composing in class="fragment" when this
+			// blockquote is fragment-marked.
+			const html = `<blockquote>\n${this.parser.parse(tokens)}</blockquote>\n`;
+			return fragment ? withFragmentClass(html) : html;
 		},
 	},
 });
@@ -627,12 +748,17 @@ export function generateHtml(
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
 	const tokens = marked.lexer(markdown);
+	let hasFragments = false;
 	const slidesHtml = splitIntoSlides(tokens)
 		.map((slideTokens) => {
-			const { layout, tokens: filteredTokens } =
-				extractSlideLayout(slideTokens);
+			const { layout, tokens: afterLayout } = extractSlideLayout(slideTokens);
 			const { name: layoutName } = resolveLayoutName(layout);
 			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
+			const { tokens: filteredTokens, hasFragment } =
+				extractFragments(afterLayout);
+			if (hasFragment) {
+				hasFragments = true;
+			}
 			const notesHtml = extractNotes(filteredTokens)
 				.map(
 					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
@@ -657,6 +783,16 @@ export function generateHtml(
 	const transitionStyle =
 		!customCss && transitionName ? transitionToCssBlock(transitionName) : "";
 	const progressStyle = !customCss ? PRESENTATION_PROGRESS_STYLE : "";
+	// See REDUCED_MOTION_STYLE's own docstring: included whenever a slide
+	// transition is configured (covering .slide's own reduced-motion rule,
+	// exactly as before fragments existed) OR this deck has at least one
+	// fragment (covering .fragment's rule even with no --transition set at
+	// all) -- but never both at once double-included, since transitionStyle
+	// and reducedMotionStyle are two separate template slots below.
+	const reducedMotionStyle =
+		!customCss && (Boolean(transitionName) || hasFragments)
+			? REDUCED_MOTION_STYLE
+			: "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -765,6 +901,8 @@ ${
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
     ${progressStyle}
+    ${FRAGMENT_STYLE}
+    ${reducedMotionStyle}
     ${layoutOverride}
     ${transitionStyle}
   </style>
@@ -808,6 +946,13 @@ export function containsUnsafeHtml(markdown: string): boolean {
  * `.tokens`, List's `.items`, Table's `.header`/`.rows`, etc.) -- this stays
  * correct even if marked adds a new nested-token shape later, since it never
  * has to be told where nested tokens live.
+ *
+ * A `<!-- fragment -->` marker already matches isPresenterNoteComment's own
+ * generic "shaped like `<!-- ... -->`" pattern (so it was never actually
+ * flagged here even before extractFragments existed) -- isFragmentMarkerComment
+ * is checked explicitly anyway, so this allowlist stays correct on its own
+ * terms even if isPresenterNoteComment's pattern is ever tightened to be
+ * note-specific rather than comment-shaped-in-general.
  */
 function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
 	if (Array.isArray(node)) {
@@ -820,7 +965,8 @@ function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
 	if (
 		token.type === "html" &&
 		typeof token.text === "string" &&
-		!isPresenterNoteComment(token.text)
+		!isPresenterNoteComment(token.text) &&
+		!isFragmentMarkerComment(token.text)
 	) {
 		return true;
 	}

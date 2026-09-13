@@ -59,6 +59,44 @@
  * keydown listener's Escape/"?" branches both check helpOpen BEFORE
  * overviewOpen -- see that listener's own precedence comment for the full
  * reasoning.
+ *
+ * Fragment (incremental bullet/element reveal, render.ts's `.fragment`
+ * class -- see fragments.ts for the authoring-side marker extraction)
+ * reveal/conceal is a state machine layered directly on top of forward/
+ * backward navigation, not a separate keybinding: advance()/retreat()
+ * (used by ArrowRight/Space/click/swipe-left and ArrowLeft/swipe-right
+ * respectively, in place of calling goTo() directly) each check the
+ * CURRENT slide's own fragments FIRST -- advance() reveals the next
+ * not-yet-revealed fragment (if any remain) and stops there; retreat()
+ * conceals the last-revealed one (if any) and stops there. Only once a
+ * slide has no more fragments left to reveal (advance) or conceal
+ * (retreat) does either function fall through to goTo(), exactly as
+ * before this feature existed -- a deck with zero fragments on a slide
+ * therefore behaves completely unchanged (revealNextFragment/
+ * concealLastFragment immediately return false, every time).
+ *
+ * goTo() itself resets the LANDING slide's fragments whenever the slide
+ * index actually changes (never when index === current, e.g.
+ * closeOverviewToPreviousSlide() returning to the same slide overview
+ * opened on): entering forward (isBackward false -- ArrowRight/Space/
+ * click/swipe-left's fall-through, and End's direct jump) resets that
+ * slide's fragments to all-concealed (reveal-count 0); entering backward
+ * (isBackward true -- ArrowLeft/swipe-right's fall-through, and Home's
+ * direct jump) sets every one of that slide's fragments to already-
+ * revealed. This is what makes "leave a slide as you found it" hold: a
+ * slide re-entered via ArrowLeft from the slide after it shows its full
+ * content immediately, matching what a viewer would have already seen
+ * revealed while moving forward through it the first time. Home/End are
+ * deliberately NOT intercepted by advance()/retreat() -- they are direct
+ * jumps (bypassing per-fragment step-by-step navigation entirely, per
+ * their own pre-existing docs above), but the slide they land ON still
+ * gets its fragment state set via this same goTo()-level rule.
+ *
+ * Each fragment's `aria-hidden` attribute is kept in lockstep with its
+ * `.is-revealed` class ("false" once revealed, "true" otherwise) as part
+ * of every reveal/conceal/reset step -- a real accessibility gap neither
+ * reveal.js nor Slidev closes for their own equivalent feature, done here
+ * as a genuine differentiator rather than left as a nice-to-have.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -133,6 +171,69 @@ export const PRESENTATION_SCRIPT = `<script>
   let indexBeforeOverview = current;
   let helpOpen = false;
 
+  // Fragment (incremental reveal) helpers -- see this file's own module
+  // docstring above for the full state-machine explanation. Fragments are
+  // looked up fresh from the live DOM every time (via .fragment/
+  // .is-revealed class state) rather than tracked in a parallel JS
+  // counter, so there is exactly one source of truth for "how many of
+  // this slide's fragments are revealed right now".
+  const fragmentsInSlide = (slide) =>
+    Array.from(slide.querySelectorAll(".fragment"));
+
+  // One-time initialization: every fragment everywhere starts concealed
+  // (aria-hidden="true", no .is-revealed class). render.ts's FRAGMENT_STYLE
+  // already renders them invisible by default under body.presenting with
+  // no JS needed -- this just keeps the accessibility tree in sync with
+  // that same starting state from first paint, matching goTo()'s own
+  // "entering a slide forward resets to 0 revealed" rule below for
+  // whichever slide ends up active first.
+  document.querySelectorAll(".fragment").forEach((el) => {
+    el.setAttribute("aria-hidden", "true");
+  });
+
+  // Reveals the next not-yet-revealed fragment on slide, in document
+  // order, toggling both .is-revealed (render.ts's CSS reads this) and
+  // aria-hidden (kept in lockstep, "false" once revealed). Returns
+  // whether there was one to reveal -- advance() uses this to decide
+  // whether to stay on this slide or fall through to goTo().
+  const revealNextFragment = (slide) => {
+    const next = fragmentsInSlide(slide).find(
+      (el) => !el.classList.contains("is-revealed"),
+    );
+    if (!next) {
+      return false;
+    }
+    next.classList.add("is-revealed");
+    next.setAttribute("aria-hidden", "false");
+    return true;
+  };
+
+  // Conceals the LAST-revealed fragment on slide (the mirror image of
+  // revealNextFragment) -- searches from the end so retreat() undoes
+  // reveals in the exact reverse order advance() applied them.
+  const concealLastFragment = (slide) => {
+    const fragments = fragmentsInSlide(slide);
+    for (let i = fragments.length - 1; i >= 0; i--) {
+      if (fragments[i].classList.contains("is-revealed")) {
+        fragments[i].classList.remove("is-revealed");
+        fragments[i].setAttribute("aria-hidden", "true");
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Sets EVERY fragment on slide to the same revealed/concealed state at
+  // once -- used by goTo() when a slide is entered wholesale (forward:
+  // reveal-count resets to 0 / all concealed; backward: all revealed),
+  // rather than one-at-a-time like revealNextFragment/concealLastFragment.
+  const setFragmentsRevealed = (slide, revealed) => {
+    fragmentsInSlide(slide).forEach((el) => {
+      el.classList.toggle("is-revealed", revealed);
+      el.setAttribute("aria-hidden", revealed ? "false" : "true");
+    });
+  };
+
   const render = () => {
     slides.forEach((slide, i) => {
       slide.classList.toggle("is-active", i === current);
@@ -149,8 +250,45 @@ export const PRESENTATION_SCRIPT = `<script>
       return;
     }
     document.body.classList.toggle("direction-backward", Boolean(isBackward));
+    // Only reset the LANDING slide's fragments when the slide index is
+    // actually changing -- e.g. closeOverviewToPreviousSlide() calls
+    // goTo(indexBeforeOverview, false) to return to the exact slide the
+    // grid overview was opened on, which is always still "current" at that
+    // point (nothing else mutates current while overview is open); that is
+    // not an "entering" event and must not disturb whatever reveal state
+    // the viewer had already reached there.
+    if (index !== current) {
+      setFragmentsRevealed(slides[index], Boolean(isBackward));
+    }
     current = index;
     render();
+  };
+
+  // Forward navigation: reveal the current slide's next fragment (if any
+  // remain) and stop there; only once none remain does this fall through
+  // to advancing the slide itself. Used in place of a direct
+  // goTo(current + 1, false) call by every forward-navigation trigger
+  // (ArrowRight/Space, a plain click, and a left swipe) -- see this file's
+  // own module docstring for the full state machine. Deliberately NOT used
+  // by End, which is a direct jump past any in-between fragments, per its
+  // own pre-existing docs above.
+  const advance = () => {
+    if (revealNextFragment(slides[current])) {
+      return;
+    }
+    goTo(current + 1, false);
+  };
+
+  // Backward navigation: the mirror image of advance() -- conceals the
+  // current slide's last-revealed fragment (if any) and stops there;
+  // only once none remain revealed does this fall through to retreating a
+  // slide. Used by ArrowLeft and a right swipe; NOT used by Home, which
+  // (like End above) is a direct jump.
+  const retreat = () => {
+    if (concealLastFragment(slides[current])) {
+      return;
+    }
+    goTo(current - 1, true);
   };
 
   // Opens grid-overview mode: records which slide was active BEFORE opening
@@ -307,9 +445,9 @@ export const PRESENTATION_SCRIPT = `<script>
       return;
     }
     if (event.key === "ArrowRight" || event.key === " ") {
-      goTo(current + 1, false);
+      advance();
     } else if (event.key === "ArrowLeft") {
-      goTo(current - 1, true);
+      retreat();
     } else if (event.key === "Home") {
       goTo(0, true);
     } else if (event.key === "End") {
@@ -321,8 +459,8 @@ export const PRESENTATION_SCRIPT = `<script>
     // Same "inert once exitPresentationMode() has removed body.presenting"
     // guard as the keydown listener above -- without it, clicking anywhere
     // on the normal continuous-scroll view (reached via Escape) would still
-    // call goTo(current + 1, false), advancing a "current slide" concept
-    // that page no longer has.
+    // call advance(), advancing a "current slide" concept that page no
+    // longer has.
     if (!document.body.classList.contains("presenting")) {
       return;
     }
@@ -366,7 +504,7 @@ export const PRESENTATION_SCRIPT = `<script>
     if (event.target.closest("a")) {
       return;
     }
-    goTo(current + 1, false);
+    advance();
   });
 
   // Touch swipe navigation, for presenting from a phone/tablet with no
@@ -427,10 +565,10 @@ export const PRESENTATION_SCRIPT = `<script>
     }
     if (deltaX < 0) {
       // Finger moved right-to-left: advance, same direction as ArrowRight.
-      goTo(current + 1, false);
+      advance();
     } else {
       // Finger moved left-to-right: go back, same direction as ArrowLeft.
-      goTo(current - 1, true);
+      retreat();
     }
   });
 

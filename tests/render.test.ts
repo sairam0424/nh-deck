@@ -266,7 +266,13 @@ describe("generateHtml", () => {
 		);
 
 		expect(html).not.toContain("transform: translateX");
-		expect(html).not.toContain("transition: opacity");
+		// "pointer-events: none" (rather than the more generic
+		// "transition: opacity") is the marker checked here: it appears ONLY
+		// inside transitionToCssBlock's fade/slide output, unlike
+		// "transition: opacity", which FRAGMENT_STYLE's own (unconditional)
+		// body.presenting .fragment rule also legitimately uses for an
+		// unrelated feature -- see FRAGMENT_STYLE's docstring in render.ts.
+		expect(html).not.toContain("pointer-events: none");
 	});
 
 	it("does not apply transition CSS when a custom --css is given, even with a transition name", () => {
@@ -278,7 +284,7 @@ describe("generateHtml", () => {
 			"fade",
 		);
 
-		expect(html).not.toContain("transition: opacity");
+		expect(html).not.toContain("pointer-events: none");
 	});
 
 	it.each(["fade", "slide"] as const)(
@@ -1061,4 +1067,241 @@ describe("generateHtml — theme code-bg/border WCAG contrast (regression: colla
 			STYLE_TEST_TIMEOUT_MS,
 		);
 	}
+});
+
+describe("generateHtml — fragment (incremental reveal) markers", () => {
+	it('applies class="fragment" to a paragraph immediately followed by a marker', () => {
+		const html = generateHtml(
+			"First paragraph.\n\n<!-- fragment -->\n\nSecond paragraph.",
+		);
+
+		expect(html).toContain('<p class="fragment">First paragraph.</p>');
+		expect(html).not.toContain('<p class="fragment">Second paragraph.</p>');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it('applies class="fragment" to a single bullet marked via a nested, indented marker (the per-item authoring convention)', () => {
+		const html = generateHtml(
+			"- Item 1\n  <!-- fragment -->\n- Item 2\n- Item 3\n",
+		);
+
+		expect(html).toContain('<li class="fragment">Item 1</li>');
+		expect(html).toContain("<li>Item 2</li>");
+		expect(html).toContain("<li>Item 3</li>");
+		expect(html).not.toContain("<!-- fragment -->");
+		// A single <ul> -- the nested marker convention must not split the
+		// list into two separate lists.
+		expect((html.match(/<ul>/g) ?? []).length).toBe(1);
+	});
+
+	it("marks each bullet independently when every item has its own trailing marker", () => {
+		const html = generateHtml(
+			"- Item 1\n  <!-- fragment -->\n- Item 2\n  <!-- fragment -->\n- Item 3\n",
+		);
+
+		expect(html).toContain('<li class="fragment">Item 1</li>');
+		expect(html).toContain('<li class="fragment">Item 2</li>');
+		expect(html).toContain("<li>Item 3</li>");
+	});
+
+	it("marks a loose list item (blank line before the nested marker) the same way as a tight one", () => {
+		const html = generateHtml("- Item 1\n\n  <!-- fragment -->\n- Item 2\n");
+
+		expect(html).toMatch(/<li class="fragment"><p>Item 1<\/p>\s*<\/li>/);
+	});
+
+	it('applies class="fragment" to a code fence immediately preceded by a marker', () => {
+		const html = generateHtml("<!-- fragment -->\n\n```\nsome code\n```\n");
+
+		expect(html).toContain('<pre class="fragment">');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it('composes class="fragment" onto a code fence\'s existing language class rather than replacing it', () => {
+		const html = generateHtml("<!-- fragment -->\n\n```bash\necho hi\n```\n");
+
+		expect(html).toContain(
+			'<pre class="fragment"><code class="language-bash">',
+		);
+	});
+
+	it('applies class="fragment" to a blockquote immediately preceded by a marker', () => {
+		const html = generateHtml("<!-- fragment -->\n\n> a quote\n");
+
+		expect(html).toContain('<blockquote class="fragment">');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("marks a paragraph nested inside a blockquote when the marker sits between two of its own paragraphs", () => {
+		const html = generateHtml(
+			"> Quote line 1.\n> <!-- fragment -->\n> Quote line 2.\n",
+		);
+
+		expect(html).toContain('<p class="fragment">Quote line 1.</p>');
+		expect(html).toContain("<p>Quote line 2.</p>");
+	});
+
+	it('applies class="fragment" to a Mermaid diagram (a code token with lang mermaid) preceded by a marker, composed onto its root <svg>', () => {
+		const html = generateHtml(
+			"<!-- fragment -->\n\n```mermaid\nflowchart TD\n  A --> B\n```\n",
+		);
+
+		expect(html).toMatch(/<svg[^>]*class="fragment"/);
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it('composes class="fragment" onto Mermaid\'s own mermaid-error class rather than replacing it, for an invalid diagram', () => {
+		const html = generateHtml(
+			"<!-- fragment -->\n\n```mermaid\nnot a real diagram\n```\n",
+		);
+
+		expect(html).toContain('class="mermaid-error fragment"');
+	});
+
+	it("drops a marker with no supported adjacent target instead of crashing or applying a class anywhere", () => {
+		expect(() =>
+			generateHtml("# Heading\n\n<!-- fragment -->\n\n# Another heading\n"),
+		).not.toThrow();
+		const html = generateHtml(
+			"# Heading\n\n<!-- fragment -->\n\n# Another heading\n",
+		);
+
+		expect(html).not.toContain('class="fragment"');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("drops a marker between two list items with no blank line (which splits the list) with no visual effect, rather than mis-attaching to the whole preceding list", () => {
+		const html = generateHtml(
+			"- Item 1\n- Item 2\n<!-- fragment -->\n- Item 3\n",
+		);
+
+		expect(html).not.toContain('class="fragment"');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("never flags a fragment-marked deck as containing unsafe HTML (allowlist covers the fragment marker itself)", () => {
+		expect(
+			containsUnsafeHtml(
+				"# Slide\n\nSome text.\n\n<!-- fragment -->\n\nMore text.\n",
+			),
+		).toBe(false);
+		expect(
+			containsUnsafeHtml("- Item 1\n  <!-- fragment -->\n- Item 2\n"),
+		).toBe(false);
+	});
+
+	it("includes the reduced-motion override for .fragment when the deck has a fragment, even with no --transition configured", () => {
+		const html = generateHtml(
+			"First.\n\n<!-- fragment -->\n\nSecond.",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(html).toContain("@media (prefers-reduced-motion: reduce)");
+		expect(html).toContain(
+			".fragment { transition: opacity 0.2s linear !important; }",
+		);
+	});
+
+	it("does not include any reduced-motion override when the deck has neither a fragment nor a --transition", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(html).not.toContain("prefers-reduced-motion");
+	});
+
+	it("includes the overview override that forces every fragment visible regardless of reveal state", () => {
+		const html = generateHtml("First.\n\n<!-- fragment -->\n\nSecond.");
+
+		expect(html).toContain("body.overview .fragment {");
+		expect(html).toMatch(
+			/body\.overview \.fragment \{\s*opacity: 1 !important;/,
+		);
+	});
+
+	it("still applies FRAGMENT_STYLE's base rules even with a custom --css (core interactive mechanic, not suppressible)", () => {
+		const html = generateHtml(
+			"First.\n\n<!-- fragment -->\n\nSecond.",
+			"sample",
+			".slide { color: red; }",
+		);
+
+		expect(html).toContain("body.presenting .fragment");
+		expect(html).toContain("body.overview .fragment");
+	});
+});
+
+describe("generateHtml — fragments visible by default (continuous-scroll view and PDF/PNG export path)", () => {
+	// pdfExport.ts/pngExport.ts both call generateHtml() and load the result
+	// directly, never appending ?present to the URL they open -- so this
+	// exercises the EXACT SAME code path those export commands rely on:
+	// loading the raw generateHtml() output with no ?present, which is all
+	// FRAGMENT_STYLE's base (non-body.presenting-scoped) opacity:1 rule
+	// needs to keep every fragment visible with zero export-specific code.
+	it(
+		"renders a fragment-marked paragraph fully visible (opacity 1) when loaded without ?present",
+		async () => {
+			const html = generateHtml(
+				"First paragraph.\n\n<!-- fragment -->\n\nSecond paragraph.",
+			);
+			const page = await openHtmlPage(html);
+
+			const opacity = await page.evaluate(() => {
+				const el = document.querySelector(".fragment");
+				return el ? getComputedStyle(el).opacity : null;
+			});
+
+			expect(opacity).toBe("1");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"renders a fragment-marked bullet fully visible (opacity 1) when loaded without ?present",
+		async () => {
+			const html = generateHtml("- Item 1\n  <!-- fragment -->\n- Item 2\n");
+			const page = await openHtmlPage(html);
+
+			const opacities = await page.evaluate(() =>
+				Array.from(document.querySelectorAll(".fragment")).map(
+					(el) => getComputedStyle(el).opacity,
+				),
+			);
+
+			expect(opacities).toEqual(["1"]);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"hides an unrevealed fragment (opacity 0) once ?present is active, proving the visible-by-default behavior above is genuinely scoped to non-presenting mode, not just always-visible",
+		async () => {
+			const html = generateHtml(
+				"First paragraph.\n\n<!-- fragment -->\n\nSecond paragraph.",
+			);
+			activeServer = await startServer(html, 0);
+			const executablePath = detectBrowserExecutable();
+			activeBrowser = await puppeteer.launch({
+				executablePath,
+				headless: true,
+			});
+			const page = await activeBrowser.newPage();
+			await page.goto(`${activeServer.url}/?present`, { waitUntil: "load" });
+
+			const opacity = await page.evaluate(() => {
+				const el = document.querySelector(".fragment");
+				return el ? getComputedStyle(el).opacity : null;
+			});
+
+			expect(opacity).toBe("0");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
 });

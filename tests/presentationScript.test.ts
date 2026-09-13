@@ -117,13 +117,8 @@ describe("PRESENTATION_SCRIPT", () => {
 		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
 			'addEventListener("click"',
 		);
-		// The trailing semicolon distinguishes the actual call site from this
-		// same listener's own pre-existing guard comment, which quotes
-		// "goTo(current + 1, false)" (followed by a comma, not a semicolon) in
-		// prose -- without it, indexOf finds that comment instead of the real
-		// statement, well before helpOpenGuardIndex.
 		const advanceIndex = PRESENTATION_SCRIPT.indexOf(
-			"goTo(current + 1, false);",
+			"advance();",
 			clickListenerStart,
 		);
 		const helpOpenGuardIndex = PRESENTATION_SCRIPT.indexOf(
