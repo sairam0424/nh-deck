@@ -3099,13 +3099,13 @@ describe("CLI: transition selection", () => {
 				throw new Error(`Could not extract URL from: ${matchedLine}`);
 			}
 			const body = await fetchBody(url);
-			// "pointer-events: none" (rather than the more generic "transition:
-			// opacity") is the marker checked here: it appears ONLY inside
-			// transitionToCssBlock's fade/slide output, unlike "transition:
-			// opacity", which FRAGMENT_STYLE's own (unconditional, --css-immune)
-			// body.presenting .fragment rule also legitimately uses for an
-			// unrelated feature -- see render.ts's FRAGMENT_STYLE docstring.
-			expect(body).not.toContain("pointer-events: none");
+			// "pointer-events: none;" (semicolon immediately after "none", no
+			// "!important") is the marker checked here: it appears ONLY inside
+			// transitionToCssBlock's fade/slide output. render.ts's
+			// PRESENTER_VIEW_STYLE also contains "pointer-events: none" but
+			// always as "none !important;", so the exact "none;" substring
+			// still uniquely identifies the transition feature.
+			expect(body).not.toContain("pointer-events: none;");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -3151,10 +3151,8 @@ describe("CLI: transition selection", () => {
 			const body = await fetchBody(url);
 			expect(body).not.toContain("transform: translateX");
 			// See the identical comment on the --css test above for why this
-			// checks "pointer-events: none" rather than the more generic
-			// "transition: opacity", which FRAGMENT_STYLE's own unconditional
-			// rule also legitimately contains for an unrelated feature.
-			expect(body).not.toContain("pointer-events: none");
+			// checks the "pointer-events: none;" (no "!important") marker.
+			expect(body).not.toContain("pointer-events: none;");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);

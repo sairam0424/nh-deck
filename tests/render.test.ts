@@ -266,13 +266,14 @@ describe("generateHtml", () => {
 		);
 
 		expect(html).not.toContain("transform: translateX");
-		// "pointer-events: none" (rather than the more generic
-		// "transition: opacity") is the marker checked here: it appears ONLY
-		// inside transitionToCssBlock's fade/slide output, unlike
-		// "transition: opacity", which FRAGMENT_STYLE's own (unconditional)
-		// body.presenting .fragment rule also legitimately uses for an
-		// unrelated feature -- see FRAGMENT_STYLE's docstring in render.ts.
-		expect(html).not.toContain("pointer-events: none");
+		// "pointer-events: none;" (semicolon immediately after "none", no
+		// "!important") is the marker checked here: it appears ONLY inside
+		// transitionToCssBlock's fade/slide output. PRESENTER_VIEW_STYLE's own
+		// (unconditional) .presenter-preview .slide rule also contains
+		// "pointer-events: none" but always as "none !important;", so the
+		// exact "none;" substring still uniquely identifies the transition
+		// feature -- see render.ts's PRESENTER_VIEW_STYLE docstring.
+		expect(html).not.toContain("pointer-events: none;");
 	});
 
 	it("does not apply transition CSS when a custom --css is given, even with a transition name", () => {
@@ -284,7 +285,7 @@ describe("generateHtml", () => {
 			"fade",
 		);
 
-		expect(html).not.toContain("pointer-events: none");
+		expect(html).not.toContain("pointer-events: none;");
 	});
 
 	it.each(["fade", "slide"] as const)(

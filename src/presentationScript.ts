@@ -271,7 +271,7 @@ export const PRESENTATION_SCRIPT = `<script>
   let nextPreview;
   let notesPanel;
 
-  // Presenter-console layout: the current slide (scaled down), a preview
+  // Presenter-console UI: the current slide (scaled down), a preview
   // of the next slide (scaled down further), the current slide's own
   // presenter notes (always visible here, unlike the main view's
   // ?notes-gated overlay), and a plain count-up elapsed timer. Entirely
