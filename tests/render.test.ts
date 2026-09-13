@@ -833,6 +833,90 @@ describe("generateHtml — two-column layout break-inside protection", () => {
 	});
 });
 
+describe("generateHtml — two-column layout container-query breakpoint", () => {
+	// Regression coverage for a real, currently-shipped bug: the two-column
+	// layout's mobile breakpoint queried `@media (max-width: 640px)` -- the
+	// real browser VIEWPORT -- instead of the slide's own box. Grid-overview
+	// mode (OVERVIEW_STYLE, toggled by presentationScript.ts's "o" key) can
+	// shrink a `.slide` down to a ~220-400px-wide thumbnail via a CSS grid +
+	// `transform: none !important`, WITHOUT the viewport itself changing size
+	// at all -- so the old viewport-scoped `@media` rule never fired there,
+	// even though the two-column layout visually needs to collapse to one
+	// column once it's squeezed that small. The fix gives `.slide` its own
+	// CSS containment context (`container-type: inline-size` on the base
+	// `.slide` rule) and swaps the breakpoint to `@container (max-width:
+	// 640px)`, which queries the slide's own box, not the viewport -- so it
+	// fires correctly inside a shrunk overview thumbnail regardless of how
+	// wide the real viewport stays. The actual `column-count` toggle lives on
+	// an inner `.two-column-flow` wrapper rather than on `.slide.layout-two-column`
+	// itself, since a CSS size query container can never match a `@container`
+	// rule against itself, only against a descendant -- see render.ts's own
+	// comment on this for the real-Chromium verification.
+	//
+	// Opens presentation mode and presses "o" -- exactly how
+	// presentationScript.ts's own openOverview() adds the `overview` class to
+	// <body> (see that file's keydown listener) -- rather than adding the
+	// class via page.evaluate, so this exercises the real toggle path a
+	// viewer actually takes.
+	async function openOverviewPage(html: string) {
+		activeServer = await startServer(html, 0);
+		const executablePath = detectBrowserExecutable();
+		activeBrowser = await puppeteer.launch({ executablePath, headless: true });
+		const page = await activeBrowser.newPage();
+		// Pinned explicitly wider than the 640px breakpoint so a passing test
+		// can only be explained by the slide's own shrunk box triggering the
+		// container query -- if the real viewport were narrow too, a lingering
+		// viewport-scoped @media rule could produce the same passing result
+		// for the wrong reason.
+		await page.setViewport({ width: 1024, height: 800 });
+		await page.goto(`${activeServer.url}/?present`, { waitUntil: "load" });
+		await page.keyboard.press("o");
+		return page;
+	}
+
+	async function twoColumnColumnCount(
+		page: Awaited<ReturnType<typeof openOverviewPage>>,
+	) {
+		return page.evaluate(() => {
+			const flow = document.querySelector(
+				".slide.layout-two-column .two-column-flow",
+			);
+			return flow ? getComputedStyle(flow).columnCount : null;
+		});
+	}
+
+	const TWO_COLUMN_DECK =
+		"<!-- layout: two-column -->\n\nColumn one text.\n\nColumn two text.";
+
+	it(
+		"collapses a two-column slide to a single column once grid-overview mode shrinks it to a thumbnail, even though the real browser viewport stays well above the 640px breakpoint",
+		async () => {
+			const html = generateHtml(TWO_COLUMN_DECK);
+			const page = await openOverviewPage(html);
+
+			const isOverviewOpen = await page.evaluate(() =>
+				document.body.classList.contains("overview"),
+			);
+			expect(isOverviewOpen).toBe(true);
+
+			expect(await twoColumnColumnCount(page)).toBe("1");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"keeps the two-column layout at two columns in the normal (non-overview) continuous-scroll view at that same wide viewport (guards against overcorrecting to always-one-column)",
+		async () => {
+			const html = generateHtml(TWO_COLUMN_DECK);
+			const page = await openHtmlPage(html);
+			await page.setViewport({ width: 1024, height: 800 });
+
+			expect(await twoColumnColumnCount(page)).toBe("2");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
 describe("generateHtml — themed notes panel", () => {
 	const DRACULA_COLORS = {
 		bg: "#282a36",

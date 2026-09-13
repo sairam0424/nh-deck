@@ -94,6 +94,22 @@ const LAYOUT_STYLE = `
       min-height: 60vh;
       text-align: center;
     }
+    /* Deliberately still "5vw", not "5cqw", despite .slide now being a size
+       query container (see the base .slide rule below) -- swapping to the
+       container-query-width unit was measured directly in a real browser
+       (getComputedStyle) against the normal (non-overview) continuous-scroll
+       view and it changes the rendered title font-size there too, e.g.
+       40px -> 37.6px at an 800px viewport, 56px -> 43px at 1280px+ -- because
+       .slide's own inline-size (the cqw basis) is capped by body's
+       max-width: 860px well before the viewport is, so cqw and vw diverge
+       even in the ordinary, non-shrunk case. That is a real regression to
+       already-shipped normal-view sizing, not just an overview-mode fix, so
+       it is out of scope here: this rule only needs to shrink correctly
+       INSIDE a grid-overview thumbnail, and clamp()'s own 2.25rem/3.5rem
+       floor/ceiling already keeps the title from overflowing there (the
+       thumbnail simply clips/scrolls under OVERVIEW_STYLE's own
+       max-height/overflow:hidden, same as any other slide content that
+       doesn't fit). */
     .slide.layout-title h1 {
       font-size: clamp(2.25rem, 5vw, 3.5rem);
       border-bottom: none;
@@ -121,12 +137,31 @@ const LAYOUT_STYLE = `
       color: var(--nh-muted);
       font-size: 1rem;
     }
-    .slide.layout-two-column {
+    /* column-count/column-gap live on the inner .two-column-flow wrapper
+       (see generateHtml's wrappedContentHtml), not on .slide.layout-two-column
+       itself -- a CSS size query container can never match a @container rule
+       against ITSELF, only against a descendant (verified directly against
+       real Chromium: an identical @container rule matches a child of the
+       container but never the container element, even for a property with
+       no possible effect on that element's own size). The base .slide rule
+       below makes .slide the query container so grid-overview mode's shrunk
+       thumbnail box can be queried at all; .two-column-flow is what the
+       @container breakpoint actually restyles. */
+    .two-column-flow {
       column-count: 2;
       column-gap: 2rem;
     }
-    @media (max-width: 640px) {
-      .slide.layout-two-column { column-count: 1; }
+    /* @container, not @media -- this must query the slide's OWN box, not the
+       real browser viewport. Grid-overview mode (OVERVIEW_STYLE) shrinks a
+       .slide down to a ~220-400px-wide thumbnail via CSS grid + transform:
+       none !important, with no actual viewport resize at all -- a
+       viewport-scoped @media rule here never fires in that case, even though
+       the two-column layout visually needs to collapse to one column once
+       squeezed that small. See tests/render.test.ts's "two-column layout
+       container-query breakpoint" describe block for the real-browser
+       regression coverage. */
+    @container (max-width: 640px) {
+      .two-column-flow { column-count: 1; }
     }
     .slide.layout-two-column h1,
     .slide.layout-two-column h2,
@@ -764,7 +799,25 @@ export function generateHtml(
 					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
 				)
 				.join("\n");
-			return `<section class="slide${layoutClass}">\n${marked.parser(filteredTokens)}${notesHtml}</section>`;
+			const contentHtml = marked.parser(filteredTokens);
+			// Two-column layout wraps its content in its own inner element rather
+			// than putting `column-count` directly on `<section class="slide
+			// layout-two-column">` -- CSS container queries cannot query a size
+			// container against itself (verified directly against real Chromium:
+			// an identical @container rule matches a DESCENDANT of the container
+			// but never the container element itself, even for a property with no
+			// possible effect on that element's own size). LAYOUT_STYLE's base
+			// `.slide` rule makes `.slide` the query container so grid-overview
+			// mode's shrunk thumbnail box can be queried at all; `column-count`
+			// therefore has to live one level down, on `.two-column-flow`, so the
+			// `@container (max-width: 640px)` breakpoint that collapses it has a
+			// container ancestor (`.slide`) that is a different element than the
+			// one it restyles.
+			const wrappedContentHtml =
+				layoutName === "two-column"
+					? `<div class="two-column-flow">\n${contentHtml}</div>\n`
+					: contentHtml;
+			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -884,6 +937,12 @@ ${
       color: var(--nh-fg);
     }
     .slide {
+      /* Makes .slide a CSS size query container along its inline axis, so
+         LAYOUT_STYLE's .two-column-flow breakpoint can use
+         @container (max-width: ...) to query the SLIDE'S OWN box instead
+         of the real browser viewport -- see that rule's own comment in
+         LAYOUT_STYLE for why this matters for grid-overview mode. */
+      container-type: inline-size;
       margin-bottom: 3rem;
       padding-bottom: 2rem;
       border-bottom: 1px solid var(--nh-border);
