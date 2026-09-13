@@ -50,4 +50,19 @@ describe("PRESENTATION_SCRIPT", () => {
 	it("never references an external CDN (local-first constraint)", () => {
 		expect(PRESENTATION_SCRIPT).not.toMatch(/https?:\/\/cdn\./i);
 	});
+
+	it("listens for touchstart and touchend to support swipe navigation", () => {
+		expect(PRESENTATION_SCRIPT).toContain('"touchstart"');
+		expect(PRESENTATION_SCRIPT).toContain('"touchend"');
+	});
+
+	it("only treats a touch as a swipe once it clears both a distance threshold and a horizontal-dominance check", () => {
+		expect(PRESENTATION_SCRIPT).toContain("SWIPE_THRESHOLD_PX");
+		expect(PRESENTATION_SCRIPT).toContain("Math.abs(deltaX)");
+		expect(PRESENTATION_SCRIPT).toContain("Math.abs(deltaY)");
+	});
+
+	it("guards swipe handling behind presentation mode and the overview state", () => {
+		expect(PRESENTATION_SCRIPT).toContain('classList.contains("presenting")');
+	});
 });

@@ -47,6 +47,56 @@ function activeSlideHeading(
 	);
 }
 
+// Dispatches real, synthetic touchstart/touchend DOM events (via the
+// standard Touch/TouchEvent constructors) rather than relying on
+// Puppeteer's own CDP-backed touchscreen API, which requires the page's
+// viewport to opt into touch emulation (hasTouch) before the browser will
+// translate input into touch events at all. Constructing and dispatching the
+// events directly exercises presentationScript.ts's own listeners exactly as
+// a real mobile browser would invoke them, without that extra emulation
+// setup -- touchmove is deliberately omitted since presentationScript.ts
+// itself never listens for it (see its own comment).
+async function simulateSwipe(
+	page: Awaited<ReturnType<typeof openPresentationPage>>,
+	startX: number,
+	startY: number,
+	endX: number,
+	endY: number,
+) {
+	await page.evaluate(
+		(sx: number, sy: number, ex: number, ey: number) => {
+			const dispatch = (
+				type: string,
+				x: number,
+				y: number,
+				active: boolean,
+			) => {
+				const touch = new Touch({
+					identifier: 1,
+					target: document.body,
+					clientX: x,
+					clientY: y,
+				});
+				document.body.dispatchEvent(
+					new TouchEvent(type, {
+						bubbles: true,
+						cancelable: true,
+						touches: active ? [touch] : [],
+						targetTouches: active ? [touch] : [],
+						changedTouches: [touch],
+					}),
+				);
+			};
+			dispatch("touchstart", sx, sy, true);
+			dispatch("touchend", ex, ey, false);
+		},
+		startX,
+		startY,
+		endX,
+		endY,
+	);
+}
+
 describe("presentation mode", () => {
 	it(
 		"shows only the first slide when ?present is in the URL",
@@ -401,6 +451,73 @@ describe("presentation mode", () => {
 
 			expect(chromeDisplay.counterDisplay).toBe("none");
 			expect(chromeDisplay.progressDisplay).toBe("none");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("presentation mode — touch swipe navigation", () => {
+	it(
+		"advances to the next slide on a left swipe past the threshold, and back to the previous slide on a right swipe",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			// Finger moves right-to-left (deltaX negative, well past the 50px
+			// threshold): same direction as ArrowRight.
+			await simulateSwipe(page, 300, 300, 80, 300);
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			// Finger moves left-to-right (deltaX positive): same direction as
+			// ArrowLeft.
+			await simulateSwipe(page, 80, 300, 300, 300);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"does not navigate on a small horizontal touch movement below the threshold, or on a vertical-dominant movement (a scroll gesture, not a swipe)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			// Only 20px of horizontal movement -- below SWIPE_THRESHOLD_PX (50).
+			await simulateSwipe(page, 200, 300, 220, 300);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			// 60px horizontal (past the threshold on its own) but 120px vertical
+			// -- vertical movement dominates, so this must read as a scroll
+			// attempt, not a swipe.
+			await simulateSwipe(page, 200, 200, 260, 320);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			const activeCount = await page.evaluate(
+				() => document.querySelectorAll(".slide.is-active").length,
+			);
+			expect(activeCount).toBe(1);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"does not navigate on a touch swipe once presentation mode has been exited via Escape",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("Escape");
+			const isPresenting = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresenting).toBe(false);
+
+			// exitPresentationMode() only removes the "presenting" class -- it
+			// deliberately never clears .is-active from whichever slide was
+			// current (see render.ts's own comment on that class), so the real
+			// signal that this swipe was ignored is the active heading staying
+			// put, not the count of .is-active elements (which stays 1 either
+			// way).
+			await simulateSwipe(page, 300, 300, 80, 300);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);

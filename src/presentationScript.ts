@@ -36,6 +36,13 @@
  * directly, in one keypress, exactly as before this feature existed. A
  * single Escape keypress therefore only ever does ONE of "close overview" or
  * "exit presentation mode", never both.
+ *
+ * Touch swipes (touchstart/touchend, plain DOM Touch events -- no gesture
+ * library) also navigate: a swipe left (finger moves right-to-left) advances
+ * like ArrowRight, a swipe right goes back like ArrowLeft. A horizontal
+ * delta must clear both a minimum-distance threshold and a "more horizontal
+ * than vertical" check before it counts as a swipe, so ordinary vertical
+ * scrolling is never hijacked -- see the touchend listener below.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -209,6 +216,66 @@ export const PRESENTATION_SCRIPT = `<script>
       return;
     }
     goTo(current + 1, false);
+  });
+
+  // Touch swipe navigation, for presenting from a phone/tablet with no
+  // keyboard. Plain DOM Touch events -- no gesture-library dependency, which
+  // would pull in a runtime dependency this project's local-first constraint
+  // (see CLAUDE.md) doesn't need for something this small. Only touchstart
+  // (record the start point) and touchend (compute the delta and decide) are
+  // needed; touchmove is deliberately NOT listened for, since nothing here
+  // needs a live drag preview -- matching goTo()'s existing all-or-nothing
+  // "jump to the target slide" behavior rather than a partial-drag animation.
+  let touchStartX = 0;
+  let touchStartY = 0;
+
+  // Below this many px of horizontal movement, a touch is a tap or a
+  // deliberately tiny nudge, not a swipe -- ignore it rather than risk
+  // firing navigation on an incidental finger tremor.
+  const SWIPE_THRESHOLD_PX = 50;
+
+  document.addEventListener("touchstart", (event) => {
+    const touch = event.touches[0];
+    if (!touch) {
+      return;
+    }
+    touchStartX = touch.clientX;
+    touchStartY = touch.clientY;
+  });
+
+  document.addEventListener("touchend", (event) => {
+    // Guards mirror the keydown listener's own: suppressed while the grid
+    // overview is open (same "no single active slide to move between"
+    // rationale as arrow/Home/End above), and inert once
+    // exitPresentationMode() has removed body.presenting -- this listener,
+    // like every listener in this script, is attached once and never
+    // detached, so without this check a swipe on the normal
+    // continuous-scroll view (reached via Escape, without a page reload)
+    // would still hijack vertical scrolling.
+    if (overviewOpen || !document.body.classList.contains("presenting")) {
+      return;
+    }
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+    const deltaX = touch.clientX - touchStartX;
+    const deltaY = touch.clientY - touchStartY;
+    // A swipe must move further horizontally than the threshold AND further
+    // horizontally than vertically -- the second half of this guard is what
+    // keeps an ordinary vertical scroll gesture (in a browser embedding this
+    // page without ?present, or a diagonal-ish swipe) from being
+    // misinterpreted as slide navigation.
+    if (Math.abs(deltaX) < SWIPE_THRESHOLD_PX || Math.abs(deltaX) <= Math.abs(deltaY)) {
+      return;
+    }
+    if (deltaX < 0) {
+      // Finger moved right-to-left: advance, same direction as ArrowRight.
+      goTo(current + 1, false);
+    } else {
+      // Finger moved left-to-right: go back, same direction as ArrowLeft.
+      goTo(current - 1, true);
+    }
   });
 
   render();
