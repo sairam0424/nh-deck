@@ -21,6 +21,18 @@ const PRESENTATION_TEST_TIMEOUT_MS = 60_000;
 const THREE_SLIDE_DECK =
 	"# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.\n\n---\n\n# Slide 3\n\nThird.";
 
+// Builds a deck with exactly slideCount slides ("Slide 1" .. "Slide N"),
+// each with trivial body text -- used by the jump-to-slide ("g" + digits +
+// Enter) tests below, which need a deck with more than 9 slides (to
+// exercise a real multi-digit jump) rather than THREE_SLIDE_DECK's fixed
+// three.
+function buildDeck(slideCount: number): string {
+	return Array.from(
+		{ length: slideCount },
+		(_, i) => `# Slide ${i + 1}\n\nContent for slide ${i + 1}.`,
+	).join("\n\n---\n\n");
+}
+
 let activeServer: StartedServer | undefined;
 let activeBrowser: Awaited<ReturnType<typeof puppeteer.launch>> | undefined;
 
@@ -1471,6 +1483,170 @@ describe("presentation mode — presenter view (separate window)", () => {
 			const laterSeconds = await readTimerSeconds();
 
 			expect(laterSeconds).toBeGreaterThan(initialSeconds);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
+
+describe('presentation mode — jump to slide ("g" + digits + Enter)', () => {
+	const FIFTEEN_SLIDE_DECK = buildDeck(15);
+
+	async function isJumpIndicatorActive(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => {
+			const el = document.querySelector(".presentation-jump-indicator");
+			return el?.classList.contains("is-active") ?? false;
+		});
+	}
+
+	async function jumpIndicatorText(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(
+			() =>
+				document.querySelector(".presentation-jump-indicator")?.textContent ??
+				"",
+		);
+	}
+
+	it(
+		'typing "g" "1" "2" then Enter navigates directly to slide 12 on a 15-slide deck',
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("g");
+			await page.keyboard.press("1");
+			await page.keyboard.press("2");
+			await page.keyboard.press("Enter");
+
+			expect(await activeSlideHeading(page)).toBe("Slide 12");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows the on-screen digit indicator while typing, updating its text with each digit, and hides it again once Enter confirms the jump",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			expect(await isJumpIndicatorActive(page)).toBe(false);
+
+			await page.keyboard.press("g");
+			expect(await isJumpIndicatorActive(page)).toBe(true);
+			expect(await jumpIndicatorText(page)).toContain("Go to");
+
+			await page.keyboard.press("1");
+			await page.keyboard.press("2");
+			expect(await jumpIndicatorText(page)).toContain("12");
+
+			await page.keyboard.press("Enter");
+			expect(await isJumpIndicatorActive(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 12");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"Escape cancels a pending jump, leaving the current slide unchanged and hiding the indicator (and does not also exit presentation mode in the same keypress)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+
+			await page.keyboard.press("g");
+			await page.keyboard.press("9");
+			expect(await isJumpIndicatorActive(page)).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			expect(await isJumpIndicatorActive(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+
+			const isPresenting = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresenting).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"clamps an out-of-range typed slide number to the last slide instead of doing nothing or throwing",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("g");
+			await page.keyboard.press("9");
+			await page.keyboard.press("9");
+			await page.keyboard.press("Enter");
+
+			expect(await activeSlideHeading(page)).toBe("Slide 15");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"suppresses ordinary arrow-key navigation while a jump is pending, still confirming the jump once Enter is pressed",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("g");
+			await page.keyboard.press("1");
+			await page.keyboard.press("ArrowRight");
+
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+			expect(await isJumpIndicatorActive(page)).toBe(true);
+
+			await page.keyboard.press("Enter");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"cancels silently, without navigating, when Enter is pressed with no digits typed yet",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("g");
+			expect(await isJumpIndicatorActive(page)).toBe(true);
+
+			await page.keyboard.press("Enter");
+
+			expect(await isJumpIndicatorActive(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		'"g" does not start a jump while the grid overview is open, or while the help overlay is open',
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("o");
+			const overviewOpen = await page.evaluate(() =>
+				document.body.classList.contains("overview"),
+			);
+			expect(overviewOpen).toBe(true);
+
+			await page.keyboard.press("g");
+			expect(await isJumpIndicatorActive(page)).toBe(false);
+
+			// Close overview, open help instead, and confirm "g" is blocked there
+			// too.
+			await page.keyboard.press("o");
+			await page.keyboard.press("?");
+			const helpOpen = await page.evaluate(() =>
+				document.body.classList.contains("help-open"),
+			);
+			expect(helpOpen).toBe(true);
+
+			await page.keyboard.press("g");
+			expect(await isJumpIndicatorActive(page)).toBe(false);
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
