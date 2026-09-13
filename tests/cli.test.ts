@@ -152,6 +152,224 @@ function fetchBody(url: string): Promise<string> {
 	});
 }
 
+describe("CLI: nh-deck init", () => {
+	it(
+		"writes a starter deck covering themes, all 4 layouts, KaTeX, Mermaid, presenter notes, and presentation-mode shortcuts",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-init-test-${randomUUID()}.md`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", tempFile],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain(`Wrote starter deck to ${tempFile}`);
+			expect(stdout).toContain(`nh-deck render ${tempFile}`);
+			expect(existsSync(tempFile)).toBe(true);
+
+			const written = readFileSync(tempFile, "utf8");
+			// Frontmatter: real theme/transition values, not placeholders.
+			expect(written).toContain("---\ntheme: dracula\ntransition: fade\n---");
+			// One slide per fixed layout, via the existing marker convention.
+			expect(written).toContain("<!-- layout: title -->");
+			expect(written).toContain("<!-- layout: section -->");
+			expect(written).toContain("<!-- layout: two-column -->");
+			expect(written).toContain("<!-- layout: quote -->");
+			// KaTeX: inline and block math.
+			expect(written).toContain("$E = mc^2$");
+			expect(written).toContain("$$");
+			expect(written).toContain("\\frac{n(n+1)}{2}");
+			// A Mermaid diagram.
+			expect(written).toContain("```mermaid");
+			expect(written).toContain("flowchart");
+			// A presenter-note comment, distinct from a layout marker.
+			expect(written).toContain(
+				"<!-- Remember: presenter notes stay hidden until ?notes is added to the URL. -->",
+			);
+			// The closing slide documents presentation mode as real slide
+			// content -- both query params and the actual keyboard shortcuts.
+			expect(written).toContain("?present");
+			expect(written).toContain("?notes");
+			expect(written).toContain("→ / Space / ← / Home / End / click / swipe");
+			expect(written).toContain("Esc");
+
+			rmSync(tempFile, { force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"refuses to overwrite an existing file without --force",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-init-exists-test-${randomUUID()}.md`,
+			);
+			const originalContent = "# My existing deck\n";
+			writeFileSync(tempFile, originalContent);
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", tempFile],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(1);
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toMatch(/already exists/);
+			expect(stderr).toMatch(/--force/);
+			// The pre-existing file must be left completely untouched.
+			expect(readFileSync(tempFile, "utf8")).toBe(originalContent);
+
+			rmSync(tempFile, { force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"overwrites an existing file when --force is passed",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-init-force-test-${randomUUID()}.md`,
+			);
+			writeFileSync(tempFile, "# My existing deck\n");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", tempFile, "--force"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain(`Wrote starter deck to ${tempFile}`);
+
+			const written = readFileSync(tempFile, "utf8");
+			expect(written).not.toBe("# My existing deck\n");
+			expect(written).toContain("<!-- layout: title -->");
+
+			rmSync(tempFile, { force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"respects a custom filename argument",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-init-custom-name-"),
+			);
+			const customFile = path.join(tempDir, "my-talk.md");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", customFile],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain(`Wrote starter deck to ${customFile}`);
+			expect(existsSync(customFile)).toBe(true);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"defaults to writing deck.md in the current directory when no file argument is given",
+		async () => {
+			// Nested under repoRoot's own (gitignored) .worktrees/, not the OS
+			// tmpdir(): `--import tsx` resolves the "tsx" package by walking up
+			// node_modules from the spawned process's cwd, exactly like plain
+			// CommonJS require() resolution -- a cwd outside this repo entirely
+			// (e.g. plain tmpdir()) has no ancestor node_modules containing
+			// "tsx" and fails with ERR_MODULE_NOT_FOUND before init ever runs.
+			// .worktrees/ is already gitignored for exactly this "real nested
+			// directory under repoRoot, safe to leave stray" use case (see
+			// .gitignore), so a crash before the rmSync cleanup below still
+			// can't taint `git status`.
+			const tempDir = mkdtempSync(
+				path.join(repoRoot, ".worktrees", "nh-deck-init-default-"),
+			);
+			const defaultFile = path.join(tempDir, "deck.md");
+
+			// Spawned with an absolute script path (rather than the usual
+			// relative "src/index.ts") so `cwd` can point at tempDir instead of
+			// repoRoot -- this test exercises init's no-argument default, which
+			// resolves "deck.md" against process.cwd(), and must never write a
+			// stray deck.md into this repo's own working directory.
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", path.join(repoRoot, "src", "index.ts"), "init"],
+				{ cwd: tempDir },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Wrote starter deck to deck.md");
+			expect(existsSync(defaultFile)).toBe(true);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render", () => {
 	it(
 		"prints the serving URL to stdout and shuts down cleanly on kill",

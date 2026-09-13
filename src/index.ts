@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodeUtil from "node:util";
@@ -13,6 +13,10 @@ import {
 	watchFileForChanges,
 } from "./cliHelpers.js";
 import { parseFrontmatter } from "./frontmatter.js";
+import {
+	DEFAULT_INIT_FILENAME,
+	STARTER_DECK_TEMPLATE,
+} from "./initTemplate.js";
 import { exportToPdf } from "./pdfExport.js";
 import { exportToPng } from "./pngExport.js";
 import { hasPresenterNotes } from "./presenterNotes.js";
@@ -240,6 +244,35 @@ program
 	.version(packageJson.version)
 	.showHelpAfterError()
 	.showSuggestionAfterError();
+
+program
+	.command("init [file]")
+	.description(
+		"Write a starter Markdown deck (covering themes, layouts, KaTeX, Mermaid, and presenter notes) to help you get started.",
+	)
+	.option("--force", "overwrite the target file if it already exists")
+	.action((file: string | undefined, options: { force?: boolean }) => {
+		const targetFile = file ?? DEFAULT_INIT_FILENAME;
+		try {
+			if (existsSync(targetFile) && !options.force) {
+				throw new Error(
+					`file '${targetFile}' already exists; pass --force to overwrite it`,
+				);
+			}
+			writeFileSync(targetFile, STARTER_DECK_TEMPLATE);
+			process.stdout.write(
+				`${style("green", `Wrote starter deck to ${targetFile}`)}\n`,
+			);
+			process.stdout.write(
+				`${style("green", `Next: nh-deck render ${targetFile}`)}\n`,
+			);
+		} catch (error) {
+			process.stderr.write(
+				`${style("red", formatActionError(error, targetFile))}\n`,
+			);
+			process.exitCode = 1;
+		}
+	});
 
 program
 	.command("render <file>")
