@@ -3,6 +3,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { PDFOptions } from "puppeteer-core";
 import puppeteer from "puppeteer-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportToPdf } from "../src/pdfExport.js";
@@ -75,6 +76,110 @@ describe("exportToPdf", () => {
 				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
 			).length;
 			expect(pageCount).toBe(3);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"produces landscape 16:9 pages matching the deck's own on-screen aspect ratio, not portrait A4",
+		async () => {
+			const html = generateHtml(fixtureMarkdown, "sample");
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-geometry-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			await exportToPdf(html, outputPath);
+
+			// /MediaBox is a plain, always-present PDF page-geometry structure
+			// (four numbers in PDF points, 72pt = 1in) -- parsing it directly
+			// avoids pulling in a PDF-parsing dependency for a single
+			// dimensions check.
+			const pdfText = readFileSync(outputPath).toString("latin1");
+			const mediaBoxMatch = pdfText.match(
+				/\/MediaBox\s*\[\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*\]/,
+			);
+			expect(mediaBoxMatch).not.toBeNull();
+			const [, x0, y0, x1, y1] = (mediaBoxMatch as RegExpMatchArray).map(
+				Number,
+			);
+			const width = x1 - x0;
+			const height = y1 - y0;
+
+			// 13.333in x 7.5in at 72pt/in = 960pt x 540pt (16:9).
+			expect(width).toBeCloseTo(960, 0);
+			expect(height).toBeCloseTo(540, 0);
+			// Guards against a regression back to portrait A4 (595.28pt x
+			// 841.89pt) even if the exact width/height values above ever
+			// legitimately change -- landscape (wider than tall) is the
+			// non-negotiable property this test exists to protect.
+			expect(width).toBeGreaterThan(height);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"adds a small, centered page-number footer to every page via displayHeaderFooter",
+		async () => {
+			const html = generateHtml(
+				"# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.\n\n---\n\n# Slide 3\n\nThird.",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-footer-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			// Spies through to the real puppeteer-core launch/newPage/pdf calls
+			// (same live-spy-chain technique as the "export failure" describe
+			// block below) so this both captures the exact options object
+			// exportToPdf() passes to page.pdf() AND still produces a real PDF
+			// to assert the rendered page count against -- a fuller check than
+			// a spy-only assertion, per this stage's own "prefer a real
+			// assertion if you can parse it" guidance.
+			type LaunchFn = typeof puppeteer.launch;
+			const originalLaunch: LaunchFn = puppeteer.launch.bind(puppeteer);
+			let capturedPdfOptions: PDFOptions | undefined;
+			vi.spyOn(puppeteer, "launch").mockImplementation(
+				async (...args: Parameters<LaunchFn>) => {
+					const browser = await originalLaunch(...args);
+					const originalNewPage = browser.newPage.bind(browser);
+					vi.spyOn(browser, "newPage").mockImplementation(async () => {
+						const page = await originalNewPage();
+						const originalPdf = page.pdf.bind(page);
+						vi.spyOn(page, "pdf").mockImplementation(async (options) => {
+							capturedPdfOptions = options;
+							return originalPdf(options);
+						});
+						return page;
+					});
+					return browser;
+				},
+			);
+
+			try {
+				await exportToPdf(html, outputPath);
+
+				expect(capturedPdfOptions?.displayHeaderFooter).toBe(true);
+				expect(capturedPdfOptions?.footerTemplate).toContain("pageNumber");
+				expect(capturedPdfOptions?.footerTemplate).toContain("totalPages");
+				// A left-aligned footer would pass the two assertions above
+				// despite the test name and release contract's "small, centered,
+				// muted" page numbers -- assert the alignment rule itself, not
+				// just the presence of the placeholders.
+				expect(capturedPdfOptions?.footerTemplate).toContain(
+					"text-align: center",
+				);
+
+				const pdfBytes = readFileSync(outputPath);
+				const pageCount = (
+					pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+				).length;
+				expect(pageCount).toBeGreaterThan(1);
+			} finally {
+				vi.restoreAllMocks();
+			}
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);

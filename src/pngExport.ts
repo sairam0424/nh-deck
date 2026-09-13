@@ -6,9 +6,13 @@ import { detectBrowserExecutable } from "./browserLaunch.js";
  * Renders the given HTML and screenshots each `<section class="slide">`
  * to its own PNG file, using a locally-installed Chrome/Chromium/Edge/Brave
  * browser detected via chrome-launcher (see browserLaunch.ts). File names
- * are derived by inserting "-N" (1-indexed) before outputPath's extension,
- * e.g. "deck.png" -> "deck-1.png", "deck-2.png", ... Returns the list of
- * file paths actually written, in slide order.
+ * are derived by inserting "-N" (1-indexed, zero-padded to the width of the
+ * deck's own total slide count) before outputPath's extension, e.g.
+ * "deck.png" -> "deck-1.png", "deck-2.png" for a 2-slide deck, but
+ * "deck-01.png" ... "deck-12.png" for a 12-slide deck -- unpadded numbers
+ * would otherwise sort lexicographically wrong ("deck-10.png" before
+ * "deck-2.png" in a plain filesystem listing). Returns the list of file
+ * paths actually written, in slide order.
  *
  * `executablePathOverride`, when provided, is used instead of calling
  * `detectBrowserExecutable()` -- existing 2-argument callers are unaffected.
@@ -41,6 +45,18 @@ export async function exportToPng(
 			args: extraLaunchArgs,
 		});
 		const page = await browser.newPage();
+		// Explicitly locked to a deliberate 16:9 size (matching the deck's
+		// own on-screen/PDF-export aspect ratio) rather than leaving
+		// puppeteer-core's implicit default viewport (800x600) in play.
+		// Without this, every screenshot in this export call still shares
+		// *a* viewport (it's the same `page` for the whole loop below), but
+		// it's an undocumented library default rather than a size this
+		// project actually intends -- and any `vh`/`vw`-relative CSS in a
+		// slide's layout (e.g. LAYOUT_STYLE's `min-height: 60vh` for the
+		// title/section/quote layouts in render.ts) would resolve against
+		// that arbitrary default instead of a size matching the rest of the
+		// export pipeline.
+		await page.setViewport({ width: 1280, height: 720 });
 		// "networkidle0"/"networkidle2" are not valid waitUntil values for
 		// setContent() (only for real navigation via goto()) as of
 		// puppeteer-core 25.x's types — setContent() injects HTML directly
@@ -53,7 +69,7 @@ export async function exportToPng(
 
 		const written: string[] = [];
 		for (let i = 0; i < sections.length; i++) {
-			const path = insertSlideNumber(outputPath, i + 1);
+			const path = insertSlideNumber(outputPath, i + 1, sections.length);
 			await sections[i].screenshot({ path });
 			written.push(path);
 		}
@@ -67,13 +83,21 @@ export async function exportToPng(
 	}
 }
 
-function insertSlideNumber(outputPath: string, slideNumber: number): string {
+function insertSlideNumber(
+	outputPath: string,
+	slideNumber: number,
+	totalSlides: number,
+): string {
 	const dir = dirname(outputPath);
 	const base = basename(outputPath);
 	const lastDot = base.lastIndexOf(".");
+	const paddedNumber = String(slideNumber).padStart(
+		String(totalSlides).length,
+		"0",
+	);
 	const newBase =
 		lastDot === -1
-			? `${base}-${slideNumber}`
-			: `${base.slice(0, lastDot)}-${slideNumber}${base.slice(lastDot)}`;
+			? `${base}-${paddedNumber}`
+			: `${base.slice(0, lastDot)}-${paddedNumber}${base.slice(lastDot)}`;
 	return join(dir, newBase);
 }

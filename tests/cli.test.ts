@@ -1302,8 +1302,16 @@ describe("CLI: nh-deck render --watch", () => {
 			expect(updatedBody).toContain("transform: translateX"); // slide transition
 			// The fade transition's own base rule (0.3s ease) must be gone, even
 			// though the shared prefers-reduced-motion override (0.2s linear) is
-			// present for every transition, "slide" included.
-			expect(updatedBody).not.toContain("transition: opacity 0.3s ease");
+			// present for every transition, "slide" included. Checked via this
+			// exact multi-line combo (rather than the bare "transition: opacity
+			// 0.3s ease" substring) because FRAGMENT_STYLE's own unconditional
+			// body.presenting .fragment rule now legitimately contains that exact
+			// same substring for an unrelated feature -- see render.ts's
+			// FRAGMENT_STYLE docstring. This combo is unique to the fade
+			// transition's own .slide rule.
+			expect(updatedBody).not.toContain(
+				"pointer-events: none;\n      transition: opacity 0.3s ease;",
+			);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -1981,6 +1989,396 @@ describe("CLI: theme selection — png", () => {
 	);
 });
 
+describe("CLI: --css-vars", () => {
+	const ACCENT_OVERLAY = ":root { --nh-accent: #ff6600; }";
+
+	it(
+		"overlays a --css-vars custom property via the render subcommand",
+		async () => {
+			const cssVarsPath = path.join(
+				tmpdir(),
+				`nh-deck-css-vars-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssVarsPath, ACCENT_OVERLAY);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css-vars",
+					cssVarsPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain(ACCENT_OVERLAY);
+			// The rest of the baseline stylesheet -- unlike --css's full
+			// replacement -- must still be present alongside the overlay.
+			expect(body).toContain("font-family: -apple-system");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(cssVarsPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"composes --css-vars with a --theme flag: theme colors and the vars overlay both apply",
+		async () => {
+			const cssVarsPath = path.join(
+				tmpdir(),
+				`nh-deck-css-vars-theme-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssVarsPath, ACCENT_OVERLAY);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--theme",
+					"dark",
+					"--css-vars",
+					cssVarsPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// github-dark's bg, per src/themes.ts's THEMES.dark -- proves the
+			// theme itself is still fully applied.
+			expect(body).toContain("--nh-bg: #0d1117");
+			// The --css-vars overlay's own accent value, proving composition
+			// rather than one silently overriding the other.
+			expect(body).toContain(ACCENT_OVERLAY);
+			expect(body.indexOf(ACCENT_OVERLAY)).toBeGreaterThan(
+				body.indexOf("--nh-bg: #0d1117"),
+			);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(cssVarsPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets --css win over --css-vars, with a stderr note and no vars overlay applied",
+		async () => {
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-css-vars-conflict-css-test-${randomUUID()}.css`,
+			);
+			const cssVarsPath = path.join(
+				tmpdir(),
+				`nh-deck-css-vars-conflict-vars-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+			writeFileSync(cssVarsPath, ACCENT_OVERLAY);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css",
+					cssPath,
+					"--css-vars",
+					cssVarsPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain(".slide { color: hotpink; }");
+			expect(body).not.toContain(ACCENT_OVERLAY);
+			expect(stderr).toContain("nh-deck: note:");
+			expect(stderr).toContain("--css overrides --css-vars");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(cssPath, { force: true });
+			rmSync(cssVarsPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"surfaces the raw ENOENT error and exits non-zero when --css-vars points to a nonexistent file",
+		async () => {
+			// A generated, guaranteed-unique path (never created) rather than a
+			// fixed literal like "/path/to/does-not-exist.css" -- an unlucky
+			// host where that literal path happens to exist would make render
+			// actually start and this test hang waiting for a process exit that
+			// never comes, instead of the ENOENT failure it means to test.
+			const nonexistentPath = path.join(
+				tmpdir(),
+				`nh-deck-css-vars-enoent-test-${randomUUID()}.css`,
+			);
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--css-vars",
+					nonexistentPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			// Same reasoning/current behavior as the --css ENOENT test above:
+			// the top-level try/catch surfaces readFileSync's own ENOENT
+			// message verbatim, prefixed with "nh-deck: ".
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toMatch(/ENOENT/);
+			expect(exitCode).toBe(1);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"wires --css-vars onto the pdf subcommand, with a successful export",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-css-vars-test-${randomUUID()}.pdf`,
+			);
+			const cssVarsPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-css-vars-file-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssVarsPath, ACCENT_OVERLAY);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--css-vars",
+					cssVarsPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toBe("");
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+			rmSync(cssVarsPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"lets --css win over --css-vars on the pdf subcommand, with a stderr note and a successful export",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-css-vars-conflict-test-${randomUUID()}.pdf`,
+			);
+			const cssPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-css-vars-conflict-css-test-${randomUUID()}.css`,
+			);
+			const cssVarsPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-css-vars-conflict-vars-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssPath, ".slide { color: hotpink; }");
+			writeFileSync(cssVarsPath, ACCENT_OVERLAY);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--css",
+					cssPath,
+					"--css-vars",
+					cssVarsPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toContain("nh-deck: note:");
+			expect(stderr).toContain("--css overrides --css-vars");
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+			rmSync(cssPath, { force: true });
+			rmSync(cssVarsPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"wires --css-vars onto the png subcommand, with a successful export",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-css-vars-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const cssVarsPath = path.join(
+				tmpdir(),
+				`nh-deck-png-css-vars-file-test-${randomUUID()}.css`,
+			);
+			writeFileSync(cssVarsPath, ACCENT_OVERLAY);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--css-vars",
+					cssVarsPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toBe("");
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			for (let n = 1; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+			rmSync(cssVarsPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: transition selection", () => {
 	it(
 		"applies a transition's CSS via the --transition flag on render",
@@ -2095,8 +2493,12 @@ describe("CLI: transition selection", () => {
 			expect(body).toContain("transform: translateX");
 			// The fade transition's own base rule (0.3s ease) must be gone, even
 			// though the shared prefers-reduced-motion override (0.2s linear) is
-			// present for every transition, "slide" included.
-			expect(body).not.toContain("transition: opacity 0.3s ease");
+			// present for every transition, "slide" included. See the identical
+			// comment above (in the --watch describe block) for why this checks
+			// the fade-specific multi-line combo rather than the bare substring.
+			expect(body).not.toContain(
+				"pointer-events: none;\n      transition: opacity 0.3s ease;",
+			);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2147,7 +2549,13 @@ describe("CLI: transition selection", () => {
 				throw new Error(`Could not extract URL from: ${matchedLine}`);
 			}
 			const body = await fetchBody(url);
-			expect(body).not.toContain("transition: opacity");
+			// "pointer-events: none" (rather than the more generic "transition:
+			// opacity") is the marker checked here: it appears ONLY inside
+			// transitionToCssBlock's fade/slide output, unlike "transition:
+			// opacity", which FRAGMENT_STYLE's own (unconditional, --css-immune)
+			// body.presenting .fragment rule also legitimately uses for an
+			// unrelated feature -- see render.ts's FRAGMENT_STYLE docstring.
+			expect(body).not.toContain("pointer-events: none");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2192,7 +2600,11 @@ describe("CLI: transition selection", () => {
 			}
 			const body = await fetchBody(url);
 			expect(body).not.toContain("transform: translateX");
-			expect(body).not.toContain("transition: opacity");
+			// See the identical comment on the --css test above for why this
+			// checks "pointer-events: none" rather than the more generic
+			// "transition: opacity", which FRAGMENT_STYLE's own unconditional
+			// rule also legitimately contains for an unrelated feature.
+			expect(body).not.toContain("pointer-events: none");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);

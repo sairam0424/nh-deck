@@ -266,7 +266,13 @@ describe("generateHtml", () => {
 		);
 
 		expect(html).not.toContain("transform: translateX");
-		expect(html).not.toContain("transition: opacity");
+		// "pointer-events: none" (rather than the more generic
+		// "transition: opacity") is the marker checked here: it appears ONLY
+		// inside transitionToCssBlock's fade/slide output, unlike
+		// "transition: opacity", which FRAGMENT_STYLE's own (unconditional)
+		// body.presenting .fragment rule also legitimately uses for an
+		// unrelated feature -- see FRAGMENT_STYLE's docstring in render.ts.
+		expect(html).not.toContain("pointer-events: none");
 	});
 
 	it("does not apply transition CSS when a custom --css is given, even with a transition name", () => {
@@ -278,7 +284,7 @@ describe("generateHtml", () => {
 			"fade",
 		);
 
-		expect(html).not.toContain("transition: opacity");
+		expect(html).not.toContain("pointer-events: none");
 	});
 
 	it.each(["fade", "slide"] as const)(
@@ -577,6 +583,140 @@ describe("generateHtml — named themes", () => {
 	});
 });
 
+describe("generateHtml — --css-vars overlay", () => {
+	// Unlike --css (which replaces the entire <style> block wholesale, see
+	// the "custom CSS opt-out" describe block above), --css-vars is designed
+	// to be a small variable overlay that COMPOSES with the rest of
+	// generateHtml's output -- the active theme's own :root block, the fixed
+	// layout/transition/progress-bar CSS, everything --css's own
+	// mutual-exclusivity with LAYOUT_STYLE/transitionStyle/progressStyle
+	// silently drops. See docs/specs/css-vars-override-design.md.
+	const ACCENT_OVERLAY = ":root { --nh-accent: #ff6600; }";
+
+	it("produces byte-identical output with no --css-vars argument (regression guard)", () => {
+		const withoutArg = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+		const withUndefinedCssVars = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedCssVars).toBe(withoutArg);
+	});
+
+	it("overlays a --css-vars custom property on top of the default (no-theme) stylesheet", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain(ACCENT_OVERLAY);
+		// The overlay's own accent value must appear strictly after the
+		// baseline stylesheet's default --nh-accent declaration -- "later in
+		// source wins" is the entire mechanism this feature relies on.
+		expect(html.indexOf(ACCENT_OVERLAY)).toBeGreaterThan(
+			html.indexOf("--nh-accent: #0b5fff"),
+		);
+	});
+
+	it("composes with an active theme, appearing after the theme's own :root override block", () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			{ bg: "#2e3440", fg: "#d8dee9", accent: "#88c0d0" },
+			undefined,
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain("--nh-bg: #2e3440");
+		expect(html).toContain(ACCENT_OVERLAY);
+		expect(html.indexOf(ACCENT_OVERLAY)).toBeGreaterThan(
+			html.indexOf("--nh-bg: #2e3440"),
+		);
+	});
+
+	it("preserves layout and transition CSS alongside a --css-vars overlay (unlike a full --css replacement, which drops both)", () => {
+		const html = generateHtml(
+			"<!-- layout: title -->\n\n# Heading\n",
+			"sample",
+			undefined,
+			undefined,
+			"fade",
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain(ACCENT_OVERLAY);
+		expect(html).toContain(".slide.layout-title");
+		expect(html).toContain("transition: opacity");
+		expect(html).toContain("body.presenting .presentation-progress");
+	});
+
+	it("ignores --css-vars when customCss is also given (mutual exclusivity mirrors --theme's own precedent)", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			"body { color: purple; }",
+			undefined,
+			undefined,
+			ACCENT_OVERLAY,
+		);
+
+		expect(html).toContain("body { color: purple; }");
+		expect(html).not.toContain(ACCENT_OVERLAY);
+	});
+
+	it("throws a clear error if --css-vars content contains a closing </style> tag, rather than letting it terminate the document's own <style> element", () => {
+		expect(() =>
+			generateHtml(
+				"# Slide",
+				"sample",
+				undefined,
+				undefined,
+				undefined,
+				"</style><script>alert(1)</script>",
+			),
+		).toThrow(/<\/style>/);
+	});
+
+	it(
+		"actually changes the computed color of an element styled via var(--nh-accent) in a real browser",
+		async () => {
+			const html = generateHtml(
+				"[a link](https://example.com)",
+				"sample",
+				undefined,
+				undefined,
+				undefined,
+				ACCENT_OVERLAY,
+			);
+			const page = await openHtmlPage(html);
+
+			const color = await page.evaluate(() => {
+				const link = document.querySelector("a");
+				return link ? getComputedStyle(link).color : null;
+			});
+
+			// #ff6600 -> rgb(255, 102, 0)
+			expect(color).toBe("rgb(255, 102, 0)");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
 describe("generateHtml — presenter notes", () => {
 	it("renders a slide's HTML comment as a hidden aside with class notes", () => {
 		const html = generateHtml("# Slide\n\n<!-- speaker note here -->\n");
@@ -697,6 +837,32 @@ describe("generateHtml — PDF pagination", () => {
 
 		expect(html).toMatch(/@media print[^}]*\.slide[^}]*break-after:\s*page/);
 	});
+
+	it("forces exact background/color printing in print media, so themed backgrounds survive a raw browser Ctrl+P", () => {
+		const html = generateHtml("# Slide 1\n\n---\n\n# Slide 2");
+
+		// Without this, a browser's print pipeline can silently substitute a
+		// dark theme's background for something print-friendlier when the
+		// user prints this raw generateHtml() output directly (e.g. via
+		// Ctrl+P) rather than going through pdfExport.ts's own
+		// `printBackground: true` Puppeteer option, which only covers the
+		// CLI's own `pdf`/`png` export commands.
+		//
+		// Uses indexOf rather than a single `toMatch` regex (unlike the sibling
+		// test above) because PRINT_PAGINATION_STYLE's `@media print` block now
+		// contains two separate rules -- a `[^}]*`-style regex spanning both
+		// would incorrectly require no `}` between them, which no longer holds
+		// now that the `.slide { break-after: page; }` rule's own closing brace
+		// sits in between.
+		const printMediaIndex = html.indexOf("@media print");
+		expect(printMediaIndex).toBeGreaterThan(-1);
+		expect(
+			html.indexOf("print-color-adjust: exact;", printMediaIndex),
+		).toBeGreaterThan(printMediaIndex);
+		expect(
+			html.indexOf("-webkit-print-color-adjust: exact;", printMediaIndex),
+		).toBeGreaterThan(printMediaIndex);
+	});
 });
 
 describe("containsUnsafeHtml", () => {
@@ -799,6 +965,90 @@ describe("generateHtml — two-column layout break-inside protection", () => {
 			/\.slide\.layout-two-column svg\s*\{\s*\n?\s*break-inside:\s*avoid;/,
 		);
 	});
+});
+
+describe("generateHtml — two-column layout container-query breakpoint", () => {
+	// Regression coverage for a real, currently-shipped bug: the two-column
+	// layout's mobile breakpoint queried `@media (max-width: 640px)` -- the
+	// real browser VIEWPORT -- instead of the slide's own box. Grid-overview
+	// mode (OVERVIEW_STYLE, toggled by presentationScript.ts's "o" key) can
+	// shrink a `.slide` down to a ~220-400px-wide thumbnail via a CSS grid +
+	// `transform: none !important`, WITHOUT the viewport itself changing size
+	// at all -- so the old viewport-scoped `@media` rule never fired there,
+	// even though the two-column layout visually needs to collapse to one
+	// column once it's squeezed that small. The fix gives `.slide` its own
+	// CSS containment context (`container-type: inline-size` on the base
+	// `.slide` rule) and swaps the breakpoint to `@container (max-width:
+	// 640px)`, which queries the slide's own box, not the viewport -- so it
+	// fires correctly inside a shrunk overview thumbnail regardless of how
+	// wide the real viewport stays. The actual `column-count` toggle lives on
+	// an inner `.two-column-flow` wrapper rather than on `.slide.layout-two-column`
+	// itself, since a CSS size query container can never match a `@container`
+	// rule against itself, only against a descendant -- see render.ts's own
+	// comment on this for the real-Chromium verification.
+	//
+	// Opens presentation mode and presses "o" -- exactly how
+	// presentationScript.ts's own openOverview() adds the `overview` class to
+	// <body> (see that file's keydown listener) -- rather than adding the
+	// class via page.evaluate, so this exercises the real toggle path a
+	// viewer actually takes.
+	async function openOverviewPage(html: string) {
+		activeServer = await startServer(html, 0);
+		const executablePath = detectBrowserExecutable();
+		activeBrowser = await puppeteer.launch({ executablePath, headless: true });
+		const page = await activeBrowser.newPage();
+		// Pinned explicitly wider than the 640px breakpoint so a passing test
+		// can only be explained by the slide's own shrunk box triggering the
+		// container query -- if the real viewport were narrow too, a lingering
+		// viewport-scoped @media rule could produce the same passing result
+		// for the wrong reason.
+		await page.setViewport({ width: 1024, height: 800 });
+		await page.goto(`${activeServer.url}/?present`, { waitUntil: "load" });
+		await page.keyboard.press("o");
+		return page;
+	}
+
+	async function twoColumnColumnCount(
+		page: Awaited<ReturnType<typeof openOverviewPage>>,
+	) {
+		return page.evaluate(() => {
+			const flow = document.querySelector(
+				".slide.layout-two-column .two-column-flow",
+			);
+			return flow ? getComputedStyle(flow).columnCount : null;
+		});
+	}
+
+	const TWO_COLUMN_DECK =
+		"<!-- layout: two-column -->\n\nColumn one text.\n\nColumn two text.";
+
+	it(
+		"collapses a two-column slide to a single column once grid-overview mode shrinks it to a thumbnail, even though the real browser viewport stays well above the 640px breakpoint",
+		async () => {
+			const html = generateHtml(TWO_COLUMN_DECK);
+			const page = await openOverviewPage(html);
+
+			const isOverviewOpen = await page.evaluate(() =>
+				document.body.classList.contains("overview"),
+			);
+			expect(isOverviewOpen).toBe(true);
+
+			expect(await twoColumnColumnCount(page)).toBe("1");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"keeps the two-column layout at two columns in the normal (non-overview) continuous-scroll view at that same wide viewport (guards against overcorrecting to always-one-column)",
+		async () => {
+			const html = generateHtml(TWO_COLUMN_DECK);
+			const page = await openHtmlPage(html);
+			await page.setViewport({ width: 1024, height: 800 });
+
+			expect(await twoColumnColumnCount(page)).toBe("2");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("generateHtml — themed notes panel", () => {
@@ -1035,4 +1285,267 @@ describe("generateHtml — theme code-bg/border WCAG contrast (regression: colla
 			STYLE_TEST_TIMEOUT_MS,
 		);
 	}
+});
+
+describe("generateHtml — fragment (incremental reveal) markers", () => {
+	it('applies class="fragment" to a paragraph immediately followed by a marker', () => {
+		const html = generateHtml(
+			"First paragraph.\n\n<!-- fragment -->\n\nSecond paragraph.",
+		);
+
+		expect(html).toContain('<p class="fragment">First paragraph.</p>');
+		expect(html).not.toContain('<p class="fragment">Second paragraph.</p>');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("recognizes the marker case-insensitively and with no internal whitespace", () => {
+		expect(generateHtml("First.\n\n<!-- FRAGMENT -->\n\nSecond.")).toContain(
+			'<p class="fragment">First.</p>',
+		);
+		expect(generateHtml("First.\n\n<!--fragment-->\n\nSecond.")).toContain(
+			'<p class="fragment">First.</p>',
+		);
+	});
+
+	it("does not treat a near-miss comment as a fragment marker", () => {
+		const html = generateHtml("First.\n\n<!-- fragments -->\n\nSecond.");
+
+		expect(html).not.toContain('class="fragment"');
+	});
+
+	it('applies class="fragment" to a single bullet marked via a nested, indented marker (the per-item authoring convention)', () => {
+		const html = generateHtml(
+			"- Item 1\n  <!-- fragment -->\n- Item 2\n- Item 3\n",
+		);
+
+		expect(html).toContain('<li class="fragment">Item 1</li>');
+		expect(html).toContain("<li>Item 2</li>");
+		expect(html).toContain("<li>Item 3</li>");
+		expect(html).not.toContain("<!-- fragment -->");
+		// A single <ul> -- the nested marker convention must not split the
+		// list into two separate lists.
+		expect((html.match(/<ul>/g) ?? []).length).toBe(1);
+	});
+
+	it("marks each bullet independently when every item has its own trailing marker", () => {
+		const html = generateHtml(
+			"- Item 1\n  <!-- fragment -->\n- Item 2\n  <!-- fragment -->\n- Item 3\n",
+		);
+
+		expect(html).toContain('<li class="fragment">Item 1</li>');
+		expect(html).toContain('<li class="fragment">Item 2</li>');
+		expect(html).toContain("<li>Item 3</li>");
+	});
+
+	it("removes an earlier direct marker inside a multi-paragraph bullet, not just the trailing one that marks the whole item (regression: the earlier marker used to leak through as a literal HTML comment)", () => {
+		const html = generateHtml(
+			"- First paragraph.\n\n  <!-- fragment -->\n\n  Second paragraph.\n\n  <!-- fragment -->\n- Item 2\n",
+		);
+
+		expect(html).toContain('<p class="fragment">First paragraph.</p>');
+		expect(html).toContain("<p>Second paragraph.</p>");
+		expect(html).toMatch(/<li class="fragment">/);
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("marks a loose list item (blank line before the nested marker) the same way as a tight one", () => {
+		const html = generateHtml("- Item 1\n\n  <!-- fragment -->\n- Item 2\n");
+
+		expect(html).toMatch(/<li class="fragment"><p>Item 1<\/p>\s*<\/li>/);
+	});
+
+	it('applies class="fragment" to a code fence immediately preceded by a marker', () => {
+		const html = generateHtml("<!-- fragment -->\n\n```\nsome code\n```\n");
+
+		expect(html).toContain('<pre class="fragment">');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it('composes class="fragment" onto a code fence\'s existing language class rather than replacing it', () => {
+		const html = generateHtml("<!-- fragment -->\n\n```bash\necho hi\n```\n");
+
+		expect(html).toContain(
+			'<pre class="fragment"><code class="language-bash">',
+		);
+	});
+
+	it('applies class="fragment" to a blockquote immediately preceded by a marker', () => {
+		const html = generateHtml("<!-- fragment -->\n\n> a quote\n");
+
+		expect(html).toContain('<blockquote class="fragment">');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("marks a paragraph nested inside a blockquote when the marker sits between two of its own paragraphs", () => {
+		const html = generateHtml(
+			"> Quote line 1.\n> <!-- fragment -->\n> Quote line 2.\n",
+		);
+
+		expect(html).toContain('<p class="fragment">Quote line 1.</p>');
+		expect(html).toContain("<p>Quote line 2.</p>");
+	});
+
+	it('applies class="fragment" to a Mermaid diagram (a code token with lang mermaid) preceded by a marker, composed onto its root <svg>', () => {
+		const html = generateHtml(
+			"<!-- fragment -->\n\n```mermaid\nflowchart TD\n  A --> B\n```\n",
+		);
+
+		expect(html).toMatch(/<svg[^>]*class="fragment"/);
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it('composes class="fragment" onto Mermaid\'s own mermaid-error class rather than replacing it, for an invalid diagram', () => {
+		const html = generateHtml(
+			"<!-- fragment -->\n\n```mermaid\nnot a real diagram\n```\n",
+		);
+
+		expect(html).toContain('class="mermaid-error fragment"');
+	});
+
+	it("drops a marker with no supported adjacent target instead of crashing or applying a class anywhere", () => {
+		expect(() =>
+			generateHtml("# Heading\n\n<!-- fragment -->\n\n# Another heading\n"),
+		).not.toThrow();
+		const html = generateHtml(
+			"# Heading\n\n<!-- fragment -->\n\n# Another heading\n",
+		);
+
+		expect(html).not.toContain('class="fragment"');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("drops a marker between two list items with no blank line (which splits the list) with no visual effect, rather than mis-attaching to the whole preceding list", () => {
+		const html = generateHtml(
+			"- Item 1\n- Item 2\n<!-- fragment -->\n- Item 3\n",
+		);
+
+		expect(html).not.toContain('class="fragment"');
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it("never flags a fragment-marked deck as containing unsafe HTML (allowlist covers the fragment marker itself)", () => {
+		expect(
+			containsUnsafeHtml(
+				"# Slide\n\nSome text.\n\n<!-- fragment -->\n\nMore text.\n",
+			),
+		).toBe(false);
+		expect(
+			containsUnsafeHtml("- Item 1\n  <!-- fragment -->\n- Item 2\n"),
+		).toBe(false);
+	});
+
+	it("includes the reduced-motion override for .fragment when the deck has a fragment, even with no --transition configured", () => {
+		const html = generateHtml(
+			"First.\n\n<!-- fragment -->\n\nSecond.",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(html).toContain("@media (prefers-reduced-motion: reduce)");
+		expect(html).toContain(
+			".fragment { transition: opacity 0.2s linear !important; }",
+		);
+	});
+
+	it("does not include any reduced-motion override when the deck has neither a fragment nor a --transition", () => {
+		const html = generateHtml(
+			"# Slide",
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(html).not.toContain("prefers-reduced-motion");
+	});
+
+	it("includes the overview override that forces every fragment visible regardless of reveal state", () => {
+		const html = generateHtml("First.\n\n<!-- fragment -->\n\nSecond.");
+
+		expect(html).toContain("body.overview .fragment {");
+		expect(html).toMatch(
+			/body\.overview \.fragment \{\s*opacity: 1 !important;/,
+		);
+	});
+
+	it("still applies FRAGMENT_STYLE's base rules even with a custom --css (core interactive mechanic, not suppressible)", () => {
+		const html = generateHtml(
+			"First.\n\n<!-- fragment -->\n\nSecond.",
+			"sample",
+			".slide { color: red; }",
+		);
+
+		expect(html).toContain("body.presenting .fragment");
+		expect(html).toContain("body.overview .fragment");
+	});
+});
+
+describe("generateHtml — fragments visible by default (continuous-scroll view and PDF/PNG export path)", () => {
+	// pdfExport.ts/pngExport.ts both call generateHtml() and load the result
+	// directly, never appending ?present to the URL they open -- so this
+	// exercises the EXACT SAME code path those export commands rely on:
+	// loading the raw generateHtml() output with no ?present, which is all
+	// FRAGMENT_STYLE's base (non-body.presenting-scoped) opacity:1 rule
+	// needs to keep every fragment visible with zero export-specific code.
+	it(
+		"renders a fragment-marked paragraph fully visible (opacity 1) when loaded without ?present",
+		async () => {
+			const html = generateHtml(
+				"First paragraph.\n\n<!-- fragment -->\n\nSecond paragraph.",
+			);
+			const page = await openHtmlPage(html);
+
+			const opacity = await page.evaluate(() => {
+				const el = document.querySelector(".fragment");
+				return el ? getComputedStyle(el).opacity : null;
+			});
+
+			expect(opacity).toBe("1");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"renders a fragment-marked bullet fully visible (opacity 1) when loaded without ?present",
+		async () => {
+			const html = generateHtml("- Item 1\n  <!-- fragment -->\n- Item 2\n");
+			const page = await openHtmlPage(html);
+
+			const opacities = await page.evaluate(() =>
+				Array.from(document.querySelectorAll(".fragment")).map(
+					(el) => getComputedStyle(el).opacity,
+				),
+			);
+
+			expect(opacities).toEqual(["1"]);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"hides an unrevealed fragment (opacity 0) once ?present is active, proving the visible-by-default behavior above is genuinely scoped to non-presenting mode, not just always-visible",
+		async () => {
+			const html = generateHtml(
+				"First paragraph.\n\n<!-- fragment -->\n\nSecond paragraph.",
+			);
+			activeServer = await startServer(html, 0);
+			const executablePath = detectBrowserExecutable();
+			activeBrowser = await puppeteer.launch({
+				executablePath,
+				headless: true,
+			});
+			const page = await activeBrowser.newPage();
+			await page.goto(`${activeServer.url}/?present`, { waitUntil: "load" });
+
+			const opacity = await page.evaluate(() => {
+				const el = document.querySelector(".fragment");
+				return el ? getComputedStyle(el).opacity : null;
+			});
+
+			expect(opacity).toBe("0");
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
 });

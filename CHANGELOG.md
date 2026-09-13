@@ -5,6 +5,50 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-09-13
+
+A second research-informed pass, picking up where 1.1.0 left off: a ground-truth
+snapshot of the shipped codebase plus 10 parallel research passes surfaced a
+currently-broken export path and nh-deck's biggest capability gap versus peer
+tools, both fixed here.
+
+### Fixed
+
+- **PDF and PNG export now produce landscape 16:9 pages instead of portrait
+  A4.** Every export was previously broken this way -- slide content came out
+  vertically stacked in a narrow portrait column, not a slide-shaped page.
+  PNG exports also now share identical dimensions across every slide in one
+  export (previously varied with content height, since no viewport was
+  locked).
+- The two-column layout no longer stays stuck at 2 columns inside the grid
+  overview mode's shrunk thumbnails -- its responsive breakpoint now queries
+  the slide's own box (a CSS container query) instead of the browser
+  viewport, which never actually shrinks in overview mode.
+- `nh-deck --version` fix from the 1.1.0 development cycle is now correctly
+  documented here (it was missed in the 1.1.0 changelog entry itself due to
+  branch-protection timing).
+
+### Added
+
+- **Fragment (incremental) reveal**: mark a bullet, paragraph, blockquote,
+  code block, or diagram with a trailing `<!-- fragment -->` comment to
+  reveal it progressively during presentation mode, one step at a time,
+  instead of showing the whole slide at once. Fragments are visible by
+  default in the continuous-scroll view and in PDF/PNG export; only
+  presentation mode reveals them incrementally. Respects
+  `prefers-reduced-motion` and keeps `aria-hidden` in sync with reveal state.
+- A "?"-triggered keyboard-shortcuts help overlay in presentation mode, plus
+  an always-visible "? controls" hint button -- nh-deck's growing set of
+  shortcuts (arrows, Space, Home, End, Escape, `o`, touch swipe) had no
+  in-UI discovery path until now.
+- `--css-vars <path>` on `render`/`pdf`/`png`: overlay just a few CSS custom
+  properties (e.g. `--nh-accent`) without losing all 4 layouts, both
+  transitions, and the progress bar the way the existing `--css` flag's full
+  stylesheet replacement does. When both are provided, `--css` takes
+  precedence and `--css-vars` is not applied (with a stderr note); `--css-vars`
+  composes with `--theme`. See `docs/specs/css-vars-override-design.md`.
+- PDF exports now include small, centered, muted page numbers by default.
+
 ## [1.1.0] - 2026-09-13
 
 A prioritized pass over UI/UX/accessibility/performance gaps, informed by a
@@ -26,6 +70,9 @@ deckrun code-level deep-dive and 10 parallel best-practices research passes.
 - A deck with 2+ Mermaid diagrams no longer emits duplicate SVG marker ids
   (e.g. two `id="arrowhead"`s), which is invalid SVG/HTML and could let one
   diagram's markers leak into another's.
+- `nh-deck --version` now reports the actual package version instead of a
+  hardcoded `0.1.0`, which it reported unchanged through the entire 1.0.0
+  release.
 
 ### Added
 
@@ -122,5 +169,6 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.2.0]: https://github.com/sairam0424/nh-deck/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/sairam0424/nh-deck/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sairam0424/nh-deck/releases/tag/v1.0.0
