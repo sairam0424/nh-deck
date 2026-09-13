@@ -439,6 +439,158 @@ const HELP_STYLE = `
     }`;
 
 /**
+ * The presenter-console layout for a genuinely separate presenter-view
+ * window -- the SAME served document, opened at the SAME URL with one
+ * added query flag (`&presenter`), rendering this layout instead of the
+ * normal one-slide-fullscreen view. See presentationScript.ts's own module
+ * docstring for the full URL/sync design; this constant is only the
+ * layout's CSS half. Everything here is scoped under `body.presenter-view`
+ * (added by presentationScript.ts only when the `presenter` flag is
+ * present), so an ordinary presenting window is completely unaffected --
+ * `.presenter-console`'s own base rule below is `display: none` unless
+ * that class is present, same as `.presentation-progress`'s own
+ * `display: none` base rule above.
+ *
+ * Deliberately NOT gated behind `!customCss`, for the same reason
+ * PRESENTATION_STYLE/OVERVIEW_STYLE/HELP_STYLE above are not: this is core
+ * interactive presentation-mode chrome (an entire alternate view, not a
+ * suppressible decorative flourish), so a custom --css should not be able
+ * to silently break it.
+ *
+ * `.presenter-preview .slide` reuses OVERVIEW_STYLE's own established
+ * thumbnail-scaling technique above (neutralize position/transform/
+ * opacity/transition via `!important` so no other presentation-mode rule
+ * -- PRESENTATION_STYLE's plain display toggle, transitionToCssBlock's
+ * per-transition absolute positioning, LAYOUT_STYLE's title/section/quote
+ * flex centering -- can win the specificity fight, then shrink via a
+ * smaller font-size) rather than a fresh `transform: scale(...)` -- same
+ * proven mechanism, applied to exactly the ONE or TWO `.slide` elements
+ * presentationScript.ts's updatePresenterConsole() moves into these boxes
+ * (never all of them at once, unlike the grid overview). The wrapping
+ * `.presenter-preview-current`/`-next` boxes -- not `.slide` itself, since
+ * a `.slide` moved in here already has its own margin/padding/border
+ * neutralized above -- carry the actual `max-height`/`overflow: hidden`
+ * clipping, the same pairing OVERVIEW_STYLE's own `.slide` rule uses for
+ * an identical purpose.
+ *
+ * `.presenter-preview .fragment` forces every fragment inside a preview
+ * box fully visible, `!important`, mirroring FRAGMENT_STYLE's own
+ * `body.overview .fragment` rule below for the exact same reason: a
+ * presenter-view window is a genuinely SEPARATE document instance (its own
+ * parse of the same served HTML, opened via window.open() -- not a live
+ * reference to the main window's DOM), so its own copy of a fragment-
+ * bearing slide never receives the main window's `.is-revealed` reveal
+ * progress at all (only the CURRENT SLIDE INDEX is synced, over
+ * BroadcastChannel -- see presentationScript.ts). Without this override, a
+ * fragment-bearing slide's content would sit permanently at
+ * FRAGMENT_STYLE's `body.presenting .fragment { opacity: 0; }` default
+ * inside the preview boxes -- invisible forever, since nothing in a
+ * presenter-view window ever reveals a fragment locally.
+ *
+ * `.presenter-preview .notes` is hidden, `!important` -- a `.notes`
+ * element nested inside a slide moved into a preview box would otherwise
+ * inherit NOTES_STYLE's own `body.presenting .notes` fixed bottom-overlay
+ * positioning, which makes no sense pinned inside a small thumbnail box.
+ * The dedicated `.presenter-notes-panel` below (populated by
+ * updatePresenterConsole() from that same `.notes` content, via a plain
+ * text copy) is what actually shows the current slide's notes here,
+ * always visible, unlike the main view's own `?notes`-gated overlay.
+ */
+const PRESENTER_VIEW_STYLE = `
+    body.presenter-view .presentation-chrome,
+    body.presenter-view .presentation-progress,
+    body.presenter-view .presentation-help,
+    body.presenter-view .presentation-help-hint {
+      display: none !important;
+    }
+    body.presenter-view .slide {
+      display: none !important;
+    }
+    .presenter-console {
+      display: none;
+    }
+    body.presenter-view .presenter-console {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      grid-template-areas:
+        "current next"
+        "notes   next";
+      gap: 1rem;
+      box-sizing: border-box;
+      min-height: 100vh;
+      padding: 1.5rem;
+      background: var(--nh-bg);
+      color: var(--nh-fg);
+    }
+    .presenter-preview {
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      background: var(--nh-bg);
+      overflow: hidden;
+    }
+    .presenter-preview-current {
+      grid-area: current;
+      max-height: 60vh;
+    }
+    .presenter-preview-next {
+      grid-area: next;
+      max-height: 30vh;
+    }
+    .presenter-notes-panel {
+      grid-area: notes;
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-y: auto;
+    }
+    .presenter-note + .presenter-note {
+      margin-top: 0.75rem;
+    }
+    .presenter-timer {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
+      border: 1px solid var(--nh-border);
+      border-radius: 4px;
+      padding: 0.25rem 0.6rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+    }
+    body.presenter-view .presenter-preview .slide {
+      display: block !important;
+      position: static !important;
+      inset: auto !important;
+      transform: none !important;
+      opacity: 1 !important;
+      pointer-events: none !important;
+      transition: none !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      border: none !important;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    body.presenter-view .presenter-preview-current .slide {
+      padding: 1.5rem;
+      font-size: 0.9rem;
+    }
+    body.presenter-view .presenter-preview-next .slide {
+      padding: 1rem;
+      font-size: 0.65rem;
+    }
+    body.presenter-view .presenter-preview .fragment {
+      opacity: 1 !important;
+      transition: none !important;
+    }
+    body.presenter-view .presenter-preview .notes {
+      display: none !important;
+    }`;
+
+/**
  * Scoped under body.presenting the same way .presentation-counter is,
  * above -- but kept in its own constant rather than folded into
  * PRESENTATION_STYLE so it can be suppressed by a custom --css the same
@@ -1080,6 +1232,7 @@ ${
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
+    ${PRESENTER_VIEW_STYLE}
     ${progressStyle}
     ${FRAGMENT_STYLE}
     ${reducedMotionStyle}

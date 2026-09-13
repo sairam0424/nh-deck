@@ -1,3 +1,4 @@
+import type { Page } from "puppeteer-core";
 import puppeteer from "puppeteer-core";
 import { afterEach, describe, expect, it } from "vitest";
 import { detectBrowserExecutable } from "../src/browserLaunch.js";
@@ -44,6 +45,30 @@ async function openPresentationPage(html: string, path = "/?present") {
 	// during a transition -- this file's tests are about the normal
 	// (non-reduced-motion) transition path, so every page here explicitly
 	// pins the opposite of that ambient host state rather than inheriting it.
+	await page.emulateMediaFeatures([
+		{ name: "prefers-reduced-motion", value: "no-preference" },
+	]);
+	await page.goto(`${activeServer.url}${path}`, { waitUntil: "load" });
+	return page;
+}
+
+// Opens a SECOND page against the SAME already-running browser/server as an
+// existing openPresentationPage() call -- required for the presenter-view
+// tests below, which need two real tabs of the identical served document
+// open at once (a main presenting page and a presenter-view page) sharing
+// the SAME origin, since that same-origin requirement is exactly what lets
+// BroadcastChannel and localStorage bridge them at all. Puppeteer's default
+// (non-incognito) browser context shares storage/broadcast scope across
+// every page opened via browser.newPage() on that one browser instance --
+// verified directly below, rather than assumed, since the task explicitly
+// calls out that this needs checking in practice.
+async function openSecondPresentationPage(path: string) {
+	if (!activeBrowser || !activeServer) {
+		throw new Error(
+			"openSecondPresentationPage requires an existing browser/server -- call openPresentationPage first",
+		);
+	}
+	const page = await activeBrowser.newPage();
 	await page.emulateMediaFeatures([
 		{ name: "prefers-reduced-motion", value: "no-preference" },
 	]);
@@ -1234,6 +1259,192 @@ describe("presentation mode — fragment (incremental reveal) state machine", ()
 			});
 
 			expect(transition).toBe("0.2s");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("presentation mode — presenter view (separate window)", () => {
+	const NOTES_DECK =
+		"# Slide 1\n\nFirst.\n\n<!-- remember to breathe -->\n\n---\n\n# Slide 2\n\nSecond.\n\n---\n\n# Slide 3\n\nThird.";
+
+	function presenterCurrentHeading(presenterPage: Page) {
+		return presenterPage.evaluate(
+			() =>
+				document.querySelector(".presenter-preview-current h1")?.textContent,
+		);
+	}
+
+	function presenterNextHeading(presenterPage: Page) {
+		return presenterPage.evaluate(
+			() => document.querySelector(".presenter-preview-next h1")?.textContent,
+		);
+	}
+
+	it(
+		"opening a second page at the same URL plus &presenter shows the presenter-console layout with current+next slide previews and notes visible without needing ?notes",
+		async () => {
+			const mainPage = await openPresentationPage(generateHtml(NOTES_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			const isPresenterView = await presenterPage.evaluate(() =>
+				document.body.classList.contains("presenter-view"),
+			);
+			expect(isPresenterView).toBe(true);
+
+			expect(await presenterCurrentHeading(presenterPage)).toBe("Slide 1");
+			expect(await presenterNextHeading(presenterPage)).toBe("Slide 2");
+
+			const notesText = await presenterPage.evaluate(
+				() => document.querySelector(".presenter-notes-panel")?.textContent,
+			);
+			expect(notesText).toContain("remember to breathe");
+
+			// The main window's own URL never carries ?notes -- the presenter
+			// console's notes panel is visible regardless, unlike the main
+			// view's own ?notes-gated overlay.
+			const mainUrlHasNotes = await mainPage.evaluate(() =>
+				new URLSearchParams(location.search).has("notes"),
+			);
+			expect(mainUrlHasNotes).toBe(false);
+
+			// The ordinary presenting (non-presenter) window must never show
+			// this chrome at all.
+			const mainHasPresenterConsole = await mainPage.evaluate(
+				() => document.querySelector(".presenter-console") !== null,
+			);
+			expect(mainHasPresenterConsole).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"navigating in the main window's simulated presenting context broadcasts the update to an already-open presenter-view page via BroadcastChannel (verified live across two real Puppeteer pages, not assumed)",
+		async () => {
+			const mainPage = await openPresentationPage(
+				generateHtml(THREE_SLIDE_DECK),
+			);
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+			expect(await presenterCurrentHeading(presenterPage)).toBe("Slide 1");
+
+			await mainPage.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(mainPage)).toBe("Slide 2");
+
+			// The BroadcastChannel message is delivered asynchronously -- poll
+			// briefly for the OTHER page's own DOM to reflect it rather than
+			// asserting immediately after the keypress, which could race.
+			await presenterPage.waitForFunction(
+				() =>
+					document.querySelector(".presenter-preview-current h1")
+						?.textContent === "Slide 2",
+			);
+
+			expect(await presenterNextHeading(presenterPage)).toBe("Slide 3");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"a presenter-view page opened AFTER navigation already happened reads the last-known slide index from localStorage on load",
+		async () => {
+			const mainPage = await openPresentationPage(
+				generateHtml(THREE_SLIDE_DECK),
+			);
+
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(mainPage)).toBe("Slide 3");
+
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			expect(await presenterCurrentHeading(presenterPage)).toBe("Slide 3");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"the presenter-view page never drives its own navigation -- keyboard and click input inside it have no effect on either window",
+		async () => {
+			const mainPage = await openPresentationPage(
+				generateHtml(THREE_SLIDE_DECK),
+			);
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			await presenterPage.keyboard.press("ArrowRight");
+			await presenterPage.click("body");
+			await presenterPage.keyboard.press("o");
+
+			expect(await activeSlideHeading(mainPage)).toBe("Slide 1");
+			expect(await presenterCurrentHeading(presenterPage)).toBe("Slide 1");
+			const presenterHasOverviewClass = await presenterPage.evaluate(() =>
+				document.body.classList.contains("overview"),
+			);
+			expect(presenterHasOverviewClass).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"pressing p in the main presenting window opens a real, separate presenter-view window carrying both the present and presenter flags",
+		async () => {
+			const mainPage = await openPresentationPage(
+				generateHtml(THREE_SLIDE_DECK),
+			);
+			if (!activeBrowser) {
+				throw new Error("activeBrowser was not set by openPresentationPage");
+			}
+
+			const [target] = await Promise.all([
+				activeBrowser.waitForTarget((candidate) =>
+					candidate.url().includes("presenter"),
+				),
+				mainPage.keyboard.press("p"),
+			]);
+			const presenterPage = await target.page();
+			if (!presenterPage) {
+				throw new Error("window.open()'s target produced no Page");
+			}
+			await presenterPage.waitForFunction(() =>
+				document.body.classList.contains("presenter-view"),
+			);
+
+			const presenterUrl = new URL(presenterPage.url());
+			const presenterParams = new URLSearchParams(presenterUrl.search);
+			expect(presenterParams.has("present")).toBe(true);
+			expect(presenterParams.has("presenter")).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows a count-up timer that visibly increases over a short real wait",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			const readTimerSeconds = async () => {
+				const text = await presenterPage.evaluate(
+					() => document.querySelector(".presenter-timer")?.textContent ?? "",
+				);
+				const [minutes, seconds] = text.split(":").map(Number);
+				return minutes * 60 + seconds;
+			};
+
+			const initialSeconds = await readTimerSeconds();
+			await new Promise((resolve) => setTimeout(resolve, 2200));
+			const laterSeconds = await readTimerSeconds();
+
+			expect(laterSeconds).toBeGreaterThan(initialSeconds);
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
