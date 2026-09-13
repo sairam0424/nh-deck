@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { styleText } from "node:util";
 import { Command } from "commander";
 import open from "open";
 import {
@@ -146,7 +147,9 @@ program
 	.description(
 		"A local-first CLI for writing, presenting, and exporting Markdown-based slide decks.",
 	)
-	.version("0.1.0");
+	.version("0.1.0")
+	.showHelpAfterError()
+	.showSuggestionAfterError();
 
 program
 	.command("render <file>")
@@ -219,7 +222,9 @@ program
 					},
 				);
 
-				process.stdout.write(`nh-deck serving ${file} at ${url}\n`);
+				process.stdout.write(
+					`${styleText("green", `nh-deck serving ${file} at ${url}`)}\n`,
+				);
 
 				if (options.watch) {
 					const rerender = debounce(() => {
@@ -260,7 +265,9 @@ program
 					await open(url);
 				}
 			} catch (error) {
-				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.stderr.write(
+					`${styleText("red", formatActionError(error, file))}\n`,
+				);
 				process.exitCode = 1;
 			}
 		},
@@ -301,9 +308,13 @@ program
 				const outputPath = resolveOutputPath(file, output);
 
 				await exportToPdf(html, outputPath);
-				process.stdout.write(`Wrote PDF to ${outputPath}\n`);
+				process.stdout.write(
+					`${styleText("green", `Wrote PDF to ${outputPath}`)}\n`,
+				);
 			} catch (error) {
-				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.stderr.write(
+					`${styleText("red", formatActionError(error, file))}\n`,
+				);
 				process.exitCode = 1;
 			}
 		},
@@ -345,10 +356,15 @@ program
 
 				const written = await exportToPng(html, outputPath);
 				process.stdout.write(
-					`Wrote ${written.length} PNG file(s), starting at ${written[0]}\n`,
+					`${styleText(
+						"green",
+						`Wrote ${written.length} PNG file(s), starting at ${written[0]}`,
+					)}\n`,
 				);
 			} catch (error) {
-				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.stderr.write(
+					`${styleText("red", formatActionError(error, file))}\n`,
+				);
 				process.exitCode = 1;
 			}
 		},

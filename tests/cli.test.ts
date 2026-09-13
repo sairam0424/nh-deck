@@ -2278,3 +2278,251 @@ describe("CLI: transition selection", () => {
 		EXIT_TIMEOUT_MS + 5_000,
 	);
 });
+
+// The ANSI escape character, built from its code point rather than a literal
+// control character embedded in source (avoids the "unexpected control
+// character" lint rule that literal regex/string escapes trigger).
+const ANSI_ESCAPE = String.fromCharCode(27);
+const ANSI_SGR_PATTERN = new RegExp(`${ANSI_ESCAPE}\\[[0-9;]*m`, "g");
+const GREEN_SGR = `${ANSI_ESCAPE}[32m`;
+const RED_SGR = `${ANSI_ESCAPE}[31m`;
+
+/** Strips ANSI SGR escape sequences (the ones node:util's styleText emits). */
+function stripAnsi(value: string): string {
+	return value.replace(ANSI_SGR_PATTERN, "");
+}
+
+describe("CLI: colorized output stays informational-content-equivalent", () => {
+	it(
+		"prints the serving line with no ANSI codes by default (non-TTY pipe)",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			// Capture the full raw stdout (not just the regex-extracted line
+			// below) so a leading/trailing ANSI escape wrapped around the
+			// matched text would still be visible here.
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+
+			// A spawned child's stdout is a pipe, not a TTY, so styleText must
+			// degrade to plain text without any explicit NO_COLOR handling --
+			// this is what every other exact-match stdout/stderr assertion in
+			// this file already relies on implicitly.
+			expect(stdout.includes(ANSI_ESCAPE)).toBe(false);
+			const normalized = matchedLine.replace(/:\d+$/, ":<PORT>");
+			expect(normalized).toBe(
+				"nh-deck serving fixtures/sample.md at http://127.0.0.1:<PORT>",
+			);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"colorizes the serving line green under FORCE_COLOR without changing its text",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot, env: { ...process.env, FORCE_COLOR: "1" } },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+
+			expect(stdout.includes(GREEN_SGR)).toBe(true);
+			// The regex-extracted line matches on plain-text boundaries only, so
+			// it is already color-free -- this doubles as the "content unchanged
+			// by coloring" check.
+			const normalized = matchedLine.replace(/:\d+$/, ":<PORT>");
+			expect(normalized).toBe(
+				"nh-deck serving fixtures/sample.md at http://127.0.0.1:<PORT>",
+			);
+			// Stripping the raw, ANSI-wrapped stdout must round-trip back to the
+			// same plain-text serving line.
+			expect(stripAnsi(stdout)).toContain(
+				"nh-deck serving fixtures/sample.md at http://127.0.0.1:",
+			);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"colorizes an error message red under FORCE_COLOR without changing its text",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"does-not-exist.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot, env: { ...process.env, FORCE_COLOR: "1" } },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).toBe(1);
+			expect(stderr.includes(RED_SGR)).toBe(true);
+			expect(stripAnsi(stderr)).toBe(
+				"nh-deck: could not find file 'does-not-exist.md'\n",
+			);
+		},
+		EXIT_TIMEOUT_MS + 5_000,
+	);
+
+	it(
+		"writes the PDF export success line in green under FORCE_COLOR, same text underneath",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-color-pdf-test-${randomUUID()}.pdf`,
+			);
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot, env: { ...process.env, FORCE_COLOR: "1" } },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout.includes(GREEN_SGR)).toBe(true);
+			expect(stripAnsi(stdout)).toContain(`Wrote PDF to ${outputPath}`);
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: showHelpAfterError / showSuggestionAfterError wiring", () => {
+	it(
+		"suggests the closest subcommand and prints help after an unknown command",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "rendr", "fixtures/sample.md"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).toBe(1);
+			expect(stderr).toMatch(/unknown command 'rendr'/);
+			// showSuggestionAfterError()
+			expect(stderr).toMatch(/Did you mean render\?/);
+			// showHelpAfterError() -- off by default in commander, so this line
+			// only appears because index.ts explicitly opts in.
+			expect(stderr).toMatch(/Usage: nh-deck/);
+		},
+		EXIT_TIMEOUT_MS + 5_000,
+	);
+
+	it(
+		"suggests the closest flag and prints subcommand help after an unknown option",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--wach",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).toBe(1);
+			expect(stderr).toMatch(/unknown option '--wach'/);
+			expect(stderr).toMatch(/Did you mean --watch\?/);
+			expect(stderr).toMatch(/Usage: nh-deck render/);
+		},
+		EXIT_TIMEOUT_MS + 5_000,
+	);
+});
