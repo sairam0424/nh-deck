@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+A prioritized pass over UI/UX/accessibility/performance gaps, informed by a
+deckrun code-level deep-dive and 10 parallel best-practices research passes.
+Not yet cut as a release -- see the PR for the version-bump decision.
+
+### Fixed
+
+- `--nh-code-bg` and `--nh-border` no longer derive from `colors.muted`/
+  `colors.line`, which failed WCAG AA contrast in every shipped theme and,
+  under Nord specifically, made the presentation-mode slide counter render
+  in a color identical to its own background.
+- The `slide` transition's backward navigation (ArrowLeft) no longer plays
+  the same left-to-right motion as forward navigation.
+- Presenter notes (`?notes`) no longer unhide every slide's note
+  simultaneously in the default continuous-scroll view, where they'd all
+  stack at an identical fixed screen position; the fixed bottom-overlay
+  behavior is now scoped to presentation mode, where exactly one slide is
+  ever active.
+- A deck with 2+ Mermaid diagrams no longer emits duplicate SVG marker ids
+  (e.g. two `id="arrowhead"`s), which is invalid SVG/HTML and could let one
+  diagram's markers leak into another's.
+
+### Added
+
+- A progress bar in presentation mode (`?present`), alongside the existing
+  slide counter.
+- `prefers-reduced-motion` support for slide transitions.
+- `Home`/`End` to jump to the first/last slide, and `Escape` to exit
+  presentation mode without hand-editing the URL.
+- A slide-overview/grid-mode toggle (`Escape`/`o`) showing every slide at
+  once as clickable thumbnails.
+- Touch swipe navigation in presentation mode.
+- Commander's built-in `showSuggestionAfterError()`/`showHelpAfterError()`,
+  and colorized success/error CLI output (via `node:util.styleText`, which
+  already no-ops on non-TTY output).
+- gzip compression for HTML served by the local dev server, negotiated via
+  `Accept-Encoding`.
+
+### Changed
+
+- `.slide.layout-title`'s heading now scales responsively (`clamp()`)
+  instead of a fixed `font-size`.
+- `.slide.layout-two-column` collapses to a single column under 640px.
+- The base font stack gained a fuller emoji/CJK-adjacent fallback chain.
+
 ## [1.0.0] - 2026-09-13
 
 First published release. nh-deck has been developed in the open on `main` since
