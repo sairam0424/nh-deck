@@ -5,11 +5,10 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [1.1.0] - 2026-09-13
 
 A prioritized pass over UI/UX/accessibility/performance gaps, informed by a
 deckrun code-level deep-dive and 10 parallel best-practices research passes.
-Not yet cut as a release -- see the PR for the version-bump decision.
 
 ### Fixed
 
@@ -40,9 +39,13 @@ Not yet cut as a release -- see the PR for the version-bump decision.
 - Touch swipe navigation in presentation mode.
 - Commander's built-in `showSuggestionAfterError()`/`showHelpAfterError()`,
   and colorized success/error CLI output (via `node:util.styleText`, which
-  already no-ops on non-TTY output).
+  already no-ops on non-TTY output and degrades to plain text on Node
+  20.0-20.11, before `styleText` existed).
 - gzip compression for HTML served by the local dev server, negotiated via
-  `Accept-Encoding`.
+  a proper RFC 7231 `Accept-Encoding` evaluator (q-values, wildcards, and
+  case-insensitive coding names all handled correctly).
+- A README demo screenshot and two new screenshots documenting
+  presentation mode's progress bar and grid overview.
 
 ### Changed
 
@@ -119,4 +122,5 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.1.0]: https://github.com/sairam0424/nh-deck/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sairam0424/nh-deck/releases/tag/v1.0.0

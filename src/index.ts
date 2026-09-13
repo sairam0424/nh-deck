@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import * as nodeUtil from "node:util";
 import { Command } from "commander";
 import open from "open";
@@ -159,6 +160,21 @@ function computeEffectiveTransition(
 	};
 }
 
+// Read directly from package.json rather than a hardcoded string literal --
+// this exact CLI shipped `--version` reporting "0.1.0" through the entire
+// 1.0.0 release, since a literal is never touched by a version bump unless
+// someone remembers to update it separately. dist/index.js's own directory
+// is one level below the package root in both the source-build layout
+// (dist/../package.json) and the published npm package layout
+// (node_modules/nh-deck/dist/../package.json), so this resolves correctly
+// in either case.
+const packageJson = JSON.parse(
+	readFileSync(
+		resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
+		"utf8",
+	),
+) as { version: string };
+
 const program = new Command();
 
 program
@@ -166,7 +182,7 @@ program
 	.description(
 		"A local-first CLI for writing, presenting, and exporting Markdown-based slide decks.",
 	)
-	.version("0.1.0")
+	.version(packageJson.version)
 	.showHelpAfterError()
 	.showSuggestionAfterError();
 

@@ -2526,3 +2526,34 @@ describe("CLI: showHelpAfterError / showSuggestionAfterError wiring", () => {
 		EXIT_TIMEOUT_MS + 5_000,
 	);
 });
+
+describe("CLI: --version", () => {
+	it(
+		"reports package.json's own version, not a stale hardcoded string (regression: --version reported 0.1.0 through the entire 1.0.0 release)",
+		async () => {
+			const packageJson = JSON.parse(
+				readFileSync(path.join(repoRoot, "package.json"), "utf8"),
+			) as { version: string };
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "--version"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.on("exit", resolve);
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout.trim()).toBe(packageJson.version);
+		},
+		EXIT_TIMEOUT_MS + 5_000,
+	);
+});
