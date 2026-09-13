@@ -176,6 +176,69 @@ const PRESENTATION_STYLE = `
     }`;
 
 /**
+ * Grid "slide overview" mode -- the convention shared by reveal.js, Slidev,
+ * Marp, and deckrun -- toggled by PRESENTATION_SCRIPT's Escape/"o" handling
+ * via a `.overview` class added onto the same `<body>` element
+ * `body.presenting` is scoped under. Every `.slide` becomes visible at once
+ * (not just the `.is-active` one), laid out in a CSS grid of thumbnails, and
+ * clickable to jump straight to that slide.
+ *
+ * Deliberately NOT gated behind `!customCss` the way LAYOUT_STYLE/
+ * transitionStyle/progressStyle are -- like PRESENTATION_STYLE itself, this
+ * defines a core interactive mechanic of presentation mode (an alternate way
+ * to see and navigate slides), not a suppressible decorative flourish, so a
+ * custom --css should not be able to silently break it.
+ *
+ * Every `.slide` override below uses `!important` rather than leaning on
+ * selector specificity to beat PRESENTATION_STYLE's `body.presenting .slide`
+ * toggle, transitionToCssBlock's per-transition `position: absolute`/
+ * `transform`/`opacity` rules, and LAYOUT_STYLE's `min-height: 60vh` title/
+ * section/quote centering -- all of which must be overridden regardless of
+ * which transition (if any) is active or where in the stylesheet this block
+ * ends up relative to them. This mirrors REDUCED_MOTION_STYLE's own
+ * established use of `!important` above for the identical kind of problem
+ * (overriding contextual presentation-mode state without a specificity
+ * fight).
+ */
+const OVERVIEW_STYLE = `
+    body.overview {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      max-width: none;
+      padding: 2rem;
+      align-content: start;
+    }
+    body.overview .presentation-counter,
+    body.overview .presentation-progress {
+      display: none !important;
+    }
+    body.overview .slide {
+      display: block !important;
+      position: static !important;
+      inset: auto !important;
+      transform: none !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      transition: none !important;
+      min-height: 0 !important;
+      max-height: 220px;
+      overflow: hidden;
+      margin: 0 !important;
+      padding: 0.75rem;
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      font-size: 0.55rem;
+      cursor: pointer;
+    }
+    body.overview .slide.is-active {
+      border-color: var(--nh-accent);
+    }
+    body.overview .notes {
+      display: none !important;
+    }`;
+
+/**
  * Scoped under body.presenting the same way .presentation-counter is,
  * above -- but kept in its own constant rather than folded into
  * PRESENTATION_STYLE so it can be suppressed by a custom --css the same
@@ -576,6 +639,7 @@ ${
     ${NOTES_STYLE}
     ${PRINT_PAGINATION_STYLE}
     ${PRESENTATION_STYLE}
+    ${OVERVIEW_STYLE}
     ${progressStyle}
     ${layoutOverride}
     ${transitionStyle}

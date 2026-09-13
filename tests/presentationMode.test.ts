@@ -405,3 +405,116 @@ describe("presentation mode", () => {
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
 });
+
+describe("presentation mode — slide overview (grid view)", () => {
+	async function visibleSlideCount(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(
+			() =>
+				Array.from(document.querySelectorAll(".slide")).filter(
+					(el) => (el as HTMLElement).offsetParent !== null,
+				).length,
+		);
+	}
+
+	async function isOverviewOpen(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => document.body.classList.contains("overview"));
+	}
+
+	it(
+		'opening the overview via the "o" key shows every slide at once, laid out in a grid, without exiting presentation mode',
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			// Before opening the overview, presentation mode's normal
+			// one-slide-at-a-time behavior holds.
+			expect(await visibleSlideCount(page)).toBe(1);
+
+			await page.keyboard.press("o");
+
+			expect(await isOverviewOpen(page)).toBe(true);
+			expect(await visibleSlideCount(page)).toBe(3);
+
+			const bodyDisplay = await page.evaluate(
+				() => getComputedStyle(document.body).display,
+			);
+			expect(bodyDisplay).toBe("grid");
+
+			// Overview is a mode WITHIN presentation mode, not a replacement for
+			// it -- it must not also exit presentation mode.
+			const isPresenting = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresenting).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"clicking a slide's thumbnail in the overview jumps presentation mode to that slide and closes the overview",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("o");
+			expect(await isOverviewOpen(page)).toBe(true);
+
+			await page.click(".slide:nth-of-type(3)");
+
+			expect(await isOverviewOpen(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
+			// Closing back into normal presentation mode restores the
+			// one-slide-at-a-time view.
+			expect(await visibleSlideCount(page)).toBe(1);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"pressing Escape while the overview is open closes ONLY the overview -- it does not also exit presentation mode in the same keypress (regression: precedence with the pre-existing Escape-exits-presentation-mode handler)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			// Land on slide 2 before opening the overview, so closing it can
+			// prove it returns to THIS slide -- not slide 1, and not whatever
+			// slide might otherwise be assumed "last active".
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			await page.keyboard.press("o");
+			expect(await isOverviewOpen(page)).toBe(true);
+
+			// The critical precedence assertion: Escape while overview is open
+			// must close the overview only -- it must NOT also run
+			// exitPresentationMode in the same keypress.
+			await page.keyboard.press("Escape");
+
+			expect(await isOverviewOpen(page)).toBe(false);
+
+			const isPresenting = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresenting).toBe(true);
+
+			const hasPresentParam = await page.evaluate(() =>
+				new URLSearchParams(location.search).has("present"),
+			);
+			expect(hasPresentParam).toBe(true);
+
+			// Returns to the slide that was active before the overview opened.
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			// A SECOND Escape (overview now closed) exits presentation mode --
+			// proving the pre-existing exit behavior still works, unmodified, once
+			// overview is out of the way.
+			await page.keyboard.press("Escape");
+			const isPresentingAfterSecondEscape = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresentingAfterSecondEscape).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});

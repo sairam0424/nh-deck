@@ -20,6 +20,22 @@
  * Escape exits presentation mode entirely (see exitPresentationMode()
  * below), back to the normal continuous-scroll document view, without a
  * full page reload.
+ *
+ * "o" also toggles a slide-overview ("grid view") mode -- the convention
+ * shared by reveal.js, Slidev, Marp, and deckrun -- which adds an
+ * `.overview` class to <body> (render.ts's CSS shows every `.slide` at once,
+ * scaled down into a grid, under that class) and closes again on a second
+ * "o", Escape, or a thumbnail click.
+ *
+ * Escape's role is deliberately NOT a symmetric toggle with "o": Escape only
+ * ever CLOSES the overview when it's open (returning to the slide active
+ * before it opened, via closeOverviewToPreviousSlide() below) -- it never
+ * OPENS the overview. This preserves exitPresentationMode()'s pre-existing,
+ * already-shipped behavior unmodified: a bare Escape press from normal
+ * presentation mode (overview not open) still exits presentation mode
+ * directly, in one keypress, exactly as before this feature existed. A
+ * single Escape keypress therefore only ever does ONE of "close overview" or
+ * "exit presentation mode", never both.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -47,6 +63,8 @@ export const PRESENTATION_SCRIPT = `<script>
   };
 
   let current = parseHashIndex();
+  let overviewOpen = false;
+  let indexBeforeOverview = current;
 
   const render = () => {
     slides.forEach((slide, i) => {
@@ -68,12 +86,47 @@ export const PRESENTATION_SCRIPT = `<script>
     render();
   };
 
+  // Opens grid-overview mode: records which slide was active BEFORE opening
+  // (indexBeforeOverview) separately from current, so closing it again via
+  // Escape/"o" (closeOverviewToPreviousSlide, below) always returns to that
+  // slide -- not necessarily whatever slide was most recently clicked/hovered
+  // while the grid was open. Nothing else mutates current while overview is
+  // open (arrow/Home/End navigation is suppressed below via the early
+  // overviewOpen return), so in practice indexBeforeOverview and current
+  // stay equal until a thumbnail click intentionally changes current -- see
+  // the click listener's own separate, non-restoring close path.
+  const openOverview = () => {
+    if (overviewOpen) {
+      return;
+    }
+    indexBeforeOverview = current;
+    overviewOpen = true;
+    document.body.classList.add("overview");
+  };
+
+  // Removes the overview class/flag without touching current -- shared by
+  // both close paths (Escape/"o", and a thumbnail click) since only the
+  // Escape/"o" path also needs to navigate back to indexBeforeOverview.
+  const closeOverviewUi = () => {
+    overviewOpen = false;
+    document.body.classList.remove("overview");
+  };
+
+  // The Escape/"o"-while-open close path: closes the grid and returns to the
+  // slide that was active when it opened.
+  const closeOverviewToPreviousSlide = () => {
+    closeOverviewUi();
+    goTo(indexBeforeOverview, false);
+  };
+
   // Exits presentation mode entirely, back to the normal continuous-scroll
   // document view -- WITHOUT a full page reload. Kept as its own
   // clearly-named function (rather than inlined into the Escape branch
-  // below) so a later overview/grid-mode addition can compose in front of
-  // it: check "is overview open" first and close that instead, falling
-  // back to this exit-presentation behavior only when overview isn't open.
+  // below) so the overview/grid-mode addition above can compose in front of
+  // it: the keydown listener checks "is overview open" first and closes that
+  // instead (closeOverviewToPreviousSlide), falling back to this
+  // exit-presentation behavior only when overview isn't open -- a single
+  // Escape keypress therefore never does both in the same event.
   const exitPresentationMode = () => {
     const params = new URLSearchParams(location.search);
     params.delete("present");
@@ -90,6 +143,35 @@ export const PRESENTATION_SCRIPT = `<script>
   };
 
   document.addEventListener("keydown", (event) => {
+    // Escape and "o" both need the "is overview open" precedence check
+    // BEFORE anything else runs: Escape must close an open overview instead
+    // of also exiting presentation mode in the same keypress (see
+    // exitPresentationMode's docstring), and "o" toggles the overview open
+    // or closed depending on that same state.
+    if (event.key === "Escape") {
+      if (overviewOpen) {
+        closeOverviewToPreviousSlide();
+      } else {
+        exitPresentationMode();
+      }
+      return;
+    }
+    if (event.key === "o" || event.key === "O") {
+      if (overviewOpen) {
+        closeOverviewToPreviousSlide();
+      } else {
+        openOverview();
+      }
+      return;
+    }
+    // Slide-to-slide navigation is suppressed while the grid overview is
+    // open -- it has no "one active slide" to move between, and silently
+    // changing current underneath the grid would make
+    // closeOverviewToPreviousSlide's "return to the slide from before
+    // opening" guarantee ambiguous.
+    if (overviewOpen) {
+      return;
+    }
     if (event.key === "ArrowRight" || event.key === " ") {
       goTo(current + 1, false);
     } else if (event.key === "ArrowLeft") {
@@ -98,12 +180,31 @@ export const PRESENTATION_SCRIPT = `<script>
       goTo(0, true);
     } else if (event.key === "End") {
       goTo(slides.length - 1, false);
-    } else if (event.key === "Escape") {
-      exitPresentationMode();
     }
   });
 
   document.addEventListener("click", (event) => {
+    if (overviewOpen) {
+      const clickedSlide = event.target.closest(".slide");
+      if (!clickedSlide) {
+        return;
+      }
+      const index = slides.indexOf(clickedSlide);
+      if (index === -1) {
+        return;
+      }
+      // Jumps straight to the clicked thumbnail's slide and closes the
+      // overview WITHOUT restoring indexBeforeOverview -- this is the one
+      // path that intentionally changes current to something other than
+      // the pre-overview slide. preventDefault() stops a link inside the
+      // thumbnail's content from actually navigating the page away; a
+      // thumbnail click always means "select this slide", not "follow this
+      // link".
+      event.preventDefault();
+      closeOverviewUi();
+      goTo(index, false);
+      return;
+    }
     if (event.target.closest("a")) {
       return;
     }

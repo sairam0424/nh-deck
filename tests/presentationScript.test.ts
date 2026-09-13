@@ -27,6 +27,18 @@ describe("PRESENTATION_SCRIPT", () => {
 		expect(PRESENTATION_SCRIPT).toContain("history.replaceState");
 	});
 
+	it('toggles a grid-overview mode via the "o" key, applying an overview class', () => {
+		expect(PRESENTATION_SCRIPT).toContain('event.key === "o"');
+		expect(PRESENTATION_SCRIPT).toContain('event.key === "O"');
+		expect(PRESENTATION_SCRIPT).toContain('classList.add("overview")');
+		expect(PRESENTATION_SCRIPT).toContain('classList.remove("overview")');
+	});
+
+	it('gives Escape/"o" precedence over exitPresentationMode while overview is open, via a distinct close function', () => {
+		expect(PRESENTATION_SCRIPT).toContain("closeOverviewToPreviousSlide");
+		expect(PRESENTATION_SCRIPT).toContain("overviewOpen");
+	});
+
 	it("persists the current slide via location.hash", () => {
 		expect(PRESENTATION_SCRIPT).toContain("location.hash");
 	});
