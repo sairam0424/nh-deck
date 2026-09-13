@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import * as nodeUtil from "node:util";
 import { Command } from "commander";
 import open from "open";
 import {
@@ -35,6 +37,24 @@ const UNSAFE_HTML_WARNING =
 	"nh-deck: warning: this deck contains raw HTML, which is rendered as-is (including any <script> tags). Only open decks from sources you trust.\n";
 
 /**
+ * `node:util.styleText` was added in Node 20.12.0 -- this repo's declared
+ * `engines.node` floor is `>=20`, which includes earlier 20.x patches where
+ * the named export doesn't exist. Accessing it through the namespace import
+ * (rather than a static named import) and feature-detecting at call time
+ * avoids a load-time crash on those older patches; text is returned
+ * unstyled there instead of colorized, which is a fully acceptable
+ * degradation for a cosmetic feature.
+ */
+function style(
+	format: Parameters<typeof nodeUtil.styleText>[0],
+	text: string,
+): string {
+	return typeof nodeUtil.styleText === "function"
+		? nodeUtil.styleText(format, text)
+		: text;
+}
+
+/**
  * Formats a caught action-handler error for `nh-deck: <message>` stderr
  * output. An ENOENT failure reading the input `<file>` argument gets a
  * clean, human-authored message instead of the raw Node.js syscall wording
@@ -47,6 +67,7 @@ const UNSAFE_HTML_WARNING =
  * when a relative path was passed in, while POSIX keeps the relative string
  * as-passed -- a raw `===` comparison only matches on POSIX.
  */
+
 function formatActionError(error: unknown, file: string): string {
 	const errnoPath = (error as NodeJS.ErrnoException)?.path;
 	if (
@@ -139,6 +160,21 @@ function computeEffectiveTransition(
 	};
 }
 
+// Read directly from package.json rather than a hardcoded string literal --
+// this exact CLI shipped `--version` reporting "0.1.0" through the entire
+// 1.0.0 release, since a literal is never touched by a version bump unless
+// someone remembers to update it separately. dist/index.js's own directory
+// is one level below the package root in both the source-build layout
+// (dist/../package.json) and the published npm package layout
+// (node_modules/nh-deck/dist/../package.json), so this resolves correctly
+// in either case.
+const packageJson = JSON.parse(
+	readFileSync(
+		resolve(dirname(fileURLToPath(import.meta.url)), "..", "package.json"),
+		"utf8",
+	),
+) as { version: string };
+
 const program = new Command();
 
 program
@@ -146,7 +182,9 @@ program
 	.description(
 		"A local-first CLI for writing, presenting, and exporting Markdown-based slide decks.",
 	)
-	.version("0.1.0");
+	.version(packageJson.version)
+	.showHelpAfterError()
+	.showSuggestionAfterError();
 
 program
 	.command("render <file>")
@@ -219,7 +257,9 @@ program
 					},
 				);
 
-				process.stdout.write(`nh-deck serving ${file} at ${url}\n`);
+				process.stdout.write(
+					`${style("green", `nh-deck serving ${file} at ${url}`)}\n`,
+				);
 
 				if (options.watch) {
 					const rerender = debounce(() => {
@@ -260,7 +300,9 @@ program
 					await open(url);
 				}
 			} catch (error) {
-				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.stderr.write(
+					`${style("red", formatActionError(error, file))}\n`,
+				);
 				process.exitCode = 1;
 			}
 		},
@@ -301,9 +343,13 @@ program
 				const outputPath = resolveOutputPath(file, output);
 
 				await exportToPdf(html, outputPath);
-				process.stdout.write(`Wrote PDF to ${outputPath}\n`);
+				process.stdout.write(
+					`${style("green", `Wrote PDF to ${outputPath}`)}\n`,
+				);
 			} catch (error) {
-				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.stderr.write(
+					`${style("red", formatActionError(error, file))}\n`,
+				);
 				process.exitCode = 1;
 			}
 		},
@@ -345,10 +391,15 @@ program
 
 				const written = await exportToPng(html, outputPath);
 				process.stdout.write(
-					`Wrote ${written.length} PNG file(s), starting at ${written[0]}\n`,
+					`${style(
+						"green",
+						`Wrote ${written.length} PNG file(s), starting at ${written[0]}`,
+					)}\n`,
 				);
 			} catch (error) {
-				process.stderr.write(`${formatActionError(error, file)}\n`);
+				process.stderr.write(
+					`${style("red", formatActionError(error, file))}\n`,
+				);
 				process.exitCode = 1;
 			}
 		},

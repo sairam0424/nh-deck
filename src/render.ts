@@ -10,22 +10,49 @@ import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
 import type { TransitionName } from "./transitions.js";
 
+/**
+ * Deliberately NOT `position: fixed` at the base -- the default
+ * continuous-scroll view has no single "current slide" concept, so a
+ * fixed bottom overlay would unhide and stack EVERY slide's note at the
+ * identical screen position the moment `?notes` reveals them all at once
+ * (a real shipped bug, verified via getComputedStyle() in
+ * tests/render.test.ts's "presenter notes reveal" describe block, not a
+ * hypothetical). A revealed note here stays in normal document flow
+ * (`position: static`, the CSS default) as a bordered inline box
+ * immediately after its own slide's content, since
+ * `<aside class="notes">` is emitted inside that same slide's `<section>`
+ * (see generateHtml below).
+ *
+ * `body.presenting .notes` below re-applies the fixed bottom-overlay
+ * behavior, but scoped to real presentation mode, where
+ * `body.presenting .slide.is-active` (PRESENTATION_STYLE) guarantees
+ * exactly one slide -- and therefore at most one revealed note -- is ever
+ * visible at a time.
+ */
 const NOTES_STYLE = `
     .notes {
       display: none;
+      background: var(--nh-code-bg);
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      color: var(--nh-fg);
+      padding: 1rem 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .notes:not([hidden]) {
+      display: block;
+    }
+    body.presenting .notes {
       position: fixed;
       bottom: 0;
       left: 0;
       right: 0;
-      background: var(--nh-code-bg);
+      margin-top: 0;
+      border: none;
       border-top: 2px solid var(--nh-border);
-      color: var(--nh-fg);
-      padding: 1rem 1.5rem;
+      border-radius: 0;
       max-height: 30vh;
       overflow-y: auto;
-    }
-    .notes:not([hidden]) {
-      display: block;
     }
     @media print {
       .notes {
@@ -49,7 +76,7 @@ const LAYOUT_STYLE = `
       text-align: center;
     }
     .slide.layout-title h1 {
-      font-size: 3rem;
+      font-size: clamp(2.25rem, 5vw, 3.5rem);
       border-bottom: none;
     }
     .slide.layout-title p:first-of-type {
@@ -78,6 +105,9 @@ const LAYOUT_STYLE = `
     .slide.layout-two-column {
       column-count: 2;
       column-gap: 2rem;
+    }
+    @media (max-width: 640px) {
+      .slide.layout-two-column { column-count: 1; }
     }
     .slide.layout-two-column h1,
     .slide.layout-two-column h2,
@@ -129,7 +159,11 @@ const PRESENTATION_STYLE = `
     body.presenting .slide.is-active {
       display: block;
     }
+    .presentation-counter {
+      display: none;
+    }
     body.presenting .presentation-counter {
+      display: block;
       position: fixed;
       bottom: 1rem;
       right: 1rem;
@@ -142,12 +176,122 @@ const PRESENTATION_STYLE = `
     }`;
 
 /**
+ * Grid "slide overview" mode -- the convention shared by reveal.js, Slidev,
+ * Marp, and deckrun -- toggled by PRESENTATION_SCRIPT's Escape/"o" handling
+ * via a `.overview` class added onto the same `<body>` element
+ * `body.presenting` is scoped under. Every `.slide` becomes visible at once
+ * (not just the `.is-active` one), laid out in a CSS grid of thumbnails, and
+ * clickable to jump straight to that slide.
+ *
+ * Deliberately NOT gated behind `!customCss` the way LAYOUT_STYLE/
+ * transitionStyle/progressStyle are -- like PRESENTATION_STYLE itself, this
+ * defines a core interactive mechanic of presentation mode (an alternate way
+ * to see and navigate slides), not a suppressible decorative flourish, so a
+ * custom --css should not be able to silently break it.
+ *
+ * Every `.slide` override below uses `!important` rather than leaning on
+ * selector specificity to beat PRESENTATION_STYLE's `body.presenting .slide`
+ * toggle, transitionToCssBlock's per-transition `position: absolute`/
+ * `transform`/`opacity` rules, and LAYOUT_STYLE's `min-height: 60vh` title/
+ * section/quote centering -- all of which must be overridden regardless of
+ * which transition (if any) is active or where in the stylesheet this block
+ * ends up relative to them. This mirrors REDUCED_MOTION_STYLE's own
+ * established use of `!important` above for the identical kind of problem
+ * (overriding contextual presentation-mode state without a specificity
+ * fight).
+ */
+const OVERVIEW_STYLE = `
+    body.overview {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 1rem;
+      max-width: none;
+      padding: 2rem;
+      align-content: start;
+    }
+    body.overview .presentation-counter,
+    body.overview .presentation-progress {
+      display: none !important;
+    }
+    body.overview .slide {
+      display: block !important;
+      position: static !important;
+      inset: auto !important;
+      transform: none !important;
+      opacity: 1 !important;
+      pointer-events: auto !important;
+      transition: none !important;
+      min-height: 0 !important;
+      max-height: 220px;
+      overflow: hidden;
+      margin: 0 !important;
+      padding: 0.75rem;
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      font-size: 0.55rem;
+      cursor: pointer;
+    }
+    body.overview .slide.is-active {
+      border-color: var(--nh-accent);
+    }
+    body.overview .notes {
+      display: none !important;
+    }`;
+
+/**
+ * Scoped under body.presenting the same way .presentation-counter is,
+ * above -- but kept in its own constant rather than folded into
+ * PRESENTATION_STYLE so it can be suppressed by a custom --css the same
+ * way LAYOUT_STYLE/transitionToCssBlock's output already is (see
+ * layoutOverride/transitionStyle in generateHtml below). PRESENTATION_STYLE
+ * itself is deliberately NOT suppressible -- the slide show/hide toggle it
+ * defines is load-bearing for presentation mode's entire visual mechanic --
+ * but a decorative progress bar has no such requirement.
+ */
+const PRESENTATION_PROGRESS_STYLE = `
+    .presentation-progress {
+      display: none;
+    }
+    body.presenting .presentation-progress {
+      display: block;
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      height: 2px;
+      background: var(--nh-accent);
+      width: 0%;
+      transition: width 0.2s ease;
+    }`;
+
+/**
+ * Appended, unconditionally, to every transitionToCssBlock() return value
+ * regardless of which transition (fade/slide) is active -- a user who has
+ * prefers-reduced-motion enabled gets a fast opacity-only crossfade instead
+ * of either the full slide/fade animation or motion being silently left
+ * untouched. Deliberately substitutes a fast crossfade rather than
+ * disabling the transition entirely (transition: none): an instant, jarring
+ * slide swap with zero visual continuity is its own kind of jolt, and a
+ * fast linear opacity fade is the pattern verified against a real
+ * competitor's implementation of this same accessibility affordance.
+ */
+const REDUCED_MOTION_STYLE = `
+    @media (prefers-reduced-motion: reduce) {
+      .slide { transition: opacity 0.2s linear !important; transform: none !important; }
+    }`;
+
+/**
  * Overrides PRESENTATION_STYLE's plain display:none/block toggle with an
  * animatable version for the given transition: both the active and
  * inactive slide stay display:block (position:absolute, stacked), so
  * opacity/transform can transition smoothly between them. Suppressible
  * by --css, unlike PRESENTATION_STYLE itself -- see the plan's Global
  * Constraints for why the split is drawn there.
+ *
+ * The "slide" transition also carries a `body.presenting.direction-backward`
+ * override: PRESENTATION_SCRIPT toggles that class onto <body> at the moment
+ * of navigation (ArrowLeft, or ArrowRight's/click's absence of it), so a
+ * backward navigation flips the translateX sign instead of replaying the
+ * exact same left-to-right motion forward navigation uses.
  */
 function transitionToCssBlock(name: TransitionName): string {
 	if (name === "fade") {
@@ -163,7 +307,7 @@ function transitionToCssBlock(name: TransitionName): string {
     body.presenting .slide.is-active {
       opacity: 1;
       pointer-events: auto;
-    }`;
+    }${REDUCED_MOTION_STYLE}`;
 	}
 	return `
     body.presenting .slide {
@@ -179,7 +323,83 @@ function transitionToCssBlock(name: TransitionName): string {
       transform: translateX(0);
       opacity: 1;
       pointer-events: auto;
-    }`;
+    }
+    body.presenting.direction-backward .slide {
+      transform: translateX(-100%);
+    }
+    body.presenting.direction-backward .slide.is-active {
+      transform: translateX(0);
+    }${REDUCED_MOTION_STYLE}`;
+}
+
+// Percentage of --nh-fg blended into --nh-bg to derive --nh-code-bg and
+// --nh-border independently of a theme's `line`/`muted` colors below.
+// `line`/`muted` are tuned for mermaid diagram roles (edge/connector color,
+// secondary diagram-label text) -- not for a UI element's background or
+// border -- and for all 4 shipped themes, `muted` happens to be the exact
+// hex beautiful-mermaid also uses for `line` (dracula) or is otherwise
+// untuned for contrast against `bg`/`fg` in a UI context. That mismatch is
+// what let --nh-code-bg collapse to the exact same hex as --nh-muted (the
+// Nord theme, notably), and let --nh-border fall under WCAG's 3:1 minimum
+// against --nh-bg for every shipped theme except dracula.
+//
+// Verified with the real WCAG 2.x contrast-ratio formula against all 4
+// shipped themes' actual resolved colors (see the
+// "theme code-bg/border WCAG contrast" describe block in
+// tests/render.test.ts, which checks this live via getComputedStyle rather
+// than by inspecting these hex constants):
+//   - CODE_BG_FG_BLEND_PERCENT (10%) keeps --nh-fg vs --nh-code-bg contrast
+//     >= 7.1:1 for every shipped theme (WCAG AA for normal text requires
+//     >= 4.5:1) -- comfortable margin because a small blend toward --nh-fg
+//     barely moves --nh-code-bg away from --nh-bg, and --nh-fg already has
+//     high contrast against --nh-bg in all 4 shipped themes.
+//   - BORDER_FG_BLEND_PERCENT (55%) keeps --nh-border vs --nh-bg contrast
+//     >= 3.6:1 for every shipped theme (WCAG's 3:1 non-text/UI-boundary
+//     minimum). This needs to be a much larger blend than
+//     CODE_BG_FG_BLEND_PERCENT because sRGB's gamma curve makes contrast
+//     rise slowly near white: the light theme (white --nh-bg) needs >=
+//     ~48% blended in before it clears 3:1 at all.
+const CODE_BG_FG_BLEND_PERCENT = 10;
+const BORDER_FG_BLEND_PERCENT = 55;
+
+/**
+ * Splits a "#rrggbb" string into its three 0-255 channel values.
+ */
+function hexToRgbChannels(hex: string): [number, number, number] {
+	const normalized = hex.replace("#", "");
+	return [
+		Number.parseInt(normalized.slice(0, 2), 16),
+		Number.parseInt(normalized.slice(2, 4), 16),
+		Number.parseInt(normalized.slice(4, 6), 16),
+	];
+}
+
+/**
+ * Blends `toColor` into `fromColor` by `weightPercent` (0-100), interpolating
+ * each RGB channel linearly in gamma-encoded sRGB space -- the same
+ * approach CSS's `color-mix(in srgb, ...)` uses, and the one
+ * beautiful-mermaid's own theme system already uses internally for its
+ * derived diagram colors (see its `MIX`-weighted `color-mix()` rules in
+ * node_modules/beautiful-mermaid/src/theme.ts). Implemented here as a
+ * plain hex computation -- rather than emitting a `color-mix()` CSS
+ * function -- so nh-deck's `--nh-*` variables keep resolving to concrete
+ * hex values, as every other theme variable already does.
+ *
+ * Assumes both inputs are "#rrggbb" hex strings, which holds for every
+ * ThemeColors value in practice (themes.ts re-exports beautiful-mermaid's
+ * own hex palettes; see themes.ts's docstring).
+ */
+function blendHexColors(
+	fromColor: string,
+	toColor: string,
+	weightPercent: number,
+): string {
+	const from = hexToRgbChannels(fromColor);
+	const to = hexToRgbChannels(toColor);
+	const weight = weightPercent / 100;
+	const toHexByte = (channel: number) =>
+		Math.round(channel).toString(16).padStart(2, "0");
+	return `#${from.map((channel, i) => toHexByte(channel + (to[i] - channel) * weight)).join("")}`;
 }
 
 /**
@@ -190,9 +410,13 @@ function transitionToCssBlock(name: TransitionName): string {
  * see docs/specs/theme-system-design.md §7).
  */
 function themeToCssVarBlock(colors: ThemeColors): string {
-	const border = colors.line ?? colors.muted ?? colors.fg;
 	const muted = colors.muted ?? colors.line ?? colors.fg;
-	const codeBg = colors.muted ?? colors.line ?? colors.bg;
+	// --nh-border and --nh-code-bg are UI-chrome roles (a UI-boundary line,
+	// a code block's own background) -- deliberately derived straight from
+	// bg/fg rather than from muted/line (diagram-label/edge-connector
+	// colors), see CODE_BG_FG_BLEND_PERCENT/BORDER_FG_BLEND_PERCENT above.
+	const codeBg = blendHexColors(colors.bg, colors.fg, CODE_BG_FG_BLEND_PERCENT);
+	const border = blendHexColors(colors.bg, colors.fg, BORDER_FG_BLEND_PERCENT);
 	const accent = colors.accent ?? colors.fg;
 	return `
     :root {
@@ -217,13 +441,25 @@ marked.use(markedKatex({ throwOnError: false }));
 // generateHtml() call can interleave and observe a stale value here.
 let currentMermaidColors: ThemeColors | undefined;
 
+// Reset alongside currentMermaidColors at the top of each generateHtml()
+// call (same module-level-state reasoning as the comment above) and
+// incremented once per mermaid code block, so renderMermaidDiagram can give
+// each diagram's SVG ids a unique prefix -- without this, two diagrams in
+// the same document both emit id="arrowhead", which is invalid HTML/SVG and
+// lets one diagram's marker definitions leak into another's.
+let mermaidDiagramCounter = 0;
+
 marked.use({
 	renderer: {
 		code({ text, lang, escaped }: Tokens.Code): string {
 			const langString = (lang ?? "").match(/^\S*/)?.[0];
 
 			if (langString === "mermaid") {
-				return renderMermaidDiagram(text, currentMermaidColors);
+				return renderMermaidDiagram(
+					text,
+					currentMermaidColors,
+					mermaidDiagramCounter++,
+				);
 			}
 
 			// Everything below exactly replicates marked@13.0.3's own default
@@ -279,6 +515,7 @@ export function generateHtml(
 	transitionName?: TransitionName,
 ): string {
 	currentMermaidColors = themeColors;
+	mermaidDiagramCounter = 0;
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
 		.map((slideTokens) => {
@@ -309,6 +546,7 @@ export function generateHtml(
 	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
 	const transitionStyle =
 		!customCss && transitionName ? transitionToCssBlock(transitionName) : "";
+	const progressStyle = !customCss ? PRESENTATION_PROGRESS_STYLE : "";
 
 	return `<!DOCTYPE html>
 <html lang="en">
@@ -340,7 +578,7 @@ ${
     }
     ${themeOverride}
     body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Noto Sans", "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
       line-height: 1.6;
       max-width: 860px;
       margin: 0 auto;
@@ -414,6 +652,8 @@ ${
     ${NOTES_STYLE}
     ${PRINT_PAGINATION_STYLE}
     ${PRESENTATION_STYLE}
+    ${OVERVIEW_STYLE}
+    ${progressStyle}
     ${layoutOverride}
     ${transitionStyle}
   </style>

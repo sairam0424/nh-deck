@@ -2,6 +2,8 @@
 
 nh-deck is a local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks. Write your deck as plain Markdown, render it and serve it from a local HTTP server on your own machine, present it straight from your browser, and export it to PDF — all without an internet connection or an account, and without any of it ever leaving your machine. It's one of three independent sibling projects under the [Not-Humans-Lab](../Not-Humans-Lab/) umbrella (alongside `nh-skills` and the planned `daily-dose`), each an independent repo with its own toolchain.
 
+![A rendered nh-deck slide deck, dracula theme](docs/assets/demo-render.png)
+
 ## Installation
 
 ```bash
@@ -97,7 +99,18 @@ A slide with no marker renders exactly as it always has. Layouts apply everywher
 
 ## Presentation mode & transitions
 
-Add `?present` to the URL `render` serves to switch from the default continuous-scroll view to one-slide-at-a-time presentation mode: advance with the right arrow key, `Space`, or a click (links inside slide content still work normally); go back with the left arrow key. Your position survives a `--watch` reload via the URL's hash.
+Add `?present` to the URL `render` serves to switch from the default continuous-scroll view to one-slide-at-a-time presentation mode, with a slide counter and progress bar in the corner:
+
+![nh-deck presentation mode, showing the slide counter and progress bar](docs/assets/demo-present.png)
+
+- Advance with the right arrow key, `Space`, a click, or a left swipe on a touchscreen (links inside slide content still work normally); go back with the left arrow key or a right swipe.
+- `Home`/`End` jump straight to the first/last slide.
+- `Escape` exits presentation mode back to the continuous-scroll view, without a full page reload.
+- `o` (or `Escape` while it's open) toggles a grid overview of every slide — click any thumbnail to jump straight to it:
+
+![nh-deck's grid overview mode, showing every slide as a clickable thumbnail](docs/assets/demo-overview.png)
+
+Your position survives a `--watch` reload via the URL's hash.
 
 Animate the transition between slides with `--transition <name>` (`fade` or `slide`), or a `transition:` key in frontmatter:
 
@@ -105,12 +118,11 @@ Animate the transition between slides with `--transition <name>` (`fade` or `sli
 nh-deck render deck.md --transition fade
 ```
 
-Transitions only apply inside presentation mode on `render` — `pdf` and `png` never read the flag, since a static export has no discrete slide changes to animate between. `--css` wins over both layout and transition CSS, same as it wins over themes. See `docs/adr/0009-templates-transitions-presentation-mode.md` for the full design rationale.
+Transitions only apply inside presentation mode on `render` — `pdf` and `png` never read the flag, since a static export has no discrete slide changes to animate between. `--css` wins over both layout and transition CSS, same as it wins over themes. Slide transitions also respect `prefers-reduced-motion`, substituting a fast crossfade instead of the full animation. See `docs/adr/0009-templates-transitions-presentation-mode.md` for the full design rationale.
 
 ## Current limitations
 
 - **The 4 themes, 4 layouts, and 2 transitions are fixed sets, not user-extensible** — `--css` is the only escape hatch beyond them (a full stylesheet replacement, not a per-color or per-layout override).
-- **Presentation mode is keyboard/click only** — no touch/swipe navigation, and no in-UI control to exit `?present` (removing it from the URL is the only way back to the continuous-scroll view).
 - **Cross-browser PDF-export visual fidelity is checked in CI, not guaranteed on every machine** — a dedicated CI job compares pixel output between two distinct Chrome-family browsers on every PR (see `docs/adr/0007-pdf-cross-browser-fidelity-check.md`), but which specific browser `chrome-launcher` finds on your own machine (Chrome vs. Edge vs. Brave) can still vary.
 - **PPTX export is out of scope** — PDF and per-slide PNG are the only export formats.
 

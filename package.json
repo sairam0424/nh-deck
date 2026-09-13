@@ -1,6 +1,6 @@
 {
 	"name": "nh-deck",
-	"version": "1.0.0",
+	"version": "1.1.0",
 	"type": "module",
 	"license": "Apache-2.0",
 	"description": "A local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks.",
@@ -48,7 +48,8 @@
 		"marked": "^18.0.12",
 		"marked-katex-extension": "^5.1.12",
 		"open": "^11.0.2",
-		"puppeteer-core": "^25.10.0"
+		"puppeteer-core": "^25.10.0",
+		"svgo": "^4.1.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",

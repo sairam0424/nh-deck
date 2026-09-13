@@ -36,3 +36,4 @@ Thumbs.db
 
 # Local git worktrees used for isolated agent-driven implementation work
 .worktrees/
+.gstack/
