@@ -185,12 +185,30 @@ describe("startServer — gzip compression", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
-	it("does not treat a non-finite q-value (gzip;q=Infinity) as a valid positive preference", async () => {
+	it("defaults a non-finite q-value (gzip;q=Infinity) to a fully acceptable gzip preference", async () => {
 		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
 		const { server, url } = await startServer(html, 0);
 
 		const { res } = await getWithHeaders(url, {
 			"Accept-Encoding": "gzip;q=Infinity",
+		});
+
+		expect(res.headers["content-encoding"]).toBe("gzip");
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("defaults a q-value with trailing garbage (gzip;q=0junk) to fully acceptable, not the literal leading digit", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		// Number.parseFloat("0junk") returns 0 (it parses the leading numeric
+		// prefix and silently ignores trailing garbage) -- if that value were
+		// used directly, a malformed q-value would be misread as an explicit,
+		// valid q=0 and incorrectly REJECT gzip, the opposite of the
+		// documented "malformed defaults to fully acceptable" fallback.
+		const { res } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip;q=0junk",
 		});
 
 		expect(res.headers["content-encoding"]).toBe("gzip");

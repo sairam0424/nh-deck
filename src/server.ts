@@ -50,14 +50,20 @@ function parseAcceptEncoding(header: string): EncodingPreference[] {
 			const qParam = params.find((param) =>
 				param.toLowerCase().startsWith("q="),
 			);
-			const parsed = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
+			// Number(), not Number.parseFloat() -- parseFloat parses only a
+			// leading numeric prefix and silently ignores trailing garbage, so
+			// "0junk" would parse as the literal, valid-looking value 0
+			// instead of being recognized as malformed. Number() requires the
+			// entire string to be numeric, correctly returning NaN for it.
+			const parsed = qParam ? Number(qParam.slice(2)) : 1;
 			// A q-value is only ever meaningful in [0, 1] per RFC 7231 -- a
-			// malformed (NaN, e.g. "q=abc") or non-finite (e.g. "q=Infinity")
-			// value defaults to fully acceptable (the client expressed *some*
-			// preference for this coding, just not a parseable strength), and
-			// an out-of-range value (negative, or >1) is clamped rather than
-			// stored as-is, so nothing downstream can be misled by a q of -1
-			// or 2 into a wrong preference ordering.
+			// malformed (NaN, e.g. "q=abc" or "q=0junk") or non-finite (e.g.
+			// "q=Infinity") value defaults to fully acceptable (the client
+			// expressed *some* preference for this coding, just not a
+			// parseable strength), and an out-of-range value (negative, or
+			// >1) is clamped rather than stored as-is, so nothing downstream
+			// can be misled by a q of -1 or 2 into a wrong preference
+			// ordering.
 			const q = Number.isFinite(parsed) ? Math.min(1, Math.max(0, parsed)) : 1;
 			return { coding: coding.toLowerCase(), q };
 		});
