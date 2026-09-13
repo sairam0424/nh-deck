@@ -164,6 +164,13 @@ describe("exportToPdf", () => {
 				expect(capturedPdfOptions?.displayHeaderFooter).toBe(true);
 				expect(capturedPdfOptions?.footerTemplate).toContain("pageNumber");
 				expect(capturedPdfOptions?.footerTemplate).toContain("totalPages");
+				// A left-aligned footer would pass the two assertions above
+				// despite the test name and release contract's "small, centered,
+				// muted" page numbers -- assert the alignment rule itself, not
+				// just the presence of the placeholders.
+				expect(capturedPdfOptions?.footerTemplate).toContain(
+					"text-align: center",
+				);
 
 				const pdfBytes = readFileSync(outputPath);
 				const pageCount = (

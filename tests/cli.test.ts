@@ -2153,6 +2153,15 @@ describe("CLI: --css-vars", () => {
 	it(
 		"surfaces the raw ENOENT error and exits non-zero when --css-vars points to a nonexistent file",
 		async () => {
+			// A generated, guaranteed-unique path (never created) rather than a
+			// fixed literal like "/path/to/does-not-exist.css" -- an unlucky
+			// host where that literal path happens to exist would make render
+			// actually start and this test hang waiting for a process exit that
+			// never comes, instead of the ENOENT failure it means to test.
+			const nonexistentPath = path.join(
+				tmpdir(),
+				`nh-deck-css-vars-enoent-test-${randomUUID()}.css`,
+			);
 			const child = spawn(
 				process.execPath,
 				[
@@ -2165,7 +2174,7 @@ describe("CLI: --css-vars", () => {
 					"--port",
 					"0",
 					"--css-vars",
-					"/path/to/does-not-exist.css",
+					nonexistentPath,
 				],
 				{ cwd: repoRoot },
 			);
