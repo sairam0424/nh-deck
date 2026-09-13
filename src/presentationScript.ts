@@ -96,7 +96,18 @@
  * `.is-revealed` class ("false" once revealed, "true" otherwise) as part
  * of every reveal/conceal/reset step -- a real accessibility gap neither
  * reveal.js nor Slidev closes for their own equivalent feature, done here
- * as a genuine differentiator rather than left as a nice-to-have.
+ * as a genuine differentiator rather than left as a nice-to-have. That
+ * same lockstep also has to survive the two OTHER views where render.ts's
+ * own CSS overrides fragment visibility independently of .is-revealed:
+ * grid-overview mode shows every fragment on every slide at once
+ * (aria-hidden="false" for all, regardless of reveal state), and exiting
+ * presentation mode entirely returns to the continuous-scroll view where
+ * fragments are visible by default with no hiding at all (aria-hidden
+ * removed, not just set to "false"). See syncFragmentAriaForCurrentMode
+ * below, called from openOverview()/closeOverviewUi()/
+ * exitPresentationMode() -- without it, a screen reader would report
+ * fragments as hidden in exactly the two views where they are visually
+ * all shown.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -234,6 +245,33 @@ export const PRESENTATION_SCRIPT = `<script>
     });
   };
 
+  // The three functions above keep aria-hidden in lockstep with .is-revealed
+  // for ONE slide's fragments during ordinary presentation-mode navigation --
+  // but render.ts's own CSS also makes every fragment visible regardless of
+  // .is-revealed under two OTHER conditions this file controls: grid-overview
+  // mode (body.overview .fragment forces full opacity for every slide at
+  // once) and exiting presentation mode entirely (fragments have no
+  // aria-hidden-worthy hiding at all in the normal continuous-scroll view --
+  // FRAGMENT_STYLE's base rule already shows them by default there). Without
+  // this, a screen reader would still report fragments as hidden in exactly
+  // the two views where they are visually all shown at once. Called from
+  // openOverview()/closeOverviewUi()/exitPresentationMode() below rather than
+  // threaded through every caller of those three functions individually.
+  const syncFragmentAriaForCurrentMode = () => {
+    document.querySelectorAll(".fragment").forEach((el) => {
+      if (overviewOpen) {
+        el.setAttribute("aria-hidden", "false");
+      } else if (document.body.classList.contains("presenting")) {
+        el.setAttribute(
+          "aria-hidden",
+          el.classList.contains("is-revealed") ? "false" : "true",
+        );
+      } else {
+        el.removeAttribute("aria-hidden");
+      }
+    });
+  };
+
   const render = () => {
     slides.forEach((slide, i) => {
       slide.classList.toggle("is-active", i === current);
@@ -307,6 +345,7 @@ export const PRESENTATION_SCRIPT = `<script>
     indexBeforeOverview = current;
     overviewOpen = true;
     document.body.classList.add("overview");
+    syncFragmentAriaForCurrentMode();
   };
 
   // Removes the overview class/flag without touching current -- shared by
@@ -315,6 +354,7 @@ export const PRESENTATION_SCRIPT = `<script>
   const closeOverviewUi = () => {
     overviewOpen = false;
     document.body.classList.remove("overview");
+    syncFragmentAriaForCurrentMode();
   };
 
   // The Escape/"o"-while-open close path: closes the grid and returns to the
@@ -368,6 +408,7 @@ export const PRESENTATION_SCRIPT = `<script>
     // chrome (counter, progress bar, nav arrows) -- render.ts scopes every
     // bit of that chrome's styling under body.presenting.
     document.body.classList.remove("presenting");
+    syncFragmentAriaForCurrentMode();
   };
 
   document.addEventListener("keydown", (event) => {

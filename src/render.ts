@@ -858,6 +858,22 @@ export function generateHtml(
 	// this repeats the check here too -- the same defense-in-depth every other
 	// customCss-gated override in this function already has, and what lets a
 	// caller (e.g. a direct unit test) pass both arguments together safely.
+	// cssVars is interpolated verbatim into the document's <style> element
+	// below -- a value containing a closing </style> delimiter would
+	// terminate that element early and let the remainder parse as document
+	// markup instead of CSS. Unlike KaTeX/Mermaid's per-formula/per-diagram
+	// graceful degradation (a single slide's content, isolated from the
+	// rest of the render), this affects the whole document's structure, so
+	// there is no small, isolated place to degrade into -- throwing here
+	// and letting the CLI's existing top-level error handling surface a
+	// clean message is the right failure mode, the same way a file-read
+	// error already propagates as a thrown Error rather than being
+	// silently swallowed.
+	if (cssVars?.match(/<\/style/i)) {
+		throw new Error(
+			"--css-vars file must not contain a closing </style> tag (it is inserted directly into the document's own <style> element).",
+		);
+	}
 	const cssVarsOverride = !customCss && cssVars ? cssVars : "";
 	const layoutOverride = !customCss ? LAYOUT_STYLE : "";
 	const transitionStyle =

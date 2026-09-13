@@ -679,6 +679,19 @@ describe("generateHtml — --css-vars overlay", () => {
 		expect(html).not.toContain(ACCENT_OVERLAY);
 	});
 
+	it("throws a clear error if --css-vars content contains a closing </style> tag, rather than letting it terminate the document's own <style> element", () => {
+		expect(() =>
+			generateHtml(
+				"# Slide",
+				"sample",
+				undefined,
+				undefined,
+				undefined,
+				"</style><script>alert(1)</script>",
+			),
+		).toThrow(/<\/style>/);
+	});
+
 	it(
 		"actually changes the computed color of an element styled via var(--nh-accent) in a real browser",
 		async () => {
@@ -1285,6 +1298,21 @@ describe("generateHtml — fragment (incremental reveal) markers", () => {
 		expect(html).not.toContain("<!-- fragment -->");
 	});
 
+	it("recognizes the marker case-insensitively and with no internal whitespace", () => {
+		expect(generateHtml("First.\n\n<!-- FRAGMENT -->\n\nSecond.")).toContain(
+			'<p class="fragment">First.</p>',
+		);
+		expect(generateHtml("First.\n\n<!--fragment-->\n\nSecond.")).toContain(
+			'<p class="fragment">First.</p>',
+		);
+	});
+
+	it("does not treat a near-miss comment as a fragment marker", () => {
+		const html = generateHtml("First.\n\n<!-- fragments -->\n\nSecond.");
+
+		expect(html).not.toContain('class="fragment"');
+	});
+
 	it('applies class="fragment" to a single bullet marked via a nested, indented marker (the per-item authoring convention)', () => {
 		const html = generateHtml(
 			"- Item 1\n  <!-- fragment -->\n- Item 2\n- Item 3\n",
@@ -1307,6 +1335,17 @@ describe("generateHtml — fragment (incremental reveal) markers", () => {
 		expect(html).toContain('<li class="fragment">Item 1</li>');
 		expect(html).toContain('<li class="fragment">Item 2</li>');
 		expect(html).toContain("<li>Item 3</li>");
+	});
+
+	it("removes an earlier direct marker inside a multi-paragraph bullet, not just the trailing one that marks the whole item (regression: the earlier marker used to leak through as a literal HTML comment)", () => {
+		const html = generateHtml(
+			"- First paragraph.\n\n  <!-- fragment -->\n\n  Second paragraph.\n\n  <!-- fragment -->\n- Item 2\n",
+		);
+
+		expect(html).toContain('<p class="fragment">First paragraph.</p>');
+		expect(html).toContain("<p>Second paragraph.</p>");
+		expect(html).toMatch(/<li class="fragment">/);
+		expect(html).not.toContain("<!-- fragment -->");
 	});
 
 	it("marks a loose list item (blank line before the nested marker) the same way as a tight one", () => {

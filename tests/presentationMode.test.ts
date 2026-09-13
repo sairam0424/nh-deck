@@ -867,6 +867,25 @@ describe("presentation mode — keyboard-shortcuts help overlay", () => {
 	);
 
 	it(
+		'toggling "?" a second time while the grid overview is also open closes only help, leaving the overview open (same precedence as the Escape case above, exercised via "?" itself)',
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("o");
+			expect(await isOverviewOpen(page)).toBe(true);
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(false);
+			expect(await isOverviewOpen(page)).toBe(true);
+			expect(await isPresenting(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"hides the help overlay and hint button once Escape exits presentation mode entirely",
 		async () => {
 			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
@@ -1082,6 +1101,29 @@ describe("presentation mode — fragment (incremental reveal) state machine", ()
 				{ isRevealed: false, ariaHidden: "true" },
 				{ isRevealed: false, ariaHidden: "true" },
 			]);
+
+			// Click through the remaining two fragments, then confirm one more
+			// click advances the slide itself (the click path exhausts and
+			// falls through to goTo() exactly like the keyboard path already
+			// verified above).
+			await page.click("body");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			await page.click("body");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: true, ariaHidden: "false" },
+			]);
+
+			await page.click("body");
+			expect(await activeSlideHeading(page)).toBe("Slide 3");
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
@@ -1100,7 +1142,7 @@ describe("presentation mode — fragment (incremental reveal) state machine", ()
 	);
 
 	it(
-		"the grid overview shows every fragment fully visible regardless of its reveal state",
+		"the grid overview shows every fragment fully visible regardless of its reveal state, and reports aria-hidden=false for all of them (regression: aria-hidden previously still reflected pre-overview reveal state, contradicting what a screen reader would infer from the visible-to-everyone-at-once grid)",
 		async () => {
 			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
 
@@ -1116,12 +1158,55 @@ describe("presentation mode — fragment (incremental reveal) state machine", ()
 
 			await page.keyboard.press("o");
 
-			const opacities = await page.evaluate(() =>
+			const overviewState = await page.evaluate(() =>
 				Array.from(
 					document.querySelectorAll(".slide:nth-of-type(2) .fragment"),
-				).map((el) => getComputedStyle(el).opacity),
+				).map((el) => ({
+					opacity: getComputedStyle(el).opacity,
+					ariaHidden: el.getAttribute("aria-hidden"),
+				})),
 			);
-			expect(opacities).toEqual(["1", "1", "1"]);
+			expect(overviewState).toEqual([
+				{ opacity: "1", ariaHidden: "false" },
+				{ opacity: "1", ariaHidden: "false" },
+				{ opacity: "1", ariaHidden: "false" },
+			]);
+
+			// Closing the overview (back to the same slide) must restore
+			// aria-hidden from each fragment's own .is-revealed state, not
+			// leave every fragment stuck at aria-hidden="false".
+			await page.keyboard.press("o");
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: true, ariaHidden: "false" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"removes aria-hidden from fragments entirely on exiting presentation mode (visible-by-default continuous-scroll view has no hiding to describe)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(FRAGMENT_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			// Slide 2's fragments are concealed (aria-hidden="true") -- confirm
+			// that starting state before exiting.
+			expect(await fragmentStates(page)).toEqual([
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+				{ isRevealed: false, ariaHidden: "true" },
+			]);
+
+			await page.keyboard.press("Escape");
+
+			const ariaHiddenValues = await page.evaluate(() =>
+				Array.from(document.querySelectorAll(".fragment")).map((el) =>
+					el.getAttribute("aria-hidden"),
+				),
+			);
+			expect(ariaHiddenValues).toEqual([null, null, null]);
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);

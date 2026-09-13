@@ -221,7 +221,19 @@ function transformListItem(
 		...transformedTokens.slice(0, lastIndex),
 		...transformedTokens.slice(lastIndex + 1),
 	];
-	return { ...otherFields, tokens: newTokens, fragment: true };
+	// The trailing marker above is only ONE marker this list item's own
+	// tokens might contain -- an earlier direct marker (e.g. two paragraphs
+	// in one bullet, the first followed by its own marker, the second being
+	// this trailing one) would otherwise survive untouched and leak through
+	// as a literal HTML comment inside the rendered <li>, since only
+	// transformNode (not the sibling-relative resolveMarkersInArray) has
+	// run over transformedTokens so far. Resolving again here removes it,
+	// mirroring what the !hasTrailingMarker branch above already does.
+	return {
+		...otherFields,
+		tokens: resolveMarkersInArray(newTokens, onFragmentFound),
+		fragment: true,
+	};
 }
 
 /**
