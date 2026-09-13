@@ -23,7 +23,7 @@ import { hasPresenterNotes } from "./presenterNotes.js";
 import { containsUnsafeHtml, generateHtml } from "./render.js";
 import { startServer } from "./server.js";
 import type { ThemeColors } from "./themes.js";
-import { resolveThemeName, THEMES } from "./themes.js";
+import { DEFAULT_THEME_NAME, resolveThemeName, THEMES } from "./themes.js";
 import type { TransitionName } from "./transitions.js";
 import { resolveTransitionName, TRANSITIONS } from "./transitions.js";
 
@@ -280,6 +280,30 @@ program
 				`${style("red", formatActionError(error, targetFile))}\n`,
 			);
 			process.exitCode = 1;
+		}
+	});
+
+/**
+ * `list-themes` -- a read-only discovery command for nh-deck's fixed 4-theme
+ * registry (see themes.ts's own docstring for why that set is fixed, not
+ * user-extensible). Unlike render/pdf/png, this never touches the
+ * filesystem beyond argv/stdout and never launches a browser -- it exists
+ * purely so a user can answer "what are my --theme options, and which one
+ * is the default?" without first writing a deck and rendering it. Printed
+ * in THEMES' own insertion order (light, dark, dracula, nord) rather than
+ * sorted alphabetically, matching every other place in this file that
+ * lists theme names (e.g. the --theme flag's own description text via
+ * `Object.keys(THEMES).join(", ")`).
+ */
+program
+	.command("list-themes")
+	.description(
+		"List nh-deck's fixed set of named color themes, noting the default.",
+	)
+	.action(() => {
+		for (const name of Object.keys(THEMES)) {
+			const suffix = name === DEFAULT_THEME_NAME ? " (default)" : "";
+			process.stdout.write(`${name}${suffix}\n`);
 		}
 	});
 

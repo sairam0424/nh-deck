@@ -376,6 +376,68 @@ describe("CLI: nh-deck init", () => {
 	);
 });
 
+describe("CLI: nh-deck list-themes", () => {
+	it(
+		"prints all 4 fixed theme names, one per line, noting the default, and exits 0",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "list-themes"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toBe("");
+			// Exactly the 4 fixed theme names from src/themes.ts's THEMES
+			// registry, in that registry's own insertion order, each on its
+			// own line -- "light" is annotated as the default (matching
+			// src/themes.ts's DEFAULT_THEME_NAME) and no other line is.
+			const lines = stdout.trim().split("\n");
+			expect(lines).toEqual(["light (default)", "dark", "dracula", "nord"]);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"never launches a browser or touches the filesystem -- it only reads the fixed THEMES registry",
+		async () => {
+			// No fixture path, no --port, no temp file: list-themes takes no
+			// arguments at all. This exercises that it still exits cleanly
+			// and quickly (well under STARTUP_TIMEOUT_MS, which every other
+			// test in this file needs specifically because it's waiting on a
+			// browser launch or a dev-server startup -- list-themes needs
+			// neither).
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "list-themes"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render", () => {
 	it(
 		"prints the serving URL to stdout and shuts down cleanly on kill",

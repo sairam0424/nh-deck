@@ -62,6 +62,16 @@ Slide content...
 
 nh-deck ships 4 fixed, named color themes — `light`, `dark`, `dracula`, and `nord` — that recolor the base deck (background, text, borders, code blocks), KaTeX math, and Mermaid diagrams consistently. A deck with no theme requested renders exactly as it always has. Explicitly requesting the `light` theme is close, but not identical, to that default — code-block backgrounds in particular differ noticeably (see `docs/adr/0008-named-theme-system.md`).
 
+Run `nh-deck list-themes` to print the fixed set of theme names from the command line (noting which one is the default), without rendering anything.
+
+| `light` (default) | `dark` |
+| --- | --- |
+| ![nh-deck's light theme](docs/assets/theme-light.png) | ![nh-deck's dark theme](docs/assets/theme-dark.png) |
+
+| `dracula` | `nord` |
+| --- | --- |
+| ![nh-deck's dracula theme](docs/assets/theme-dracula.png) | ![nh-deck's nord theme](docs/assets/theme-nord.png) |
+
 Select a theme either via a `--theme <name>` flag on any of `render`, `pdf`, or `png`:
 
 ```bash

@@ -30,7 +30,8 @@
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit && node scripts/typecheck-tests.mjs",
 		"lint": "biome ci .",
-		"check:fidelity": "node --import tsx scripts/check-pdf-fidelity.mjs"
+		"check:fidelity": "node --import tsx scripts/check-pdf-fidelity.mjs",
+		"generate:theme-gallery": "node --import tsx scripts/generate-theme-gallery.mjs"
 	},
 	"repository": {
 		"type": "git",
