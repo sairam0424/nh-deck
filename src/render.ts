@@ -62,6 +62,60 @@ const NOTES_STYLE = `
     }`;
 
 /**
+ * Styling for the additional "notes page" `<div>` generateHtml emits once
+ * per slide that has at least one presenter note, but only when called with
+ * `withNotes: true` (see pdfExport.ts/pngExport.ts's `--with-notes` wiring
+ * in index.ts). This is a source-adjacent SIBLING of that slide's own
+ * `<section class="slide">` -- appended immediately after its closing tag,
+ * never inside it and never an overlay on top of it -- so it can never
+ * change how the slide itself renders.
+ *
+ * `.note`'s typography is lifted directly from NOTES_STYLE's own base
+ * `.notes` rule above (background/border/border-radius/color/padding/
+ * margin-top), MINUS that rule's `position: fixed` override (which only
+ * ever applies under `body.presenting` -- irrelevant here, since export
+ * never adds that class to `<body>`) and MINUS its
+ * `@media print { .notes { display: none !important } }` rule -- the whole
+ * point of this page is to appear in the exported PDF, so it must stay
+ * visible under print, unlike the overlay note it borrows typography from.
+ *
+ * `break-after: page` on `.notes-page` under `@media print` is what turns
+ * this div into its own additional PDF page, immediately following the
+ * slide's own page -- entirely independent of PRINT_PAGINATION_STYLE's
+ * `.slide { break-after: page }` rule below, since this div deliberately
+ * never carries class="slide" itself. Reusing "slide" here would make this
+ * div compete with the real slide `<section>` for CSS's `:last-of-type`
+ * pseudo-class, which counts siblings by TAG NAME, not by class: a trailing
+ * `<section class="slide notes-page">` would silently strip the REAL last
+ * slide's own `.slide:last-of-type` margin/padding/border trim the moment
+ * that slide had a note, changing that slide's own exported PNG's pixel
+ * dimensions -- exactly the "existing slide output must stay byte-identical"
+ * regression this design avoids by using a plain `<div>` instead (a `<div>`
+ * is never counted alongside `<section>` siblings for `:last-of-type`
+ * purposes, so the real slide's own last-of-type styling is untouched).
+ */
+const NOTES_PAGE_STYLE = `
+    .notes-page {
+      padding: 1rem 1.5rem;
+    }
+    .notes-page .note {
+      background: var(--nh-code-bg);
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      color: var(--nh-fg);
+      padding: 1rem 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .notes-page .note:first-child {
+      margin-top: 0;
+    }
+    @media print {
+      .notes-page {
+        break-after: page;
+      }
+    }`;
+
+/**
  * `print-color-adjust: exact` (plus the `-webkit-` prefix Chromium/Safari
  * still need) stops a browser's print pipeline from silently substituting
  * background colors for something print-friendlier -- without it, a dark
@@ -788,6 +842,15 @@ marked.use({
  * entire `<style>` block wholesale) rather than a reopening of
  * docs/specs/theme-system-design.md §2's "no CSS-cascade-layering
  * complexity" decision for `--css` itself.
+ *
+ * `withNotes`, when true, additionally emits a `<div class="notes-page">`
+ * sibling immediately after any slide's own `<section>` that has at least
+ * one presenter note (see NOTES_PAGE_STYLE's own docstring for the full
+ * mechanism and why it is a `<div>`, never a `<section class="slide">`).
+ * A slide with no note gets no such sibling. Defaults to false, matching
+ * this project's own explicit-opt-in precedent for anything notes-related
+ * (`?notes` is opt-in on `render` too) -- pdfExport.ts/pngExport.ts's
+ * `--with-notes` CLI flag is the only caller that ever passes true.
  */
 export function generateHtml(
 	markdown: string,
@@ -796,13 +859,14 @@ export function generateHtml(
 	themeColors?: ThemeColors,
 	transitionName?: TransitionName,
 	cssVars?: string,
+	withNotes = false,
 ): string {
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
 	const tokens = marked.lexer(markdown);
 	let hasFragments = false;
 	const slidesHtml = splitIntoSlides(tokens)
-		.map((slideTokens) => {
+		.map((slideTokens, slideIndex) => {
 			const { layout, tokens: afterLayout } = extractSlideLayout(slideTokens);
 			const { name: layoutName } = resolveLayoutName(layout);
 			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
@@ -811,11 +875,23 @@ export function generateHtml(
 			if (hasFragment) {
 				hasFragments = true;
 			}
-			const notesHtml = extractNotes(filteredTokens)
+			const notes = extractNotes(filteredTokens);
+			const notesHtml = notes
 				.map(
 					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
 				)
 				.join("\n");
+			// See NOTES_PAGE_STYLE's own docstring for why this is a plain
+			// `<div>` (never `<section class="slide">`) -- appended as a SIBLING
+			// after the slide's own closing `</section>` below, never inside it,
+			// so the slide's own markup byte-for-byte is completely unaffected
+			// by whether `withNotes` is true or a slide has notes at all.
+			const notesPageHtml =
+				withNotes && notes.length > 0
+					? `\n<div class="notes-page" data-notes-for="${slideIndex + 1}">\n${notes
+							.map((note) => `<div class="note">${escapeHtml(note)}</div>`)
+							.join("\n")}\n</div>`
+					: "";
 			const contentHtml = marked.parser(filteredTokens);
 			// Two-column layout wraps its content in its own inner element rather
 			// than putting `column-count` directly on `<section class="slide
@@ -834,7 +910,7 @@ export function generateHtml(
 				layoutName === "two-column"
 					? `<div class="two-column-flow">\n${contentHtml}</div>\n`
 					: contentHtml;
-			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>`;
+			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>${notesPageHtml}`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -999,6 +1075,7 @@ ${
 }
     ${katexStyle}
     ${NOTES_STYLE}
+    ${NOTES_PAGE_STYLE}
     ${PRINT_PAGINATION_STYLE}
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}

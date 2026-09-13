@@ -746,6 +746,130 @@ describe("generateHtml — presenter notes", () => {
 	});
 });
 
+describe("generateHtml — withNotes export pages", () => {
+	const TWO_SLIDE_DECK_ONE_NOTE =
+		"# Slide 1\n\nFirst slide body.\n\n<!-- note for slide one -->\n\n---\n\n# Slide 2\n\nSecond slide body, no note.";
+
+	// Every <section class="slide...">...</section> block, in document order --
+	// used to prove the real slide markup itself is byte-for-byte identical
+	// whether or not withNotes/a notes-page div is involved, since neither
+	// argument should ever change how a slide itself renders.
+	function extractSlideSections(html: string): string[] {
+		return [
+			...html.matchAll(/<section class="slide[^>]*>[\s\S]*?<\/section>/g),
+		].map((match) => match[0]);
+	}
+
+	it("emits no notes-page div when withNotes is not passed, even though the slide has a note", () => {
+		const html = generateHtml("# Slide\n\n<!-- a note -->\n");
+
+		expect(html).not.toContain('class="notes-page"');
+	});
+
+	it("emits no notes-page div when withNotes is explicitly false", () => {
+		const html = generateHtml(
+			"# Slide\n\n<!-- a note -->\n",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			false,
+		);
+
+		expect(html).not.toContain('class="notes-page"');
+	});
+
+	it("emits a notes-page div immediately after a slide's own section when withNotes is true and that slide has a note", () => {
+		const html = generateHtml(
+			"# Slide\n\n<!-- remember to smile -->\n",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		expect(html).toContain(
+			'</section>\n<div class="notes-page" data-notes-for="1">\n<div class="note">remember to smile</div>\n</div>',
+		);
+	});
+
+	it("emits no notes-page div for a slide that has no notes, even when withNotes is true", () => {
+		const html = generateHtml(
+			TWO_SLIDE_DECK_ONE_NOTE,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		const notesPageMatches = [...html.matchAll(/data-notes-for="(\d+)"/g)].map(
+			(match) => match[1],
+		);
+		expect(notesPageMatches).toEqual(["1"]);
+	});
+
+	it("stacks multiple notes for the same slide inside one shared notes-page div", () => {
+		const html = generateHtml(
+			"# Slide\n\n<!-- first note -->\n\nBody.\n\n<!-- second note -->\n",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		const notesPageMatch = html.match(
+			/<div class="notes-page"[^>]*>[\s\S]*?<\/div>\n<\/div>/,
+		);
+		expect(notesPageMatch).not.toBeNull();
+		const notesPageHtml = (notesPageMatch as RegExpMatchArray)[0];
+		expect(notesPageHtml).toContain('<div class="note">first note</div>');
+		expect(notesPageHtml).toContain('<div class="note">second note</div>');
+	});
+
+	it("keeps every slide's own <section> markup byte-identical whether or not withNotes is true", () => {
+		const withoutNotes = generateHtml(TWO_SLIDE_DECK_ONE_NOTE);
+		const withNotes = generateHtml(
+			TWO_SLIDE_DECK_ONE_NOTE,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		expect(extractSlideSections(withNotes)).toEqual(
+			extractSlideSections(withoutNotes),
+		);
+	});
+
+	it("never hides .notes-page in print media -- it must remain visible in an exported PDF", () => {
+		const html = generateHtml(
+			"# Slide\n\n<!-- a note -->\n",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		expect(html).not.toMatch(
+			/@media print[^}]*\.notes-page[^}]*display:\s*none/,
+		);
+		expect(html).toMatch(
+			/@media print[^}]*\.notes-page[^}]*break-after:\s*page/,
+		);
+	});
+});
+
 describe("generateHtml — presenter notes reveal (?notes) rendering scope", () => {
 	// Regression coverage for a real bug: `.notes` was unconditionally
 	// `position: fixed; bottom: 0; left: 0; right: 0`, so revealing notes via

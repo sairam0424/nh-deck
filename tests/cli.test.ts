@@ -1008,6 +1008,338 @@ describe("CLI: nh-deck png — error handling", () => {
 	);
 });
 
+describe("CLI: nh-deck pdf/png — presenter notes dropped warning", () => {
+	// Today, presenter notes are silently and completely dropped from every
+	// pdf/png export unless --with-notes is passed -- this is the fix for
+	// that silence: a non-fatal stderr note printed once, after a
+	// successful export, whenever the deck actually has at least one note
+	// that --with-notes would have included.
+	const NOTES_DROPPED_TEXT =
+		"note: presenter notes are not included in this export (pass --with-notes to include them)";
+
+	it(
+		"pdf: writes the notes-dropped note to stderr for a deck with a presenter note, exported without --with-notes",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-pdf-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-pdf-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "pdf", tempFile, outputPath],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(tempFile, { force: true });
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"pdf: does not write the notes-dropped note for a deck with zero presenter notes",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-none-pdf-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).not.toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"pdf: does not write the notes-dropped note for a deck with a presenter note when --with-notes is passed",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-notes-included-pdf-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-included-pdf-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					tempFile,
+					outputPath,
+					"--with-notes",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).not.toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(tempFile, { force: true });
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"png: writes the notes-dropped note to stderr for a deck with a presenter note, exported without --with-notes",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-png-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-png-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "png", tempFile, outputPath],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(tempFile, { force: true });
+			rmSync(firstSlidePath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"png: does not write the notes-dropped note for a deck with zero presenter notes",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-none-png-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const secondSlidePath = outputPath.replace(/\.png$/, "-2.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).not.toContain(NOTES_DROPPED_TEXT);
+
+			for (let n = 1; n <= 6; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+			rmSync(firstSlidePath, { force: true });
+			rmSync(secondSlidePath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck pdf --with-notes", () => {
+	it(
+		"exports a PDF with an extra page for the slide that has a note, and no dropped-notes stderr note",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-with-notes-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide 1\n\nFirst.\n\n<!-- a note -->\n\n---\n\n# Slide 2\n\nSecond, no note.",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-with-notes-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					tempFile,
+					outputPath,
+					"--with-notes",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(stderr).not.toContain("presenter notes are not included");
+
+			// 2 real slide pages + 1 extra notes page for slide 1 only.
+			const pdfBytes = readFileSync(outputPath);
+			const pageCount = (
+				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+			).length;
+			expect(pageCount).toBe(3);
+
+			rmSync(tempFile, { force: true });
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck png --with-notes", () => {
+	it(
+		"exports the usual per-slide PNGs plus an additional -notes.png file for the slide that has a note",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-with-notes-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide 1\n\nFirst.\n\n<!-- a note -->\n\n---\n\n# Slide 2\n\nSecond, no note.",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-with-notes-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const secondSlidePath = outputPath.replace(/\.png$/, "-2.png");
+			const notesPath = outputPath.replace(/\.png$/, "-1-notes.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					tempFile,
+					outputPath,
+					"--with-notes",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain("Wrote 3 PNG file(s)");
+			expect(stderr).not.toContain("presenter notes are not included");
+			expect(existsSync(firstSlidePath)).toBe(true);
+			expect(existsSync(secondSlidePath)).toBe(true);
+			expect(existsSync(notesPath)).toBe(true);
+
+			rmSync(tempFile, { force: true });
+			rmSync(firstSlidePath, { force: true });
+			rmSync(secondSlidePath, { force: true });
+			rmSync(notesPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render --watch", () => {
 	it(
 		"pushes a reload event over SSE when the watched file changes",

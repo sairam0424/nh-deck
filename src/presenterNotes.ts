@@ -1,4 +1,5 @@
 import type { Token } from "marked";
+import { marked } from "marked";
 
 const HTML_COMMENT_PATTERN = /^<!--([\s\S]*?)-->/;
 
@@ -35,4 +36,23 @@ export function extractNotes(tokens: Token[]): string[] {
  */
 export function isPresenterNoteComment(text: string): boolean {
 	return HTML_COMMENT_PATTERN.test(text);
+}
+
+/**
+ * Returns true if `markdown`'s own token stream contains at least one
+ * presenter note anywhere in the document -- a whole-document check (not
+ * per-slide), which is all the CLI's own "presenter notes were dropped from
+ * this export" warning needs (see index.ts): it only has to know whether
+ * ANY slide in the deck has a note, not which one or how many.
+ *
+ * Lexing the whole document directly (rather than first splitting into
+ * per-slide token groups the way generateHtml's own splitIntoSlides does)
+ * is safe here because extractNotes only ever inspects the TOP-LEVEL tokens
+ * it's given -- a standalone comment is always a top-level "html"-type
+ * token regardless of which `---`-delimited slide it ends up in, so
+ * splitting first would find the exact same comments, just grouped
+ * differently.
+ */
+export function hasPresenterNotes(markdown: string): boolean {
+	return extractNotes(marked.lexer(markdown)).length > 0;
 }

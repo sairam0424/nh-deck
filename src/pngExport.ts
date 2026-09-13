@@ -28,6 +28,25 @@ import { detectBrowserExecutable } from "./browserLaunch.js";
  * lacks the setuid permissions GitHub Actions containers need -- the real
  * CLI export path (used on a real end user's own machine, with a
  * normally-installed browser) never needs this and never passes it.
+ *
+ * If `html` was generated with `generateHtml(..., withNotes: true)`, it may
+ * additionally contain one `<div class="notes-page" data-notes-for="N">`
+ * per slide that has at least one presenter note (see render.ts's
+ * NOTES_PAGE_STYLE docstring) -- this function has no separate `withNotes`
+ * parameter of its own because the presence of that markup in `html` is
+ * already the single source of truth for whether "also export a notes
+ * file" was requested; there is nothing else this function would need a
+ * flag to decide. Each such div is screenshotted to its own
+ * `<base>-<N>-notes.<ext>` file (e.g. "deck-1-notes.png" next to
+ * "deck-1.png"), appended to the end of the returned `written` array,
+ * after every real slide's own file. `data-notes-for`'s value is exactly
+ * the 1-indexed slide number generateHtml assigned that slide, so the file
+ * name always lines up with its own slide's file regardless of how many
+ * earlier slides had no note (and therefore no notes-page div) at all. A
+ * deck with no notes-page divs (either because `withNotes` was false, or
+ * every slide happened to have zero notes) produces this function's exact
+ * pre-existing output -- `section.slide` never matches a `<div>`, so this
+ * addition changes nothing when there is nothing to add.
  */
 export async function exportToPng(
 	html: string,
@@ -73,6 +92,36 @@ export async function exportToPng(
 			await sections[i].screenshot({ path });
 			written.push(path);
 		}
+
+		// `section.slide` above never matches a `<div>`, so this query only
+		// ever finds anything when `html` came from
+		// `generateHtml(..., withNotes: true)` -- see this function's own
+		// docstring for why that (rather than a separate parameter here) is
+		// this function's single source of truth for "also export notes
+		// files". Queried and processed after every real slide's own file
+		// above, so `written`'s slide files keep their exact pre-existing
+		// order and values regardless of whether any notes files are appended.
+		const notesPages = await page.$$("div.notes-page");
+		for (const notesPage of notesPages) {
+			const slideNumberAttr = await notesPage.evaluate((el) =>
+				el.getAttribute("data-notes-for"),
+			);
+			const slideNumber = Number(slideNumberAttr);
+			if (!Number.isInteger(slideNumber) || slideNumber < 1) {
+				throw new Error(
+					`Encountered a notes-page element with an invalid data-notes-for attribute: ${String(slideNumberAttr)}`,
+				);
+			}
+			const path = insertSlideNumber(
+				outputPath,
+				slideNumber,
+				sections.length,
+				"-notes",
+			);
+			await notesPage.screenshot({ path });
+			written.push(path);
+		}
+
 		await page.close();
 		return written;
 	} catch (error) {
@@ -83,10 +132,21 @@ export async function exportToPng(
 	}
 }
 
+/**
+ * `suffix`, when given (e.g. "-notes"), is inserted immediately after the
+ * zero-padded number and before the extension -- e.g. "deck-1-notes.png"
+ * for slideNumber=1, suffix="-notes" -- so a notes file sorts immediately
+ * after its own slide's file for the exact same zero-padded number, using
+ * the identical padding width every other file for this export already
+ * uses (`totalSlides`, the REAL slide count, not counting any notes-page
+ * elements). Defaults to "" for every existing call site, leaving their
+ * output completely unchanged.
+ */
 function insertSlideNumber(
 	outputPath: string,
 	slideNumber: number,
 	totalSlides: number,
+	suffix = "",
 ): string {
 	const dir = dirname(outputPath);
 	const base = basename(outputPath);
@@ -97,7 +157,7 @@ function insertSlideNumber(
 	);
 	const newBase =
 		lastDot === -1
-			? `${base}-${paddedNumber}`
-			: `${base.slice(0, lastDot)}-${paddedNumber}${base.slice(lastDot)}`;
+			? `${base}-${paddedNumber}${suffix}`
+			: `${base.slice(0, lastDot)}-${paddedNumber}${suffix}${base.slice(lastDot)}`;
 	return join(dir, newBase);
 }
