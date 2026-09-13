@@ -151,17 +151,17 @@ describe("presentation mode", () => {
 				),
 			);
 
-			// Wait for the 0.3s CSS transition to settle so the read below sees
-			// the rule's resting value rather than a mid-animation interpolation.
-			const settle = () => new Promise((resolve) => setTimeout(resolve, 500));
-
-			// Reads the translateX component (matrix's tx) of the first
-			// currently-inactive slide -- always a slide sitting at its rule's
-			// resting transform, never the actively-animating one becoming
-			// active.
-			const inactiveSlideTranslateX = () =>
-				page.evaluate(() => {
-					const el = document.querySelector(".slide:not(.is-active)");
+			// Reads the translateX component (matrix's tx) of a specific slide
+			// by index -- deliberately NOT ".slide:not(.is-active)", which is
+			// ambiguous with 3 slides (2 are inactive at once): after
+			// ArrowLeft navigates back to slide 0, slide 2 is ALSO still
+			// inactive (resting at its untouched forward +100% from the very
+			// first ArrowRight), and querySelector would happily return
+			// whichever of the two comes first in DOM order regardless of
+			// which one the test actually means to observe.
+			const slideTranslateX = (index: number) =>
+				page.evaluate((i) => {
+					const el = document.querySelectorAll(".slide")[i];
 					const transform = el ? getComputedStyle(el).transform : "none";
 					const match = transform.match(/matrix\(([^)]+)\)/);
 					if (!match) {
@@ -169,15 +169,40 @@ describe("presentation mode", () => {
 					}
 					const parts = match[1].split(",").map((n) => Number.parseFloat(n));
 					return parts[4] ?? 0;
-				});
+				}, index);
+
+			// Polls for a value that is both nonzero AND unchanged across two
+			// consecutive 100ms-apart reads, rather than a single fixed sleep:
+			// on slower/busier CI runners (observed intermittently on
+			// windows-latest, never on ubuntu-latest/macos-14), a single fixed
+			// wait sometimes read a still-animating (mid-transition) value.
+			// Requiring stability, not just non-zero, is what actually proves
+			// the 0.3s CSS transition has settled rather than merely started.
+			const pollForSettledTranslateX = async (index: number) => {
+				const deadline = Date.now() + 3000;
+				let previous = await slideTranslateX(index);
+				do {
+					await new Promise((resolve) => setTimeout(resolve, 100));
+					const current = await slideTranslateX(index);
+					if (current === previous && current !== 0) {
+						return current;
+					}
+					previous = current;
+				} while (Date.now() < deadline);
+				return previous;
+			};
 
 			await page.keyboard.press("ArrowRight");
-			await settle();
-			const forwardTx = await inactiveSlideTranslateX();
+			// Slide 0 was active, is now inactive -- resting at the forward
+			// direction's +100%-equivalent.
+			const forwardTx = await pollForSettledTranslateX(0);
 
 			await page.keyboard.press("ArrowLeft");
-			await settle();
-			const backwardTx = await inactiveSlideTranslateX();
+			// Slide 1 was active, is now inactive -- resting at the backward
+			// direction's -100%-equivalent. Slide 0 (now active again) and
+			// slide 2 (still untouched since the first navigation) are
+			// deliberately not read here.
+			const backwardTx = await pollForSettledTranslateX(1);
 
 			expect(forwardTx).toBeGreaterThan(0);
 			expect(backwardTx).toBeLessThan(0);
