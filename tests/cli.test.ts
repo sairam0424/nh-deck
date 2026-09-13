@@ -2,6 +2,7 @@ import { type ChildProcess, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import {
 	existsSync,
+	mkdirSync,
 	mkdtempSync,
 	readFileSync,
 	rmSync,
@@ -151,6 +152,229 @@ function fetchBody(url: string): Promise<string> {
 			.on("error", reject);
 	});
 }
+
+describe("CLI: nh-deck init", () => {
+	it(
+		"writes a starter deck covering themes, all 4 layouts, KaTeX, Mermaid, presenter notes, and presentation-mode shortcuts",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-init-test-${randomUUID()}.md`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", tempFile],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain(`Wrote starter deck to ${tempFile}`);
+			expect(stdout).toContain(`nh-deck render ${tempFile}`);
+			expect(existsSync(tempFile)).toBe(true);
+
+			const written = readFileSync(tempFile, "utf8");
+			// Frontmatter: real theme/transition values, not placeholders.
+			expect(written).toContain("---\ntheme: dracula\ntransition: fade\n---");
+			// One slide per fixed layout, via the existing marker convention.
+			expect(written).toContain("<!-- layout: title -->");
+			expect(written).toContain("<!-- layout: section -->");
+			expect(written).toContain("<!-- layout: two-column -->");
+			expect(written).toContain("<!-- layout: quote -->");
+			// KaTeX: inline and block math.
+			expect(written).toContain("$E = mc^2$");
+			expect(written).toContain("$$");
+			expect(written).toContain("\\frac{n(n+1)}{2}");
+			// A Mermaid diagram.
+			expect(written).toContain("```mermaid");
+			expect(written).toContain("flowchart");
+			// A presenter-note comment, distinct from a layout marker.
+			expect(written).toContain(
+				"<!-- Remember: presenter notes stay hidden until ?notes is added to the URL. -->",
+			);
+			// The closing slide documents presentation mode as real slide
+			// content -- both query params and the actual keyboard shortcuts.
+			expect(written).toContain("?present");
+			expect(written).toContain("?notes");
+			expect(written).toContain("→ / Space / ← / Home / End / click / swipe");
+			expect(written).toContain("Esc");
+
+			rmSync(tempFile, { force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"refuses to overwrite an existing file without --force",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-init-exists-test-${randomUUID()}.md`,
+			);
+			const originalContent = "# My existing deck\n";
+			writeFileSync(tempFile, originalContent);
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", tempFile],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(1);
+			expect(stderr).toMatch(/^nh-deck: /);
+			expect(stderr).toMatch(/already exists/);
+			expect(stderr).toMatch(/--force/);
+			// The pre-existing file must be left completely untouched.
+			expect(readFileSync(tempFile, "utf8")).toBe(originalContent);
+
+			rmSync(tempFile, { force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"overwrites an existing file when --force is passed",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-init-force-test-${randomUUID()}.md`,
+			);
+			writeFileSync(tempFile, "# My existing deck\n");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", tempFile, "--force"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain(`Wrote starter deck to ${tempFile}`);
+
+			const written = readFileSync(tempFile, "utf8");
+			expect(written).not.toBe("# My existing deck\n");
+			expect(written).toContain("<!-- layout: title -->");
+
+			rmSync(tempFile, { force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"respects a custom filename argument",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-init-custom-name-"),
+			);
+			const customFile = path.join(tempDir, "my-talk.md");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "init", customFile],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain(`Wrote starter deck to ${customFile}`);
+			expect(existsSync(customFile)).toBe(true);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"defaults to writing deck.md in the current directory when no file argument is given",
+		async () => {
+			// Nested under repoRoot's own (gitignored) .worktrees/, not the OS
+			// tmpdir(): `--import tsx` resolves the "tsx" package by walking up
+			// node_modules from the spawned process's cwd, exactly like plain
+			// CommonJS require() resolution -- a cwd outside this repo entirely
+			// (e.g. plain tmpdir()) has no ancestor node_modules containing
+			// "tsx" and fails with ERR_MODULE_NOT_FOUND before init ever runs.
+			// .worktrees/ is already gitignored for exactly this "real nested
+			// directory under repoRoot, safe to leave stray" use case (see
+			// .gitignore), so a crash before the rmSync cleanup below still
+			// can't taint `git status`. A fresh CI checkout never has this
+			// directory on disk (it is gitignored, so nothing creates it before
+			// this test runs) -- mkdtempSync requires its parent to already
+			// exist, so it must be created here rather than assumed present.
+			const worktreesDir = path.join(repoRoot, ".worktrees");
+			mkdirSync(worktreesDir, { recursive: true });
+			const tempDir = mkdtempSync(
+				path.join(worktreesDir, "nh-deck-init-default-"),
+			);
+			const defaultFile = path.join(tempDir, "deck.md");
+
+			// Spawned with an absolute script path (rather than the usual
+			// relative "src/index.ts") so `cwd` can point at tempDir instead of
+			// repoRoot -- this test exercises init's no-argument default, which
+			// resolves "deck.md" against process.cwd(), and must never write a
+			// stray deck.md into this repo's own working directory.
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", path.join(repoRoot, "src", "index.ts"), "init"],
+				{ cwd: tempDir },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stdout).toContain("Wrote starter deck to deck.md");
+			expect(existsSync(defaultFile)).toBe(true);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+});
 
 describe("CLI: nh-deck render", () => {
 	it(
@@ -1005,6 +1229,338 @@ describe("CLI: nh-deck png — error handling", () => {
 			expect(existsSync(outputPath.replace(/\.png$/, "-1.png"))).toBe(false);
 		},
 		STARTUP_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck pdf/png — presenter notes dropped warning", () => {
+	// Today, presenter notes are silently and completely dropped from every
+	// pdf/png export unless --with-notes is passed -- this is the fix for
+	// that silence: a non-fatal stderr note printed once, after a
+	// successful export, whenever the deck actually has at least one note
+	// that --with-notes would have included.
+	const NOTES_DROPPED_TEXT =
+		"note: presenter notes are not included in this export (pass --with-notes to include them)";
+
+	it(
+		"pdf: writes the notes-dropped note to stderr for a deck with a presenter note, exported without --with-notes",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-pdf-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-pdf-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "pdf", tempFile, outputPath],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(tempFile, { force: true });
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"pdf: does not write the notes-dropped note for a deck with zero presenter notes",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-none-pdf-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).not.toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"pdf: does not write the notes-dropped note for a deck with a presenter note when --with-notes is passed",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-notes-included-pdf-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-included-pdf-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					tempFile,
+					outputPath,
+					"--with-notes",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).not.toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(tempFile, { force: true });
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"png: writes the notes-dropped note to stderr for a deck with a presenter note, exported without --with-notes",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-png-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-png-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "png", tempFile, outputPath],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).toContain(NOTES_DROPPED_TEXT);
+
+			rmSync(tempFile, { force: true });
+			rmSync(firstSlidePath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"png: does not write the notes-dropped note for a deck with zero presenter notes",
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-notes-dropped-none-png-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const secondSlidePath = outputPath.replace(/\.png$/, "-2.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stderr).not.toContain(NOTES_DROPPED_TEXT);
+
+			for (let n = 1; n <= 6; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+			rmSync(firstSlidePath, { force: true });
+			rmSync(secondSlidePath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck pdf --with-notes", () => {
+	it(
+		"exports a PDF with an extra page for the slide that has a note, and no dropped-notes stderr note",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-with-notes-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide 1\n\nFirst.\n\n<!-- a note -->\n\n---\n\n# Slide 2\n\nSecond, no note.",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-pdf-with-notes-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					tempFile,
+					outputPath,
+					"--with-notes",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(stderr).not.toContain("presenter notes are not included");
+
+			// 2 real slide pages + 1 extra notes page for slide 1 only.
+			const pdfBytes = readFileSync(outputPath);
+			const pageCount = (
+				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+			).length;
+			expect(pageCount).toBe(3);
+
+			rmSync(tempFile, { force: true });
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck png --with-notes", () => {
+	it(
+		"exports the usual per-slide PNGs plus an additional -notes.png file for the slide that has a note",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-with-notes-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide 1\n\nFirst.\n\n<!-- a note -->\n\n---\n\n# Slide 2\n\nSecond, no note.",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-cli-png-with-notes-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+			const secondSlidePath = outputPath.replace(/\.png$/, "-2.png");
+			const notesPath = outputPath.replace(/\.png$/, "-1-notes.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					tempFile,
+					outputPath,
+					"--with-notes",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			await waitForExit(child, PDF_EXPORT_TIMEOUT_MS);
+
+			expect(stdout).toContain("Wrote 3 PNG file(s)");
+			expect(stderr).not.toContain("presenter notes are not included");
+			expect(existsSync(firstSlidePath)).toBe(true);
+			expect(existsSync(secondSlidePath)).toBe(true);
+			expect(existsSync(notesPath)).toBe(true);
+
+			rmSync(tempFile, { force: true });
+			rmSync(firstSlidePath, { force: true });
+			rmSync(secondSlidePath, { force: true });
+			rmSync(notesPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
 	);
 });
 
@@ -2549,13 +3105,13 @@ describe("CLI: transition selection", () => {
 				throw new Error(`Could not extract URL from: ${matchedLine}`);
 			}
 			const body = await fetchBody(url);
-			// "pointer-events: none" (rather than the more generic "transition:
-			// opacity") is the marker checked here: it appears ONLY inside
-			// transitionToCssBlock's fade/slide output, unlike "transition:
-			// opacity", which FRAGMENT_STYLE's own (unconditional, --css-immune)
-			// body.presenting .fragment rule also legitimately uses for an
-			// unrelated feature -- see render.ts's FRAGMENT_STYLE docstring.
-			expect(body).not.toContain("pointer-events: none");
+			// "pointer-events: none;" (semicolon immediately after "none", no
+			// "!important") is the marker checked here: it appears ONLY inside
+			// transitionToCssBlock's fade/slide output. render.ts's
+			// PRESENTER_VIEW_STYLE also contains "pointer-events: none" but
+			// always as "none !important;", so the exact "none;" substring
+			// still uniquely identifies the transition feature.
+			expect(body).not.toContain("pointer-events: none;");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -2601,10 +3157,8 @@ describe("CLI: transition selection", () => {
 			const body = await fetchBody(url);
 			expect(body).not.toContain("transform: translateX");
 			// See the identical comment on the --css test above for why this
-			// checks "pointer-events: none" rather than the more generic
-			// "transition: opacity", which FRAGMENT_STYLE's own unconditional
-			// rule also legitimately contains for an unrelated feature.
-			expect(body).not.toContain("pointer-events: none");
+			// checks the "pointer-events: none;" (no "!important") marker.
+			expect(body).not.toContain("pointer-events: none;");
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);

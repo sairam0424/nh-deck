@@ -81,6 +81,63 @@ describe("exportToPdf", () => {
 	);
 
 	it(
+		"adds one extra PDF page per slide that has a note when the HTML was generated with withNotes: true",
+		async () => {
+			// Slide 1 has a note (expects an extra page immediately after its
+			// own), slide 2 has none (expects no extra page), slide 3 has a
+			// note again -- covers both "gets an extra page" and "does not"
+			// within the same deck.
+			const html = generateHtml(
+				"# Slide 1\n\nFirst.\n\n<!-- note one -->\n\n---\n\n# Slide 2\n\nSecond, no note.\n\n---\n\n# Slide 3\n\nThird.\n\n<!-- note three -->",
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				true,
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-with-notes-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			await exportToPdf(html, outputPath);
+
+			const pdfBytes = readFileSync(outputPath);
+			const pageCount = (
+				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+			).length;
+			// 3 real slides + 2 notes pages (slides 1 and 3, not slide 2).
+			expect(pageCount).toBe(5);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		"produces exactly one PDF page per slide (no extra pages) when the HTML was generated without withNotes, even though slides have notes",
+		async () => {
+			const html = generateHtml(
+				"# Slide 1\n\nFirst.\n\n<!-- note one -->\n\n---\n\n# Slide 2\n\nSecond.\n\n<!-- note two -->",
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-without-notes-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			await exportToPdf(html, outputPath);
+
+			const pdfBytes = readFileSync(outputPath);
+			const pageCount = (
+				pdfBytes.toString("latin1").match(/\/Type\s*\/Page[^s]/g) ?? []
+			).length;
+			expect(pageCount).toBe(2);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
 		"produces landscape 16:9 pages matching the deck's own on-screen aspect ratio, not portrait A4",
 		async () => {
 			const html = generateHtml(fixtureMarkdown, "sample");

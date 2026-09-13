@@ -108,6 +108,70 @@
  * exitPresentationMode() -- without it, a screen reader would report
  * fragments as hidden in exactly the two views where they are visually
  * all shown.
+ *
+ * A genuinely separate presenter view -- a second browser window/tab
+ * showing a presenter-console layout (the current slide, a preview of the
+ * next slide, that slide's own presenter notes always visible, and a
+ * count-up elapsed timer) instead of the normal one-slide-fullscreen view
+ * -- is opened via "p"/"P" (see openPresenterView() below). It is
+ * deliberately the SAME served document at the SAME URL, with one added
+ * query flag: an "&presenter" alongside the "present" flag this whole
+ * script already requires. There is no second HTML generation path
+ * anywhere in this project for presenter view -- a presenter-view window
+ * is detected purely by that one extra flag (isPresenterView below) and
+ * renders a DIFFERENT layout (a body.presenter-view class -- see
+ * render.ts's PRESENTER_VIEW_STYLE) on top of the exact same
+ * slides/current/goTo() machinery every other view in this file already
+ * shares. See updatePresenterConsole() below for the one small, additive
+ * piece specific to that layout (moving the current/next slide's own real
+ * elements into two preview boxes, never cloning them, plus refreshing a
+ * dedicated notes panel) -- this is NOT a fork of slide-index tracking
+ * itself.
+ *
+ * A presenter-view window is read-only: it never drives navigation itself
+ * (its own keydown/click/touchend listeners all bail out immediately once
+ * document.body.classList.contains("presenter-view") -- see each
+ * listener's own early guard below), and it never calls goTo() (reserved
+ * for the window a presenter is actually clicking/pressing keys in --
+ * ordinarily the main, non-presenter-view one). Instead it mirrors that
+ * OTHER window's state via two channels: a BroadcastChannel (deliberately
+ * not postMessage -- both windows are same-origin tabs of the identical
+ * served document, exactly what BroadcastChannel is for, and it needs no
+ * opener/window reference the way postMessage would) that goTo() posts
+ * {type: "slide", index: current} to on every call, live, for whichever
+ * presenter-view window(s) are ALREADY open and listening; and
+ * localStorage (a "nh-deck-current-slide" key goTo() also writes on every
+ * call), which a presenter-view window opened or reloaded AFTER some
+ * navigation already happened reads exactly ONCE, at startup, to recover
+ * that last-known index before it has ever received a single broadcast --
+ * see the `current` initialization right after parseHashIndex() below.
+ * Receiving a broadcast updates `current` and calls render() directly
+ * (never goTo()) -- goTo()'s own bounds-check, fragment-reset, and
+ * direction-backward bookkeeping are for the window actually navigating,
+ * and repeating them here would be redundant at best and (for the
+ * direction flag specifically) wrong: a presenter-view window has no
+ * navigation direction of its own.
+ *
+ * "p"/"P" (openPresenterView() below) opens that window via a plain
+ * window.open() call against a NAMED target ("nh-deck-presenter"), so
+ * repeated presses reuse/focus the same window rather than spawning a new
+ * tab every time. It is checked in the keydown listener right after "?"
+ * and before the `if (helpOpen) { return; }` guard that suppresses every
+ * OTHER key while help is open -- opening presenter view is a side-channel
+ * action on an entirely separate window/document; it neither reads nor
+ * mutates this window's own helpOpen/overviewOpen state, so (like "?" and
+ * Escape immediately above it) it must not be swallowed by either
+ * suppression rule. The presenter URL is built as
+ * `location.pathname + location.search + "&presenter" + location.hash`,
+ * deliberately NOT `location.href + "&presenter"` -- the latter breaks the
+ * moment location.hash is non-empty (true almost immediately, since
+ * render() unconditionally sets it below): appending after an existing
+ * "#fragment" makes the appended text part of the hash, not an actual
+ * query parameter. `location.search` is guaranteed non-empty here (it must
+ * already contain "?present", or this whole script would have returned at
+ * the top-level gate above), so "&presenter" is always syntactically safe
+ * to append to it as one more bare flag, matching the bare (no "=value")
+ * style "present"/"notes" already use elsewhere in this project.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -116,10 +180,34 @@ export const PRESENTATION_SCRIPT = `<script>
   }
   document.body.classList.add("presenting");
 
+  // See this file's own module docstring above for the full presenter-view
+  // design. This is the ONLY thing that distinguishes a presenter-view
+  // window from an ordinary presenting one -- everything else in this
+  // script (slides/current/goTo(), even the chrome elements created below)
+  // is shared, unforked code; render.ts's PRESENTER_VIEW_STYLE is what
+  // actually swaps the visible layout, scoped entirely under this class.
+  const isPresenterView = new URLSearchParams(location.search).has(
+    "presenter",
+  );
+  if (isPresenterView) {
+    document.body.classList.add("presenter-view");
+  }
+
   const slides = Array.from(document.querySelectorAll(".slide"));
   if (slides.length === 0) {
     return;
   }
+
+  // Presenter-view sync constants -- see this file's own module docstring
+  // for the full BroadcastChannel/localStorage design. Shared verbatim by
+  // every window (main or presenter-view): both need the exact same
+  // channel name to talk to each other, and the exact same localStorage
+  // key so a presenter-view window reads what the main window itself last
+  // wrote there.
+  const PRESENTER_CHANNEL_NAME = "nh-deck-presenter-sync";
+  const CURRENT_SLIDE_STORAGE_KEY = "nh-deck-current-slide";
+  const PRESENTER_WINDOW_NAME = "nh-deck-presenter";
+  const presenterChannel = new BroadcastChannel(PRESENTER_CHANNEL_NAME);
 
   // Wraps the slide counter together with the "? controls" hint button
   // (below) in a single flex row, positioned via render.ts's
@@ -172,12 +260,116 @@ export const PRESENTATION_SCRIPT = `<script>
     "</div>";
   document.body.appendChild(help);
 
+  // Presenter-console DOM refs -- only ever assigned (and only ever read by
+  // updatePresenterConsole() below) when isPresenterView is true; see the
+  // isPresenterView block immediately below, which is the only place that
+  // assigns them. Declared here, at the outer scope, purely so
+  // updatePresenterConsole() (a plain function value, not yet invoked at
+  // this point in the script) can close over them regardless of where in
+  // this file it happens to be defined relative to this block.
+  let currentPreview;
+  let nextPreview;
+  let notesPanel;
+
+  // Presenter-console UI: the current slide (scaled down), a preview
+  // of the next slide (scaled down further), the current slide's own
+  // presenter notes (always visible here, unlike the main view's
+  // ?notes-gated overlay), and a plain count-up elapsed timer. Entirely
+  // absent from the DOM in an ordinary presenting window -- see this
+  // file's own module docstring for why isPresenterView is the only fork
+  // in this whole script, and why it is confined to layout/UI construction
+  // like this rather than slide-index tracking itself.
+  if (isPresenterView) {
+    const presenterConsole = document.createElement("div");
+    presenterConsole.className = "presenter-console";
+    document.body.appendChild(presenterConsole);
+
+    currentPreview = document.createElement("div");
+    currentPreview.className = "presenter-preview presenter-preview-current";
+    presenterConsole.appendChild(currentPreview);
+
+    nextPreview = document.createElement("div");
+    nextPreview.className = "presenter-preview presenter-preview-next";
+    presenterConsole.appendChild(nextPreview);
+
+    notesPanel = document.createElement("div");
+    notesPanel.className = "presenter-notes-panel";
+    presenterConsole.appendChild(notesPanel);
+
+    const timerEl = document.createElement("div");
+    timerEl.className = "presenter-timer";
+    presenterConsole.appendChild(timerEl);
+
+    // A plain count-up timer -- starts counting from when THIS window
+    // opens, via setInterval computing Date.now() minus a stored start
+    // time. Deliberately no pause/resume and no duration-based color
+    // coding for this v1 -- both are explicit fast-follows, not built here.
+    const timerStartMs = Date.now();
+    const updateTimerDisplay = () => {
+      const elapsedSeconds = Math.floor((Date.now() - timerStartMs) / 1000);
+      const minutes = Math.floor(elapsedSeconds / 60);
+      const seconds = elapsedSeconds % 60;
+      timerEl.textContent =
+        String(minutes).padStart(2, "0") +
+        ":" +
+        String(seconds).padStart(2, "0");
+    };
+    updateTimerDisplay();
+    setInterval(updateTimerDisplay, 1000);
+
+    // The read-only half of the sync mechanism (see this file's own module
+    // docstring): a "slide" message means the MAIN window just navigated,
+    // so mirror its new index directly and re-render -- deliberately
+    // calling render() here, never goTo(), since goTo()'s bounds-check,
+    // fragment-reset, and direction-backward bookkeeping are for the
+    // window actually doing the navigating, not this passive display of
+    // it.
+    presenterChannel.addEventListener("message", (event) => {
+      if (event.data && event.data.type === "slide") {
+        current = event.data.index;
+        render();
+      }
+    });
+  }
+
   const parseHashIndex = () => {
     const n = parseInt(location.hash.slice(1), 10);
     return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
   };
 
   let current = parseHashIndex();
+
+  // A presenter-view window opened or reloaded AFTER navigation has already
+  // happened in the main window has no hash of its own to resume from --
+  // it is a genuinely separate tab/window with its own navigation history,
+  // so parseHashIndex() above only ever reflects THIS window's own,
+  // possibly-stale hash. localStorage is shared across same-origin tabs, so
+  // this reads the main window's last-known slide index once, here, at
+  // startup, before subscribing to presenterChannel above for every live
+  // update from that point on -- see this file's own module docstring.
+  if (isPresenterView) {
+    const storedIndex = Number.parseInt(
+      localStorage.getItem(CURRENT_SLIDE_STORAGE_KEY) ?? "",
+      10,
+    );
+    if (
+      Number.isInteger(storedIndex) &&
+      storedIndex >= 0 &&
+      storedIndex < slides.length
+    ) {
+      current = storedIndex;
+    }
+  } else {
+    // The MAIN window's own initial index (parsed from ITS hash above, or
+    // 0 with no hash) is written here immediately, rather than left for
+    // goTo() to write on the FIRST actual navigation -- otherwise a
+    // presenter-view window opened before any navigation happens would
+    // read whatever stale index a PREVIOUS session left in localStorage
+    // (shared across same-origin tabs indefinitely, not cleared between
+    // runs) instead of the main window's real current slide.
+    localStorage.setItem(CURRENT_SLIDE_STORAGE_KEY, String(current));
+  }
+
   let overviewOpen = false;
   let indexBeforeOverview = current;
   let helpOpen = false;
@@ -272,6 +464,56 @@ export const PRESENTATION_SCRIPT = `<script>
     });
   };
 
+  // Presenter-console update: moves the CURRENT and NEXT slide's own real
+  // .slide elements into their dedicated preview boxes -- never clones
+  // them. Cloning would duplicate any id a slide's content carries (e.g.
+  // Mermaid's own SVG marker/arrowhead ids, or KaTeX's internal ids),
+  // which is invalid HTML and can break rendering the moment two copies of
+  // the same id exist in one document; moving the real node sidesteps that
+  // entirely, since only one copy of it ever exists. Also refreshes the
+  // dedicated notes panel from the CURRENT slide's own .notes content, via
+  // a plain textContent copy (never innerHTML) so nothing here can ever
+  // inject markup. Only ever called when isPresenterView is true (see
+  // render()'s own call site immediately below) -- currentPreview/
+  // nextPreview/notesPanel are only ever assigned in that case, so this
+  // function is never invoked with them undefined.
+  const updatePresenterConsole = () => {
+    // A preview box can only ever hold the ONE slide currently designated
+    // current/next -- park whatever it held before (if anything) back onto
+    // <body> first, so the appendChild calls below never leave a stale
+    // previous occupant sitting alongside the new one. body.presenter-view's
+    // own CSS hides every .slide NOT inside a .presenter-preview box, so a
+    // parked-back slide simply disappears again, exactly like every other
+    // slide currently not designated current/next.
+    while (currentPreview.firstChild) {
+      document.body.appendChild(currentPreview.firstChild);
+    }
+    while (nextPreview.firstChild) {
+      document.body.appendChild(nextPreview.firstChild);
+    }
+    if (slides[current]) {
+      currentPreview.appendChild(slides[current]);
+    }
+    if (slides[current + 1]) {
+      nextPreview.appendChild(slides[current + 1]);
+    }
+
+    notesPanel.innerHTML = "";
+    const currentNotes = slides[current]
+      ? Array.from(slides[current].querySelectorAll(".notes"))
+      : [];
+    if (currentNotes.length === 0) {
+      notesPanel.textContent = "(no notes for this slide)";
+    } else {
+      currentNotes.forEach((note) => {
+        const noteEl = document.createElement("div");
+        noteEl.className = "presenter-note";
+        noteEl.textContent = note.textContent ?? "";
+        notesPanel.appendChild(noteEl);
+      });
+    }
+  };
+
   const render = () => {
     slides.forEach((slide, i) => {
       slide.classList.toggle("is-active", i === current);
@@ -281,6 +523,9 @@ export const PRESENTATION_SCRIPT = `<script>
     const progressPercent = lastIndex === 0 ? 100 : (current / lastIndex) * 100;
     progress.style.width = progressPercent + "%";
     location.hash = String(current + 1);
+    if (isPresenterView) {
+      updatePresenterConsole();
+    }
   };
 
   const goTo = (index, isBackward) => {
@@ -300,6 +545,21 @@ export const PRESENTATION_SCRIPT = `<script>
     }
     current = index;
     render();
+    // Presenter-view sync (see this file's own module docstring): persists
+    // the new index to localStorage (read once, at startup, by a
+    // presenter-view window opened or reloaded after this point) and
+    // broadcasts it live to any ALREADY-OPEN presenter-view window via
+    // BroadcastChannel. goTo() is only ever reachable from a presenter-view
+    // window's own user input in the first place (its keydown/click/
+    // touchend listeners all bail out before calling goTo() -- see their
+    // own isPresenterView guards below), so in practice this only ever
+    // actually fires from the MAIN presenting window -- but writing it
+    // here, unconditionally, inside goTo() itself, keeps this one shared
+    // function the single place that both windows' tracking flows through,
+    // rather than forking a separate "broadcasting goTo" for the main
+    // window alone.
+    localStorage.setItem(CURRENT_SLIDE_STORAGE_KEY, String(current));
+    presenterChannel.postMessage({ type: "slide", index: current });
   };
 
   // Forward navigation: reveal the current slide's next fragment (if any
@@ -411,6 +671,16 @@ export const PRESENTATION_SCRIPT = `<script>
     syncFragmentAriaForCurrentMode();
   };
 
+  // Opens the presenter-view window/tab -- see this file's own module
+  // docstring for the full URL-construction and precedence reasoning.
+  // Targets a NAMED window ("nh-deck-presenter") so repeated "p" presses
+  // reuse/focus the same window instead of spawning a new tab every time.
+  const openPresenterView = () => {
+    const presenterUrl =
+      location.pathname + location.search + "&presenter" + location.hash;
+    window.open(presenterUrl, PRESENTER_WINDOW_NAME);
+  };
+
   document.addEventListener("keydown", (event) => {
     // Inert once exitPresentationMode() has removed body.presenting -- this
     // listener, like every listener in this script, is attached once and
@@ -420,6 +690,16 @@ export const PRESENTATION_SCRIPT = `<script>
     // would still call openOverview(), turning the ordinary document into a
     // grid of clipped thumbnails outside presentation mode entirely.
     if (!document.body.classList.contains("presenting")) {
+      return;
+    }
+    // A presenter-view window is a read-only mirror of the MAIN window's
+    // state (see this file's own module docstring's presenter-view
+    // section) -- every key this listener handles below (Escape/"?"/"p"/
+    // "o"/arrows/Home/End/Space) exists to drive or view THIS window's own
+    // slide state, which a presenter-view window must never do. Checked
+    // here, once, before any of those branches, rather than duplicated
+    // inside each one individually.
+    if (document.body.classList.contains("presenter-view")) {
       return;
     }
     // Precedence across this script's three modal-ish states -- help open,
@@ -466,6 +746,21 @@ export const PRESENTATION_SCRIPT = `<script>
       }
       return;
     }
+    // "p"/"P" opens a NEW presenter-view window/tab (see openPresenterView()
+    // above) -- checked here, right after "?" and BEFORE the
+    // "if (helpOpen) { return; }" guard just below (which suppresses every
+    // OTHER key, including "o" and slide navigation, while the help overlay
+    // is open), because opening presenter view is a side-channel action on
+    // an entirely separate window/document: it neither reads nor mutates
+    // THIS window's own helpOpen/overviewOpen/current state at all, so
+    // there is nothing here for either of those modal-ish states to
+    // conflict with. A single "p" keypress therefore always opens
+    // presenter view, regardless of whatever else is currently open in
+    // this window, exactly like "?" and Escape immediately above it.
+    if (event.key === "p" || event.key === "P") {
+      openPresenterView();
+      return;
+    }
     if (helpOpen) {
       return;
     }
@@ -503,6 +798,12 @@ export const PRESENTATION_SCRIPT = `<script>
     // call advance(), advancing a "current slide" concept that page no
     // longer has.
     if (!document.body.classList.contains("presenting")) {
+      return;
+    }
+    // Same "read-only mirror" guard as the keydown listener above -- a
+    // presenter-view window must never advance/retreat a slide, open the
+    // grid overview, or open help from a click either.
+    if (document.body.classList.contains("presenter-view")) {
       return;
     }
     // Mirrors the keydown listener's own "help open" precedence: a helpHint
@@ -586,7 +887,8 @@ export const PRESENTATION_SCRIPT = `<script>
     if (
       helpOpen ||
       overviewOpen ||
-      !document.body.classList.contains("presenting")
+      !document.body.classList.contains("presenting") ||
+      document.body.classList.contains("presenter-view")
     ) {
       return;
     }

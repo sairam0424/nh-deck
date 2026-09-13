@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodeUtil from "node:util";
@@ -13,8 +13,13 @@ import {
 	watchFileForChanges,
 } from "./cliHelpers.js";
 import { parseFrontmatter } from "./frontmatter.js";
+import {
+	DEFAULT_INIT_FILENAME,
+	STARTER_DECK_TEMPLATE,
+} from "./initTemplate.js";
 import { exportToPdf } from "./pdfExport.js";
 import { exportToPng } from "./pngExport.js";
+import { hasPresenterNotes } from "./presenterNotes.js";
 import { containsUnsafeHtml, generateHtml } from "./render.js";
 import { startServer } from "./server.js";
 import type { ThemeColors } from "./themes.js";
@@ -35,6 +40,26 @@ import { resolveTransitionName, TRANSITIONS } from "./transitions.js";
  */
 const UNSAFE_HTML_WARNING =
 	"nh-deck: warning: this deck contains raw HTML, which is rendered as-is (including any <script> tags). Only open decks from sources you trust.\n";
+
+/**
+ * Non-fatal stderr note printed, on `pdf`/`png` only, after a successful
+ * export whose deck has at least one presenter note (see
+ * presenterNotes.ts's hasPresenterNotes) but whose invocation did NOT pass
+ * `--with-notes`. Presenter notes are opt-in to export (matching this
+ * project's own explicit-opt-in precedent for anything notes-related --
+ * `?notes` is opt-in on `render` too) and are otherwise dropped completely
+ * silently, with zero indication to the user that anything was left out --
+ * this is the fix for that silence, not a change to the opt-in default
+ * itself. Deliberately styled the same way the "Wrote PDF to .../Wrote N
+ * PNG file(s)..." success line right above it already is (see `style()`),
+ * rather than left unstyled the way UNSAFE_HTML_WARNING/the --theme and
+ * --css-vars "note:" messages above are -- both this note and that success
+ * line only ever appear together, on a successful export, so they share
+ * that success line's own color rather than introducing a third,
+ * unprecedented color into this file for a message that isn't an error.
+ */
+const NOTES_DROPPED_NOTE =
+	"nh-deck: note: presenter notes are not included in this export (pass --with-notes to include them)";
 
 /**
  * `node:util.styleText` was added in Node 20.12.0 -- this repo's declared
@@ -221,6 +246,44 @@ program
 	.showSuggestionAfterError();
 
 program
+	.command("init [file]")
+	.description(
+		"Write a starter Markdown deck (covering themes, layouts, KaTeX, Mermaid, and presenter notes) to help you get started.",
+	)
+	.option("--force", "overwrite the target file if it already exists")
+	.action((file: string | undefined, options: { force?: boolean }) => {
+		const targetFile = file ?? DEFAULT_INIT_FILENAME;
+		try {
+			try {
+				writeFileSync(targetFile, STARTER_DECK_TEMPLATE, {
+					flag: options.force ? "w" : "wx",
+				});
+			} catch (writeError) {
+				if (
+					!options.force &&
+					(writeError as NodeJS.ErrnoException).code === "EEXIST"
+				) {
+					throw new Error(
+						`file '${targetFile}' already exists; pass --force to overwrite it`,
+					);
+				}
+				throw writeError;
+			}
+			process.stdout.write(
+				`${style("green", `Wrote starter deck to ${targetFile}`)}\n`,
+			);
+			process.stdout.write(
+				`${style("green", `Next: nh-deck render ${targetFile}`)}\n`,
+			);
+		} catch (error) {
+			process.stderr.write(
+				`${style("red", formatActionError(error, targetFile))}\n`,
+			);
+			process.exitCode = 1;
+		}
+	});
+
+program
 	.command("render <file>")
 	.description("Render a Markdown deck and serve it locally.")
 	.option("--no-open", "do not open the deck in the default browser")
@@ -372,11 +435,20 @@ program
 		"--theme <name>",
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
+	.option(
+		"--with-notes",
+		"include presenter notes as an additional PDF page, immediately after each slide that has one",
+	)
 	.action(
 		async (
 			file: string,
 			output?: string,
-			options?: { css?: string; cssVars?: string; theme?: string },
+			options?: {
+				css?: string;
+				cssVars?: string;
+				theme?: string;
+				withNotes?: boolean;
+			},
 		) => {
 			try {
 				const customCss = options?.css
@@ -400,6 +472,7 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
+				const withNotes = options?.withNotes ?? false;
 				const html = generateHtml(
 					markdown,
 					file,
@@ -407,6 +480,7 @@ program
 					themeColors,
 					undefined,
 					effectiveCssVars,
+					withNotes,
 				);
 				const outputPath = resolveOutputPath(file, output);
 
@@ -414,6 +488,9 @@ program
 				process.stdout.write(
 					`${style("green", `Wrote PDF to ${outputPath}`)}\n`,
 				);
+				if (!withNotes && hasPresenterNotes(markdown)) {
+					process.stderr.write(`${style("green", NOTES_DROPPED_NOTE)}\n`);
+				}
 			} catch (error) {
 				process.stderr.write(
 					`${style("red", formatActionError(error, file))}\n`,
@@ -438,11 +515,20 @@ program
 		"--theme <name>",
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
+	.option(
+		"--with-notes",
+		"include presenter notes as an additional PNG file per slide that has one (e.g. deck-1-notes.png next to deck-1.png)",
+	)
 	.action(
 		async (
 			file: string,
 			output?: string,
-			options?: { css?: string; cssVars?: string; theme?: string },
+			options?: {
+				css?: string;
+				cssVars?: string;
+				theme?: string;
+				withNotes?: boolean;
+			},
 		) => {
 			try {
 				const customCss = options?.css
@@ -466,6 +552,7 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
+				const withNotes = options?.withNotes ?? false;
 				const html = generateHtml(
 					markdown,
 					file,
@@ -473,16 +560,26 @@ program
 					themeColors,
 					undefined,
 					effectiveCssVars,
+					withNotes,
 				);
 				const outputPath = resolveOutputPath(file, output, "png");
 
-				const written = await exportToPng(html, outputPath);
+				const written = await exportToPng(
+					html,
+					outputPath,
+					undefined,
+					undefined,
+					withNotes,
+				);
 				process.stdout.write(
 					`${style(
 						"green",
 						`Wrote ${written.length} PNG file(s), starting at ${written[0]}`,
 					)}\n`,
 				);
+				if (!withNotes && hasPresenterNotes(markdown)) {
+					process.stderr.write(`${style("green", NOTES_DROPPED_NOTE)}\n`);
+				}
 			} catch (error) {
 				process.stderr.write(
 					`${style("red", formatActionError(error, file))}\n`,

@@ -135,6 +135,134 @@ describe("exportToPng", () => {
 	}, 30_000);
 });
 
+describe("exportToPng — withNotes export files", () => {
+	let dir: string;
+
+	afterEach(() => {
+		if (dir) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("writes an additional -notes.png file only for the slide that has a note, when generateHtml was called with withNotes: true", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
+		const outputPath = join(dir, "deck.png");
+		const html = generateHtml(
+			"# Slide 1\n\nFirst.\n\n<!-- note for slide one -->\n\n---\n\n# Slide 2\n\nSecond, no note.",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		const written = await exportToPng(
+			html,
+			outputPath,
+			undefined,
+			undefined,
+			true,
+		);
+
+		// Both real slides' own files, then the single notes file appended
+		// after them -- see exportToPng's own docstring for why notes files
+		// are always written after every real slide's file.
+		expect(written).toEqual([
+			join(dir, "deck-1.png"),
+			join(dir, "deck-2.png"),
+			join(dir, "deck-1-notes.png"),
+		]);
+		const notesBytes = readFileSync(join(dir, "deck-1-notes.png"));
+		expect(notesBytes.subarray(0, 8)).toEqual(
+			Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+		);
+	}, 30_000);
+
+	it("writes no additional -notes.png file when the deck has zero presenter notes, even with withNotes: true", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
+		const outputPath = join(dir, "deck.png");
+		const html = generateHtml(
+			"# Slide 1\n\nFirst.\n\n---\n\n# Slide 2\n\nSecond.",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+
+		const written = await exportToPng(html, outputPath);
+
+		expect(written).toEqual([join(dir, "deck-1.png"), join(dir, "deck-2.png")]);
+	}, 30_000);
+
+	it("writes no additional -notes.png file when generateHtml was called without withNotes, even though the deck has notes", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
+		const outputPath = join(dir, "deck.png");
+		const html = generateHtml("# Slide 1\n\nFirst.\n\n<!-- a note -->\n");
+
+		const written = await exportToPng(html, outputPath);
+
+		expect(written).toEqual([join(dir, "deck-1.png")]);
+	}, 30_000);
+
+	it("never screenshots a forged div.notes-page from a deck's own raw HTML content when withNotes is false, even though it structurally matches", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
+		const outputPath = join(dir, "deck.png");
+		// This project's local-first constraint permits raw HTML pass-through
+		// in a deck's own Markdown (render.ts's containsUnsafeHtml only warns,
+		// never strips) -- so a deck's own content, not a real generated notes
+		// page, can structurally match div.notes-page. --with-notes was never
+		// requested here (generateHtml called with its default withNotes:
+		// false), so this forged element must never be screenshotted/written.
+		const html = generateHtml(
+			'# Slide 1\n\nFirst.\n\n<div class="notes-page" data-notes-for="1">forged</div>\n',
+		);
+
+		const written = await exportToPng(html, outputPath);
+
+		expect(written).toEqual([join(dir, "deck-1.png")]);
+	}, 30_000);
+
+	it("produces a byte-identical real slide PNG whether or not withNotes is true, even for the slide with the note", async () => {
+		const markdown =
+			"# Slide 1\n\nFirst.\n\n<!-- a note -->\n\n---\n\n# Slide 2\n\nSecond, no note.";
+
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
+		const outputPathWithout = join(dir, "without.png");
+		const htmlWithout = generateHtml(markdown);
+		const writtenWithout = await exportToPng(htmlWithout, outputPathWithout);
+
+		const outputPathWith = join(dir, "with.png");
+		const htmlWith = generateHtml(
+			markdown,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			true,
+		);
+		const writtenWith = await exportToPng(htmlWith, outputPathWith);
+
+		// Only the two real slide files (not the extra notes file) are
+		// compared here -- this is the "existing slide PNG must stay
+		// byte-identical" guarantee, not a claim that the notes file itself
+		// (which has no --with-notes: false equivalent to compare against)
+		// is identical to anything.
+		const slideBytesWithout = writtenWithout
+			.filter((path) => !path.includes("-notes"))
+			.map((path) => readFileSync(path));
+		const slideBytesWith = writtenWith
+			.filter((path) => !path.includes("-notes"))
+			.map((path) => readFileSync(path));
+
+		expect(slideBytesWith).toHaveLength(slideBytesWithout.length);
+		for (let i = 0; i < slideBytesWithout.length; i++) {
+			expect(slideBytesWith[i].equals(slideBytesWithout[i])).toBe(true);
+		}
+	}, 30_000);
+});
+
 describe("exportToPng — post-launch export failure", () => {
 	afterEach(() => {
 		vi.doUnmock("puppeteer-core");

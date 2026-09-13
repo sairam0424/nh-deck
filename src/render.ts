@@ -62,6 +62,60 @@ const NOTES_STYLE = `
     }`;
 
 /**
+ * Styling for the additional "notes page" `<div>` generateHtml emits once
+ * per slide that has at least one presenter note, but only when called with
+ * `withNotes: true` (see pdfExport.ts/pngExport.ts's `--with-notes` wiring
+ * in index.ts). This is a source-adjacent SIBLING of that slide's own
+ * `<section class="slide">` -- appended immediately after its closing tag,
+ * never inside it and never an overlay on top of it -- so it can never
+ * change how the slide itself renders.
+ *
+ * `.note`'s typography is lifted directly from NOTES_STYLE's own base
+ * `.notes` rule above (background/border/border-radius/color/padding/
+ * margin-top), MINUS that rule's `position: fixed` override (which only
+ * ever applies under `body.presenting` -- irrelevant here, since export
+ * never adds that class to `<body>`) and MINUS its
+ * `@media print { .notes { display: none !important } }` rule -- the whole
+ * point of this page is to appear in the exported PDF, so it must stay
+ * visible under print, unlike the overlay note it borrows typography from.
+ *
+ * `break-after: page` on `.notes-page` under `@media print` is what turns
+ * this div into its own additional PDF page, immediately following the
+ * slide's own page -- entirely independent of PRINT_PAGINATION_STYLE's
+ * `.slide { break-after: page }` rule below, since this div deliberately
+ * never carries class="slide" itself. Reusing "slide" here would make this
+ * div compete with the real slide `<section>` for CSS's `:last-of-type`
+ * pseudo-class, which counts siblings by TAG NAME, not by class: a trailing
+ * `<section class="slide notes-page">` would silently strip the REAL last
+ * slide's own `.slide:last-of-type` margin/padding/border trim the moment
+ * that slide had a note, changing that slide's own exported PNG's pixel
+ * dimensions -- exactly the "existing slide output must stay byte-identical"
+ * regression this design avoids by using a plain `<div>` instead (a `<div>`
+ * is never counted alongside `<section>` siblings for `:last-of-type`
+ * purposes, so the real slide's own last-of-type styling is untouched).
+ */
+const NOTES_PAGE_STYLE = `
+    .notes-page {
+      padding: 1rem 1.5rem;
+    }
+    .notes-page .note {
+      background: var(--nh-code-bg);
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      color: var(--nh-fg);
+      padding: 1rem 1.5rem;
+      margin-top: 1.5rem;
+    }
+    .notes-page .note:first-child {
+      margin-top: 0;
+    }
+    @media print {
+      .notes-page {
+        break-after: page;
+      }
+    }`;
+
+/**
  * `print-color-adjust: exact` (plus the `-webkit-` prefix Chromium/Safari
  * still need) stops a browser's print pipeline from silently substituting
  * background colors for something print-friendlier -- without it, a dark
@@ -382,6 +436,158 @@ const HELP_STYLE = `
       color: var(--nh-muted);
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.9rem;
+    }`;
+
+/**
+ * The presenter-console layout for a genuinely separate presenter-view
+ * window -- the SAME served document, opened at the SAME URL with one
+ * added query flag (`&presenter`), rendering this layout instead of the
+ * normal one-slide-fullscreen view. See presentationScript.ts's own module
+ * docstring for the full URL/sync design; this constant is only the
+ * layout's CSS half. Everything here is scoped under `body.presenter-view`
+ * (added by presentationScript.ts only when the `presenter` flag is
+ * present), so an ordinary presenting window is completely unaffected --
+ * `.presenter-console`'s own base rule below is `display: none` unless
+ * that class is present, same as `.presentation-progress`'s own
+ * `display: none` base rule above.
+ *
+ * Deliberately NOT gated behind `!customCss`, for the same reason
+ * PRESENTATION_STYLE/OVERVIEW_STYLE/HELP_STYLE above are not: this is core
+ * interactive presentation-mode chrome (an entire alternate view, not a
+ * suppressible decorative flourish), so a custom --css should not be able
+ * to silently break it.
+ *
+ * `.presenter-preview .slide` reuses OVERVIEW_STYLE's own established
+ * thumbnail-scaling technique above (neutralize position/transform/
+ * opacity/transition via `!important` so no other presentation-mode rule
+ * -- PRESENTATION_STYLE's plain display toggle, transitionToCssBlock's
+ * per-transition absolute positioning, LAYOUT_STYLE's title/section/quote
+ * flex centering -- can win the specificity fight, then shrink via a
+ * smaller font-size) rather than a fresh `transform: scale(...)` -- same
+ * proven mechanism, applied to exactly the ONE or TWO `.slide` elements
+ * presentationScript.ts's updatePresenterConsole() moves into these boxes
+ * (never all of them at once, unlike the grid overview). The wrapping
+ * `.presenter-preview-current`/`-next` boxes -- not `.slide` itself, since
+ * a `.slide` moved in here already has its own margin/padding/border
+ * neutralized above -- carry the actual `max-height`/`overflow: hidden`
+ * clipping, the same pairing OVERVIEW_STYLE's own `.slide` rule uses for
+ * an identical purpose.
+ *
+ * `.presenter-preview .fragment` forces every fragment inside a preview
+ * box fully visible, `!important`, mirroring FRAGMENT_STYLE's own
+ * `body.overview .fragment` rule below for the exact same reason: a
+ * presenter-view window is a genuinely SEPARATE document instance (its own
+ * parse of the same served HTML, opened via window.open() -- not a live
+ * reference to the main window's DOM), so its own copy of a fragment-
+ * bearing slide never receives the main window's `.is-revealed` reveal
+ * progress at all (only the CURRENT SLIDE INDEX is synced, over
+ * BroadcastChannel -- see presentationScript.ts). Without this override, a
+ * fragment-bearing slide's content would sit permanently at
+ * FRAGMENT_STYLE's `body.presenting .fragment { opacity: 0; }` default
+ * inside the preview boxes -- invisible forever, since nothing in a
+ * presenter-view window ever reveals a fragment locally.
+ *
+ * `.presenter-preview .notes` is hidden, `!important` -- a `.notes`
+ * element nested inside a slide moved into a preview box would otherwise
+ * inherit NOTES_STYLE's own `body.presenting .notes` fixed bottom-overlay
+ * positioning, which makes no sense pinned inside a small thumbnail box.
+ * The dedicated `.presenter-notes-panel` below (populated by
+ * updatePresenterConsole() from that same `.notes` content, via a plain
+ * text copy) is what actually shows the current slide's notes here,
+ * always visible, unlike the main view's own `?notes`-gated overlay.
+ */
+const PRESENTER_VIEW_STYLE = `
+    body.presenter-view .presentation-chrome,
+    body.presenter-view .presentation-progress,
+    body.presenter-view .presentation-help,
+    body.presenter-view .presentation-help-hint {
+      display: none !important;
+    }
+    body.presenter-view .slide {
+      display: none !important;
+    }
+    .presenter-console {
+      display: none;
+    }
+    body.presenter-view .presenter-console {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      grid-template-areas:
+        "current next"
+        "notes   next";
+      gap: 1rem;
+      box-sizing: border-box;
+      min-height: 100vh;
+      padding: 1.5rem;
+      background: var(--nh-bg);
+      color: var(--nh-fg);
+    }
+    .presenter-preview {
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      background: var(--nh-bg);
+      overflow: hidden;
+    }
+    .presenter-preview-current {
+      grid-area: current;
+      max-height: 60vh;
+    }
+    .presenter-preview-next {
+      grid-area: next;
+      max-height: 30vh;
+    }
+    .presenter-notes-panel {
+      grid-area: notes;
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
+      border: 1px solid var(--nh-border);
+      border-radius: 6px;
+      padding: 1rem;
+      overflow-y: auto;
+    }
+    .presenter-note + .presenter-note {
+      margin-top: 0.75rem;
+    }
+    .presenter-timer {
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
+      border: 1px solid var(--nh-border);
+      border-radius: 4px;
+      padding: 0.25rem 0.6rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+    }
+    body.presenter-view .presenter-preview .slide {
+      display: block !important;
+      position: static !important;
+      inset: auto !important;
+      transform: none !important;
+      opacity: 1 !important;
+      pointer-events: none !important;
+      transition: none !important;
+      min-height: 0 !important;
+      margin: 0 !important;
+      border: none !important;
+      width: 100%;
+      box-sizing: border-box;
+    }
+    body.presenter-view .presenter-preview-current .slide {
+      padding: 1.5rem;
+      font-size: 0.9rem;
+    }
+    body.presenter-view .presenter-preview-next .slide {
+      padding: 1rem;
+      font-size: 0.65rem;
+    }
+    body.presenter-view .presenter-preview .fragment {
+      opacity: 1 !important;
+      transition: none !important;
+    }
+    body.presenter-view .presenter-preview .notes {
+      display: none !important;
     }`;
 
 /**
@@ -788,6 +994,15 @@ marked.use({
  * entire `<style>` block wholesale) rather than a reopening of
  * docs/specs/theme-system-design.md §2's "no CSS-cascade-layering
  * complexity" decision for `--css` itself.
+ *
+ * `withNotes`, when true, additionally emits a `<div class="notes-page">`
+ * sibling immediately after any slide's own `<section>` that has at least
+ * one presenter note (see NOTES_PAGE_STYLE's own docstring for the full
+ * mechanism and why it is a `<div>`, never a `<section class="slide">`).
+ * A slide with no note gets no such sibling. Defaults to false, matching
+ * this project's own explicit-opt-in precedent for anything notes-related
+ * (`?notes` is opt-in on `render` too) -- pdfExport.ts/pngExport.ts's
+ * `--with-notes` CLI flag is the only caller that ever passes true.
  */
 export function generateHtml(
 	markdown: string,
@@ -796,13 +1011,14 @@ export function generateHtml(
 	themeColors?: ThemeColors,
 	transitionName?: TransitionName,
 	cssVars?: string,
+	withNotes = false,
 ): string {
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
 	const tokens = marked.lexer(markdown);
 	let hasFragments = false;
 	const slidesHtml = splitIntoSlides(tokens)
-		.map((slideTokens) => {
+		.map((slideTokens, slideIndex) => {
 			const { layout, tokens: afterLayout } = extractSlideLayout(slideTokens);
 			const { name: layoutName } = resolveLayoutName(layout);
 			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
@@ -811,11 +1027,23 @@ export function generateHtml(
 			if (hasFragment) {
 				hasFragments = true;
 			}
-			const notesHtml = extractNotes(filteredTokens)
+			const notes = extractNotes(filteredTokens);
+			const notesHtml = notes
 				.map(
 					(note) => `<aside class="notes" hidden>${escapeHtml(note)}</aside>`,
 				)
 				.join("\n");
+			// See NOTES_PAGE_STYLE's own docstring for why this is a plain
+			// `<div>` (never `<section class="slide">`) -- appended as a SIBLING
+			// after the slide's own closing `</section>` below, never inside it,
+			// so the slide's own markup byte-for-byte is completely unaffected
+			// by whether `withNotes` is true or a slide has notes at all.
+			const notesPageHtml =
+				withNotes && notes.length > 0
+					? `\n<div class="notes-page" data-notes-for="${slideIndex + 1}">\n${notes
+							.map((note) => `<div class="note">${escapeHtml(note)}</div>`)
+							.join("\n")}\n</div>`
+					: "";
 			const contentHtml = marked.parser(filteredTokens);
 			// Two-column layout wraps its content in its own inner element rather
 			// than putting `column-count` directly on `<section class="slide
@@ -834,7 +1062,7 @@ export function generateHtml(
 				layoutName === "two-column"
 					? `<div class="two-column-flow">\n${contentHtml}</div>\n`
 					: contentHtml;
-			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>`;
+			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>${notesPageHtml}`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -999,10 +1227,12 @@ ${
 }
     ${katexStyle}
     ${NOTES_STYLE}
+    ${NOTES_PAGE_STYLE}
     ${PRINT_PAGINATION_STYLE}
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
+    ${PRESENTER_VIEW_STYLE}
     ${progressStyle}
     ${FRAGMENT_STYLE}
     ${reducedMotionStyle}

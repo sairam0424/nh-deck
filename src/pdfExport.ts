@@ -46,6 +46,15 @@ const PDF_FOOTER_TEMPLATE = `
  * lacks the setuid permissions GitHub Actions containers need -- the real
  * CLI export path (used on a real end user's own machine, with a
  * normally-installed browser) never needs this and never passes it.
+ *
+ * If `html` was generated with `generateHtml(..., withNotes: true)`, it may
+ * additionally contain one `<div class="notes-page">` per slide that has a
+ * presenter note (see render.ts's NOTES_PAGE_STYLE docstring). This
+ * function needs no code of its own to handle that -- `.notes-page`'s own
+ * `@media print { break-after: page }` rule (part of the `html` passed in)
+ * already turns each one into its own additional PDF page immediately
+ * following its slide's page, through the exact same print pipeline that
+ * already paginates every `.slide` below.
  */
 export async function exportToPdf(
 	html: string,

@@ -142,3 +142,155 @@ describe("PRESENTATION_SCRIPT", () => {
 		expect(guard).toContain("overviewOpen");
 	});
 });
+
+describe("PRESENTATION_SCRIPT — presenter view", () => {
+	it('detects the "presenter" query flag and applies a presenter-view class on body', () => {
+		expect(PRESENTATION_SCRIPT).toContain('has(\n    "presenter",\n  )');
+		expect(PRESENTATION_SCRIPT).toContain('classList.add("presenter-view")');
+	});
+
+	it("opens presenter view via a plain, named window.open() call", () => {
+		expect(PRESENTATION_SCRIPT).toContain("openPresenterView");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"window.open(presenterUrl, PRESENTER_WINDOW_NAME)",
+		);
+	});
+
+	it("never uses window.postMessage for the sync mechanism -- only BroadcastChannel's own postMessage method", () => {
+		expect(PRESENTATION_SCRIPT).not.toContain("window.postMessage");
+		expect(PRESENTATION_SCRIPT).toContain("presenterChannel.postMessage");
+	});
+
+	it('builds the presenter URL from pathname + search + "&presenter" + hash, never location.href directly (a bare href-append would corrupt a non-empty hash)', () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'location.pathname + location.search + "&presenter" + location.hash',
+		);
+		expect(PRESENTATION_SCRIPT).not.toContain('location.href + "&presenter"');
+	});
+
+	it('gives "p"/"P" precedence over the help-open suppression guard, checked right after "?" and before `if (helpOpen) { return; }`', () => {
+		const keydownListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("keydown"',
+		);
+		const pKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			'event.key === "p"',
+			keydownListenerStart,
+		);
+		const questionMarkIndex = PRESENTATION_SCRIPT.indexOf(
+			'event.key === "?"',
+			keydownListenerStart,
+		);
+		// The FIRST "if (helpOpen) {" after keydownListenerStart is actually
+		// inside the Escape branch above (`if (helpOpen) { closeHelp(); }`) --
+		// the standalone suppression guard this test cares about only comes
+		// after the "p" branch, so search from pKeyIndex, not
+		// keydownListenerStart, to find that one specifically.
+		const helpOpenGuardIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (helpOpen) {",
+			pKeyIndex,
+		);
+		expect(pKeyIndex).toBeGreaterThan(-1);
+		expect(pKeyIndex).toBeGreaterThan(questionMarkIndex);
+		expect(pKeyIndex).toBeLessThan(helpOpenGuardIndex);
+	});
+
+	it("guards the keydown listener against a presenter-view window ever driving its own navigation, checked before any Escape/?/p/o/arrow branch", () => {
+		const keydownListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("keydown"',
+		);
+		const presenterViewGuardIndex = PRESENTATION_SCRIPT.indexOf(
+			'classList.contains("presenter-view")',
+			keydownListenerStart,
+		);
+		const escapeIndex = PRESENTATION_SCRIPT.indexOf(
+			'event.key === "Escape"',
+			keydownListenerStart,
+		);
+		expect(presenterViewGuardIndex).toBeGreaterThan(-1);
+		expect(presenterViewGuardIndex).toBeLessThan(escapeIndex);
+	});
+
+	it("guards the click listener against a presenter-view window ever driving its own navigation", () => {
+		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("click"',
+		);
+		const presenterViewGuardIndex = PRESENTATION_SCRIPT.indexOf(
+			'classList.contains("presenter-view")',
+			clickListenerStart,
+		);
+		const helpHintIndex = PRESENTATION_SCRIPT.indexOf(
+			'closest(".presentation-help-hint")',
+			clickListenerStart,
+		);
+		expect(presenterViewGuardIndex).toBeGreaterThan(-1);
+		expect(presenterViewGuardIndex).toBeLessThan(helpHintIndex);
+	});
+
+	it("guards touch-swipe navigation against a presenter-view window ever driving its own navigation", () => {
+		const touchendListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("touchend"',
+		);
+		const guard = PRESENTATION_SCRIPT.slice(
+			touchendListenerStart,
+			touchendListenerStart + 900,
+		);
+		expect(guard).toContain('classList.contains("presenter-view")');
+	});
+
+	it("syncs slide navigation via a BroadcastChannel, not postMessage, and persists the current index to localStorage on every goTo() call", () => {
+		expect(PRESENTATION_SCRIPT).toContain("new BroadcastChannel(");
+		expect(PRESENTATION_SCRIPT).toContain(
+			'presenterChannel.postMessage({ type: "slide", index: current })',
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"localStorage.setItem(CURRENT_SLIDE_STORAGE_KEY, String(current))",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"localStorage.getItem(CURRENT_SLIDE_STORAGE_KEY)",
+		);
+	});
+
+	it("updates a presenter-view window's own current index straight from a received broadcast, via render() -- never goTo(), which is reserved for the window actually navigating", () => {
+		const messageHandlerIndex = PRESENTATION_SCRIPT.indexOf(
+			'presenterChannel.addEventListener("message"',
+		);
+		expect(messageHandlerIndex).toBeGreaterThan(-1);
+		const handlerBody = PRESENTATION_SCRIPT.slice(
+			messageHandlerIndex,
+			messageHandlerIndex + 300,
+		);
+		expect(handlerBody).toContain("current = event.data.index");
+		expect(handlerBody).toContain("render();");
+		expect(handlerBody).not.toContain("goTo(");
+	});
+
+	it("moves the real current/next .slide elements into dedicated preview boxes rather than cloning them (cloning would duplicate ids like Mermaid's own SVG marker ids)", () => {
+		expect(PRESENTATION_SCRIPT).toContain("updatePresenterConsole");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"currentPreview.appendChild(slides[current])",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"nextPreview.appendChild(slides[current + 1])",
+		);
+		expect(PRESENTATION_SCRIPT).not.toContain("cloneNode");
+	});
+
+	it("populates the always-visible presenter notes panel via textContent only, never innerHTML with untrusted content", () => {
+		expect(PRESENTATION_SCRIPT).toContain('notesPanel.innerHTML = "";');
+		expect(PRESENTATION_SCRIPT).toContain(
+			"noteEl.textContent = note.textContent",
+		);
+	});
+
+	it("runs a plain count-up timer via setInterval and Date.now(), with no pause/resume/color-coding logic (an explicit v1 scope cut)", () => {
+		expect(PRESENTATION_SCRIPT).toContain("presenter-timer");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"setInterval(updateTimerDisplay, 1000)",
+		);
+		expect(PRESENTATION_SCRIPT).toContain("Date.now() - timerStartMs");
+	});
+
+	it("never references an external CDN from the presenter-view feature either (local-first constraint)", () => {
+		expect(PRESENTATION_SCRIPT).not.toMatch(/https?:\/\/cdn\./i);
+	});
+});

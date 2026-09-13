@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2026-09-14
+
+A backlog-prioritization pass: three ranked items from the outstanding
+feature backlog, picked and shipped together as one round.
+
+### Added
+
+- `--with-notes` on `pdf`/`png` export: presenter notes are appended as an
+  extra PDF page (or a sibling PNG) immediately after their slide, instead
+  of being silently dropped from every export as before. When a deck has
+  notes and `--with-notes` isn't passed, a one-line stderr note now says
+  so.
+- `nh-deck init [file]`: scaffolds a starter deck covering real theme/
+  transition frontmatter, all 4 layouts, inline and block KaTeX, a Mermaid
+  diagram, a presenter note, and a closing slide that documents
+  presentation mode's keyboard shortcuts and query params as slide
+  content. Refuses to overwrite an existing file unless `--force` is
+  passed.
+- A presenter-view window (press `p`/`P` in presentation mode): opens a
+  second, read-only window showing the current and next slide, the
+  current slide's presenter notes (always visible, no `?notes` needed),
+  and a count-up timer, synced live to the main presenting window via
+  `BroadcastChannel` and `localStorage`.
+
 ## [1.2.0] - 2026-09-13
 
 A second research-informed pass, picking up where 1.1.0 left off: a ground-truth
@@ -169,6 +193,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.3.0]: https://github.com/sairam0424/nh-deck/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/sairam0424/nh-deck/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/sairam0424/nh-deck/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/sairam0424/nh-deck/releases/tag/v1.0.0
