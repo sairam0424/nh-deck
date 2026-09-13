@@ -26,6 +26,9 @@ deckrun code-level deep-dive and 10 parallel best-practices research passes.
 - A deck with 2+ Mermaid diagrams no longer emits duplicate SVG marker ids
   (e.g. two `id="arrowhead"`s), which is invalid SVG/HTML and could let one
   diagram's markers leak into another's.
+- `nh-deck --version` now reports the actual package version instead of a
+  hardcoded `0.1.0`, which it reported unchanged through the entire 1.0.0
+  release.
 
 ### Added
 
