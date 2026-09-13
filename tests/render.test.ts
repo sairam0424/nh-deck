@@ -486,6 +486,17 @@ describe("generateHtml — Mermaid diagrams", () => {
 		expect(html).not.toContain("fonts.googleapis.com");
 	});
 
+	it("gives each mermaid diagram unique ids so a deck with 2+ diagrams has no duplicate id attributes", () => {
+		const html = generateHtml(
+			"```mermaid\nflowchart TD\n  A --> B\n```\n\n```mermaid\nflowchart TD\n  C --> D\n```",
+		);
+
+		const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((m) => m[1]);
+		const duplicates = ids.filter((id, index) => ids.indexOf(id) !== index);
+
+		expect(duplicates).toEqual([]);
+	});
+
 	it("renders a non-mermaid fenced code block exactly as before this phase", () => {
 		const html = generateHtml("```bash\necho hi\n```");
 

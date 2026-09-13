@@ -441,13 +441,25 @@ marked.use(markedKatex({ throwOnError: false }));
 // generateHtml() call can interleave and observe a stale value here.
 let currentMermaidColors: ThemeColors | undefined;
 
+// Reset alongside currentMermaidColors at the top of each generateHtml()
+// call (same module-level-state reasoning as the comment above) and
+// incremented once per mermaid code block, so renderMermaidDiagram can give
+// each diagram's SVG ids a unique prefix -- without this, two diagrams in
+// the same document both emit id="arrowhead", which is invalid HTML/SVG and
+// lets one diagram's marker definitions leak into another's.
+let mermaidDiagramCounter = 0;
+
 marked.use({
 	renderer: {
 		code({ text, lang, escaped }: Tokens.Code): string {
 			const langString = (lang ?? "").match(/^\S*/)?.[0];
 
 			if (langString === "mermaid") {
-				return renderMermaidDiagram(text, currentMermaidColors);
+				return renderMermaidDiagram(
+					text,
+					currentMermaidColors,
+					mermaidDiagramCounter++,
+				);
 			}
 
 			// Everything below exactly replicates marked@13.0.3's own default
@@ -503,6 +515,7 @@ export function generateHtml(
 	transitionName?: TransitionName,
 ): string {
 	currentMermaidColors = themeColors;
+	mermaidDiagramCounter = 0;
 	const tokens = marked.lexer(markdown);
 	const slidesHtml = splitIntoSlides(tokens)
 		.map((slideTokens) => {

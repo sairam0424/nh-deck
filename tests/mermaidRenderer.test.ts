@@ -29,7 +29,14 @@ describe("renderMermaidDiagram", () => {
 	it("still keeps the font-family fallback chain so text is not unstyled", () => {
 		const svg = renderMermaidDiagram("flowchart TD\n  A --> B");
 
-		expect(svg).toMatch(/font-family:\s*'?Inter'?,\s*system-ui,\s*sans-serif/);
+		// svgo's minifyStyles (part of the preset-default optimization pass)
+		// HTML-entity-encodes quotes inside the SVG's inline <style> text
+		// node, so "Inter" can come back as &quot;Inter&quot; rather than a
+		// literal quote character -- functionally identical CSS, so the
+		// assertion accepts either serialization.
+		expect(svg).toMatch(
+			/font-family:\s*(?:&quot;|['"])?Inter(?:&quot;|['"])?,\s*system-ui,\s*sans-serif/,
+		);
 	});
 
 	it("gracefully degrades invalid Mermaid syntax instead of throwing", () => {
@@ -59,5 +66,33 @@ describe("renderMermaidDiagram", () => {
 
 		expect(withColors).not.toBe(withoutColors);
 		expect(withColors).toContain("#2e3440");
+	});
+
+	it("prefixes every id/class with the given diagramIndex so multiple diagrams in one document never collide", () => {
+		const first = renderMermaidDiagram("flowchart TD\n  A --> B", undefined, 0);
+		const second = renderMermaidDiagram(
+			"flowchart TD\n  C --> D",
+			undefined,
+			1,
+		);
+
+		expect(first).toContain('id="nh-mermaid-0__arrowhead"');
+		expect(second).toContain('id="nh-mermaid-1__arrowhead"');
+
+		const idPattern = /\bid="([^"]+)"/g;
+		const firstIds = [...first.matchAll(idPattern)].map((m) => m[1]);
+		const secondIds = [...second.matchAll(idPattern)].map((m) => m[1]);
+		expect(firstIds.some((id) => secondIds.includes(id))).toBe(false);
+	});
+
+	it("defaults diagramIndex to 0 when not provided, preserving the existing call signature", () => {
+		const withDefault = renderMermaidDiagram("flowchart TD\n  A --> B");
+		const withExplicitZero = renderMermaidDiagram(
+			"flowchart TD\n  A --> B",
+			undefined,
+			0,
+		);
+
+		expect(withDefault).toBe(withExplicitZero);
 	});
 });
