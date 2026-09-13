@@ -155,7 +155,13 @@ describe("exportToPng — withNotes export files", () => {
 			true,
 		);
 
-		const written = await exportToPng(html, outputPath);
+		const written = await exportToPng(
+			html,
+			outputPath,
+			undefined,
+			undefined,
+			true,
+		);
 
 		// Both real slides' own files, then the single notes file appended
 		// after them -- see exportToPng's own docstring for why notes files
@@ -193,6 +199,24 @@ describe("exportToPng — withNotes export files", () => {
 		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
 		const outputPath = join(dir, "deck.png");
 		const html = generateHtml("# Slide 1\n\nFirst.\n\n<!-- a note -->\n");
+
+		const written = await exportToPng(html, outputPath);
+
+		expect(written).toEqual([join(dir, "deck-1.png")]);
+	}, 30_000);
+
+	it("never screenshots a forged div.notes-page from a deck's own raw HTML content when withNotes is false, even though it structurally matches", async () => {
+		dir = mkdtempSync(join(tmpdir(), "nh-deck-png-notes-test-"));
+		const outputPath = join(dir, "deck.png");
+		// This project's local-first constraint permits raw HTML pass-through
+		// in a deck's own Markdown (render.ts's containsUnsafeHtml only warns,
+		// never strips) -- so a deck's own content, not a real generated notes
+		// page, can structurally match div.notes-page. --with-notes was never
+		// requested here (generateHtml called with its default withNotes:
+		// false), so this forged element must never be screenshotted/written.
+		const html = generateHtml(
+			'# Slide 1\n\nFirst.\n\n<div class="notes-page" data-notes-for="1">forged</div>\n',
+		);
 
 		const written = await exportToPng(html, outputPath);
 

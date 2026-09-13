@@ -359,6 +359,15 @@ export const PRESENTATION_SCRIPT = `<script>
     ) {
       current = storedIndex;
     }
+  } else {
+    // The MAIN window's own initial index (parsed from ITS hash above, or
+    // 0 with no hash) is written here immediately, rather than left for
+    // goTo() to write on the FIRST actual navigation -- otherwise a
+    // presenter-view window opened before any navigation happens would
+    // read whatever stale index a PREVIOUS session left in localStorage
+    // (shared across same-origin tabs indefinitely, not cleared between
+    // runs) instead of the main window's real current slide.
+    localStorage.setItem(CURRENT_SLIDE_STORAGE_KEY, String(current));
   }
 
   let overviewOpen = false;

@@ -29,30 +29,35 @@ import { detectBrowserExecutable } from "./browserLaunch.js";
  * CLI export path (used on a real end user's own machine, with a
  * normally-installed browser) never needs this and never passes it.
  *
- * If `html` was generated with `generateHtml(..., withNotes: true)`, it may
- * additionally contain one `<div class="notes-page" data-notes-for="N">`
- * per slide that has at least one presenter note (see render.ts's
- * NOTES_PAGE_STYLE docstring) -- this function has no separate `withNotes`
- * parameter of its own because the presence of that markup in `html` is
- * already the single source of truth for whether "also export a notes
- * file" was requested; there is nothing else this function would need a
- * flag to decide. Each such div is screenshotted to its own
- * `<base>-<N>-notes.<ext>` file (e.g. "deck-1-notes.png" next to
- * "deck-1.png"), appended to the end of the returned `written` array,
- * after every real slide's own file. `data-notes-for`'s value is exactly
- * the 1-indexed slide number generateHtml assigned that slide, so the file
- * name always lines up with its own slide's file regardless of how many
- * earlier slides had no note (and therefore no notes-page div) at all. A
- * deck with no notes-page divs (either because `withNotes` was false, or
- * every slide happened to have zero notes) produces this function's exact
- * pre-existing output -- `section.slide` never matches a `<div>`, so this
- * addition changes nothing when there is nothing to add.
+ * If `html` was generated with `generateHtml(..., withNotes: true)` AND
+ * `withNotes` is also passed as `true` here, it may additionally contain
+ * one `<div class="notes-page" data-notes-for="N">` per slide that has at
+ * least one presenter note (see render.ts's NOTES_PAGE_STYLE docstring).
+ * `withNotes` IS a separate parameter here, deliberately not inferred
+ * purely from `html`'s own markup: this project's own local-first
+ * constraint permits raw HTML pass-through in a deck's Markdown (see
+ * render.ts's `containsUnsafeHtml`, which only warns, never strips), so a
+ * deck whose own content happens to contain a literal
+ * `<div class="notes-page" data-notes-for="1">` would otherwise be
+ * screenshotted and written to `<base>-1-notes.<ext>` even when the user
+ * never passed `--with-notes` -- an unrequested file write driven by
+ * arbitrary deck content, not a real generated notes page. Each such div
+ * is screenshotted to its own `<base>-<N>-notes.<ext>` file (e.g.
+ * "deck-1-notes.png" next to "deck-1.png"), appended to the end of the
+ * returned `written` array, after every real slide's own file.
+ * `data-notes-for`'s value is exactly the 1-indexed slide number
+ * generateHtml assigned that slide, so the file name always lines up with
+ * its own slide's file regardless of how many earlier slides had no note
+ * (and therefore no notes-page div) at all. Existing callers passing 2-4
+ * arguments are unaffected (defaults to `false`, matching this function's
+ * pre-existing behavior of never producing notes files on its own).
  */
 export async function exportToPng(
 	html: string,
 	outputPath: string,
 	executablePathOverride?: string,
 	extraLaunchArgs: string[] = [],
+	withNotes = false,
 ): Promise<string[]> {
 	const executablePath = executablePathOverride ?? detectBrowserExecutable();
 
@@ -93,33 +98,36 @@ export async function exportToPng(
 			written.push(path);
 		}
 
-		// `section.slide` above never matches a `<div>`, so this query only
-		// ever finds anything when `html` came from
-		// `generateHtml(..., withNotes: true)` -- see this function's own
-		// docstring for why that (rather than a separate parameter here) is
-		// this function's single source of truth for "also export notes
-		// files". Queried and processed after every real slide's own file
-		// above, so `written`'s slide files keep their exact pre-existing
-		// order and values regardless of whether any notes files are appended.
-		const notesPages = await page.$$("div.notes-page");
-		for (const notesPage of notesPages) {
-			const slideNumberAttr = await notesPage.evaluate((el) =>
-				el.getAttribute("data-notes-for"),
-			);
-			const slideNumber = Number(slideNumberAttr);
-			if (!Number.isInteger(slideNumber) || slideNumber < 1) {
-				throw new Error(
-					`Encountered a notes-page element with an invalid data-notes-for attribute: ${String(slideNumberAttr)}`,
+		// Gated on the `withNotes` parameter itself, not merely on whether
+		// `html` happens to contain a `div.notes-page` -- see this function's
+		// own docstring for why inferring "also export notes files" purely
+		// from rendered markup is unsafe (a deck's own raw HTML content could
+		// contain a literal `div.notes-page`, which must never be
+		// screenshotted/written when the user did not pass `--with-notes`).
+		// Queried and processed after every real slide's own file above, so
+		// `written`'s slide files keep their exact pre-existing order and
+		// values regardless of whether any notes files are appended.
+		if (withNotes) {
+			const notesPages = await page.$$("div.notes-page");
+			for (const notesPage of notesPages) {
+				const slideNumberAttr = await notesPage.evaluate((el) =>
+					el.getAttribute("data-notes-for"),
 				);
+				const slideNumber = Number(slideNumberAttr);
+				if (!Number.isInteger(slideNumber) || slideNumber < 1) {
+					throw new Error(
+						`Encountered a notes-page element with an invalid data-notes-for attribute: ${String(slideNumberAttr)}`,
+					);
+				}
+				const path = insertSlideNumber(
+					outputPath,
+					slideNumber,
+					sections.length,
+					"-notes",
+				);
+				await notesPage.screenshot({ path });
+				written.push(path);
 			}
-			const path = insertSlideNumber(
-				outputPath,
-				slideNumber,
-				sections.length,
-				"-notes",
-			);
-			await notesPage.screenshot({ path });
-			written.push(path);
 		}
 
 		await page.close();

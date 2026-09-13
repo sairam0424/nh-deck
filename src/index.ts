@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodeUtil from "node:util";
@@ -254,12 +254,21 @@ program
 	.action((file: string | undefined, options: { force?: boolean }) => {
 		const targetFile = file ?? DEFAULT_INIT_FILENAME;
 		try {
-			if (existsSync(targetFile) && !options.force) {
-				throw new Error(
-					`file '${targetFile}' already exists; pass --force to overwrite it`,
-				);
+			try {
+				writeFileSync(targetFile, STARTER_DECK_TEMPLATE, {
+					flag: options.force ? "w" : "wx",
+				});
+			} catch (writeError) {
+				if (
+					!options.force &&
+					(writeError as NodeJS.ErrnoException).code === "EEXIST"
+				) {
+					throw new Error(
+						`file '${targetFile}' already exists; pass --force to overwrite it`,
+					);
+				}
+				throw writeError;
 			}
-			writeFileSync(targetFile, STARTER_DECK_TEMPLATE);
 			process.stdout.write(
 				`${style("green", `Wrote starter deck to ${targetFile}`)}\n`,
 			);
@@ -555,7 +564,13 @@ program
 				);
 				const outputPath = resolveOutputPath(file, output, "png");
 
-				const written = await exportToPng(html, outputPath);
+				const written = await exportToPng(
+					html,
+					outputPath,
+					undefined,
+					undefined,
+					withNotes,
+				);
 				process.stdout.write(
 					`${style(
 						"green",

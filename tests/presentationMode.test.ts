@@ -1369,6 +1369,32 @@ describe("presentation mode — presenter view (separate window)", () => {
 	);
 
 	it(
+		"a presenter-view page opened BEFORE any navigation happens in a fresh main window shows that window's real current slide, not a stale index left over by an earlier session at the same origin",
+		async () => {
+			const staleSessionPage = await openPresentationPage(
+				generateHtml(THREE_SLIDE_DECK),
+			);
+			await staleSessionPage.keyboard.press("ArrowRight");
+			await staleSessionPage.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(staleSessionPage)).toBe("Slide 3");
+
+			// A genuinely fresh main-window session at the SAME origin/server,
+			// with no hash of its own -- localStorage still holds "2" from the
+			// session above at this point, until this window's own startup
+			// code runs.
+			const freshMainPage = await openSecondPresentationPage("/?present");
+			expect(await activeSlideHeading(freshMainPage)).toBe("Slide 1");
+
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			expect(await presenterCurrentHeading(presenterPage)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"the presenter-view page never drives its own navigation -- keyboard and click input inside it have no effect on either window",
 		async () => {
 			const mainPage = await openPresentationPage(
