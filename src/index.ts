@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { styleText } from "node:util";
+import * as nodeUtil from "node:util";
 import { Command } from "commander";
 import open from "open";
 import {
@@ -36,6 +36,24 @@ const UNSAFE_HTML_WARNING =
 	"nh-deck: warning: this deck contains raw HTML, which is rendered as-is (including any <script> tags). Only open decks from sources you trust.\n";
 
 /**
+ * `node:util.styleText` was added in Node 20.12.0 -- this repo's declared
+ * `engines.node` floor is `>=20`, which includes earlier 20.x patches where
+ * the named export doesn't exist. Accessing it through the namespace import
+ * (rather than a static named import) and feature-detecting at call time
+ * avoids a load-time crash on those older patches; text is returned
+ * unstyled there instead of colorized, which is a fully acceptable
+ * degradation for a cosmetic feature.
+ */
+function style(
+	format: Parameters<typeof nodeUtil.styleText>[0],
+	text: string,
+): string {
+	return typeof nodeUtil.styleText === "function"
+		? nodeUtil.styleText(format, text)
+		: text;
+}
+
+/**
  * Formats a caught action-handler error for `nh-deck: <message>` stderr
  * output. An ENOENT failure reading the input `<file>` argument gets a
  * clean, human-authored message instead of the raw Node.js syscall wording
@@ -48,6 +66,7 @@ const UNSAFE_HTML_WARNING =
  * when a relative path was passed in, while POSIX keeps the relative string
  * as-passed -- a raw `===` comparison only matches on POSIX.
  */
+
 function formatActionError(error: unknown, file: string): string {
 	const errnoPath = (error as NodeJS.ErrnoException)?.path;
 	if (
@@ -223,7 +242,7 @@ program
 				);
 
 				process.stdout.write(
-					`${styleText("green", `nh-deck serving ${file} at ${url}`)}\n`,
+					`${style("green", `nh-deck serving ${file} at ${url}`)}\n`,
 				);
 
 				if (options.watch) {
@@ -266,7 +285,7 @@ program
 				}
 			} catch (error) {
 				process.stderr.write(
-					`${styleText("red", formatActionError(error, file))}\n`,
+					`${style("red", formatActionError(error, file))}\n`,
 				);
 				process.exitCode = 1;
 			}
@@ -309,11 +328,11 @@ program
 
 				await exportToPdf(html, outputPath);
 				process.stdout.write(
-					`${styleText("green", `Wrote PDF to ${outputPath}`)}\n`,
+					`${style("green", `Wrote PDF to ${outputPath}`)}\n`,
 				);
 			} catch (error) {
 				process.stderr.write(
-					`${styleText("red", formatActionError(error, file))}\n`,
+					`${style("red", formatActionError(error, file))}\n`,
 				);
 				process.exitCode = 1;
 			}
@@ -356,14 +375,14 @@ program
 
 				const written = await exportToPng(html, outputPath);
 				process.stdout.write(
-					`${styleText(
+					`${style(
 						"green",
 						`Wrote ${written.length} PNG file(s), starting at ${written[0]}`,
 					)}\n`,
 				);
 			} catch (error) {
 				process.stderr.write(
-					`${styleText("red", formatActionError(error, file))}\n`,
+					`${style("red", formatActionError(error, file))}\n`,
 				);
 				process.exitCode = 1;
 			}

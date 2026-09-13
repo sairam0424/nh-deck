@@ -35,17 +35,46 @@ function withReloadScript(html: string): string {
 		: `${html}${RELOAD_SCRIPT}`;
 }
 
+interface EncodingPreference {
+	coding: string;
+	q: number;
+}
+
+function parseAcceptEncoding(header: string): EncodingPreference[] {
+	return header
+		.split(",")
+		.map((entry) => entry.trim())
+		.filter((entry) => entry.length > 0)
+		.map((entry) => {
+			const [coding, ...params] = entry.split(";").map((part) => part.trim());
+			const qParam = params.find((param) =>
+				param.toLowerCase().startsWith("q="),
+			);
+			const q = qParam ? Number.parseFloat(qParam.slice(2)) : 1;
+			return { coding: coding.toLowerCase(), q: Number.isNaN(q) ? 1 : q };
+		});
+}
+
 /**
- * Checked against the request itself rather than assumed -- only compress
- * when the client actually declares gzip support, so a client that can't
- * decode it keeps getting a plain, uncompressed response.
+ * RFC 7231 §5.3.4 Accept-Encoding negotiation for gzip specifically: an
+ * explicit "gzip" entry's q-value (including q=0, which explicitly forbids
+ * it) always takes precedence over a "*" wildcard entry, and coding names
+ * are matched case-insensitively and exactly -- a naive prefix match would
+ * wrongly accept "gzip;q=0" (explicitly disallowed) or an unrelated coding
+ * like "gzip-extra".
  */
 function acceptsGzip(req: http.IncomingMessage): boolean {
 	const header = req.headers["accept-encoding"];
-	return (
-		typeof header === "string" &&
-		header.split(",").some((encoding) => encoding.trim().startsWith("gzip"))
-	);
+	if (typeof header !== "string") {
+		return false;
+	}
+	const preferences = parseAcceptEncoding(header);
+	const explicitGzip = preferences.find((pref) => pref.coding === "gzip");
+	if (explicitGzip) {
+		return explicitGzip.q > 0;
+	}
+	const wildcard = preferences.find((pref) => pref.coding === "*");
+	return wildcard ? wildcard.q > 0 : false;
 }
 
 function sendHtml(

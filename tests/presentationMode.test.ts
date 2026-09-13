@@ -466,6 +466,37 @@ describe("presentation mode", () => {
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"ignores 'o' and clicks on the normal continuous-scroll view after Escape has exited presentation mode (regression: the keydown/click listeners are attached once at load and never detached, so without a presenting guard they kept firing after exit)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("Escape");
+			await page.keyboard.press("o");
+
+			const stateAfterO = await page.evaluate(() => ({
+				hasOverviewClass: document.body.classList.contains("overview"),
+				hasPresentingClass: document.body.classList.contains("presenting"),
+			}));
+			expect(stateAfterO.hasOverviewClass).toBe(false);
+			expect(stateAfterO.hasPresentingClass).toBe(false);
+
+			// A click on the normal document must not behave like a
+			// presentation-mode "advance to next slide" click either.
+			// exitPresentationMode() only removes body.presenting -- it doesn't
+			// clear whichever slide's leftover .is-active from before the exit,
+			// so the correct regression signal is that .is-active does NOT move
+			// to a different slide as a result of this click (which is exactly
+			// what the buggy unguarded click listener's goTo(current + 1, false)
+			// would have done).
+			const headingBeforeClick = await activeSlideHeading(page);
+			await page.click("body");
+			const headingAfterClick = await activeSlideHeading(page);
+			expect(headingAfterClick).toBe(headingBeforeClick);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("presentation mode — touch swipe navigation", () => {

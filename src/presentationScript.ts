@@ -150,6 +150,16 @@ export const PRESENTATION_SCRIPT = `<script>
   };
 
   document.addEventListener("keydown", (event) => {
+    // Inert once exitPresentationMode() has removed body.presenting -- this
+    // listener, like every listener in this script, is attached once and
+    // never detached (see the touchend listener's identical guard/comment
+    // below), so without this check, pressing "o" on the normal
+    // continuous-scroll view (reached via Escape, without a page reload)
+    // would still call openOverview(), turning the ordinary document into a
+    // grid of clipped thumbnails outside presentation mode entirely.
+    if (!document.body.classList.contains("presenting")) {
+      return;
+    }
     // Escape and "o" both need the "is overview open" precedence check
     // BEFORE anything else runs: Escape must close an open overview instead
     // of also exiting presentation mode in the same keypress (see
@@ -191,6 +201,14 @@ export const PRESENTATION_SCRIPT = `<script>
   });
 
   document.addEventListener("click", (event) => {
+    // Same "inert once exitPresentationMode() has removed body.presenting"
+    // guard as the keydown listener above -- without it, clicking anywhere
+    // on the normal continuous-scroll view (reached via Escape) would still
+    // call goTo(current + 1, false), advancing a "current slide" concept
+    // that page no longer has.
+    if (!document.body.classList.contains("presenting")) {
+      return;
+    }
     if (overviewOpen) {
       const clickedSlide = event.target.closest(".slide");
       if (!clickedSlide) {

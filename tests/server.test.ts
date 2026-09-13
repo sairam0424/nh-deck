@@ -89,6 +89,72 @@ describe("startServer — gzip compression", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
+	it("does NOT gzip-compress when the client explicitly disallows it with gzip;q=0", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip;q=0",
+		});
+
+		expect(res.headers["content-encoding"]).toBeUndefined();
+		expect(body.toString("utf8")).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("matches the gzip coding case-insensitively (GZip)", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res } = await getWithHeaders(url, { "Accept-Encoding": "GZip" });
+
+		expect(res.headers["content-encoding"]).toBe("gzip");
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("does not treat an unrelated coding token like gzip-extra as gzip support", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip-extra",
+		});
+
+		expect(res.headers["content-encoding"]).toBeUndefined();
+		expect(body.toString("utf8")).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("permits gzip via a bare wildcard (*;q=1) when no explicit gzip entry exists", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res } = await getWithHeaders(url, {
+			"Accept-Encoding": "*;q=1",
+		});
+
+		expect(res.headers["content-encoding"]).toBe("gzip");
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("lets an explicit gzip;q=0 override a permissive wildcard (*;q=1)", async () => {
+		const html = "<!DOCTYPE html><html><body><p>hello</p></body></html>";
+		const { server, url } = await startServer(html, 0);
+
+		const { res, body } = await getWithHeaders(url, {
+			"Accept-Encoding": "gzip;q=0,*;q=1",
+		});
+
+		expect(res.headers["content-encoding"]).toBeUndefined();
+		expect(body.toString("utf8")).toBe(html);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
 	it("still gzip-compresses the reload-injected HTML in watch mode", async () => {
 		const html = "<!DOCTYPE html><html><body><p>v1</p></body></html>";
 		const { server, url } = await startServer(html, 0, { watch: true });
