@@ -5,6 +5,46 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-09-14
+
+Phase 2 of the backlog-prioritization pass: the remaining ranked quick wins.
+
+### Added
+
+- `nh-deck list-themes`: prints the fixed theme names from the command
+  line, noting the default, without rendering anything. README now shows a
+  screenshot gallery of all 4 themes.
+- Jump-to-slide in presentation mode: press `g`, type a slide number, then
+  Enter to jump directly to it (an out-of-range number clamps to the last
+  slide; Escape cancels a pending jump). Documented in the `?` help
+  overlay alongside the other shortcuts.
+- `nh-deck render` now prints `?present`/`?notes` hints after it starts
+  serving, so both opt-in URL features are discoverable without reading
+  the README. The `?notes` hint only appears when the deck actually has
+  presenter notes.
+- `ACCESSIBILITY.md`: an honest, sourced snapshot of what's supported
+  (keyboard-only navigation, the shortcuts overlay, `prefers-reduced-motion`,
+  `aria-hidden` fragment sync, WCAG AA contrast verification) and what
+  isn't yet (no screen-reader testing, no WCAG conformance claim, no
+  axe-core in CI).
+
+### Fixed
+
+- `--watch` re-renders triggered by a file save were completely silent,
+  and a genuine render error (as opposed to a transient mid-save read
+  glitch) was swallowed with no trace. A successful rebuild now prints a
+  short confirmation; a real render error prints a warning without
+  tearing down the server.
+
+### Verified
+
+- PDF exports already carry the deck's title as real PDF document
+  metadata (the file's own `/Info Title`, not just the source HTML's
+  `<title>` tag) — confirmed against a real exported file and locked in
+  with a regression test.
+- PNG dimension-uniformity coverage (the v1.2.0 landscape-geometry fix)
+  already runs on every PR across the full CI matrix; no gap found.
+
 ## [1.3.0] - 2026-09-14
 
 A backlog-prioritization pass: three ranked items from the outstanding
@@ -193,6 +233,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.4.0]: https://github.com/sairam0424/nh-deck/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/sairam0424/nh-deck/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/sairam0424/nh-deck/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/sairam0424/nh-deck/compare/v1.0.0...v1.1.0
