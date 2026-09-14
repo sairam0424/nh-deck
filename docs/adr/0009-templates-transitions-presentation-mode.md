@@ -251,12 +251,11 @@ Concretely, as landed:
 
 **Bad / open risks:**
 
-- **There is no in-UI way to exit presentation mode.** Once `?present` is
-  in the URL, leaving it is a manual URL edit (removing the query
-  parameter) — explicitly out of scope for v1
-  (`docs/specs/templates-transitions-design.md` §7). A presenter unfamiliar
-  with the URL bar has no on-screen affordance to return to the
-  continuous-scroll view.
+- ~~There is no in-UI way to exit presentation mode.~~ **Resolved in
+  v1.1.0** — Escape now exits presentation mode directly, back to the
+  continuous-scroll view, with no URL edit and no full page reload; see
+  `CHANGELOG.md`'s v1.1.0 entry and `exitPresentationMode()` in
+  `src/presentationScript.ts`.
 - **Unrecognized layout names are silently ignored, with no warning at
   all — the one behavior asymmetry with the theme and transition
   systems, which both warn-and-fall-back on an unrecognized name.** This
