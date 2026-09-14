@@ -10,6 +10,7 @@ import {
 	debounce,
 	parsePort,
 	resolveOutputPath,
+	runWatchedRerender,
 	watchFileForChanges,
 } from "./cliHelpers.js";
 import { parseFrontmatter } from "./frontmatter.js";
@@ -397,35 +398,60 @@ program
 				);
 
 				if (options.watch) {
+					// Every file-change event fires this -- including, on an editor
+					// with autosave, every keystroke -- so the outcome is reported in
+					// exactly one short line, not a multi-line dump. runWatchedRerender
+					// (cliHelpers.ts) does the read-vs-render classification:
+					// - success: a brief green confirmation, so a save is never
+					//   followed by silence with no sign anything happened.
+					// - transient (ENOENT while reading `file` -- an atomic-save
+					//   editor's rename briefly making the path disappear mid-save):
+					//   stays exactly as silent as before this change; the next
+					//   change event retries.
+					// - error (anything else, including generateHtml/frontmatter/
+					//   theme/transition rejecting the new content for a real
+					//   reason): a red warning naming the actual problem, without
+					//   tearing down the server -- updateHtml is never reached in this
+					//   branch, so the last-known-good HTML keeps being served.
 					const rerender = debounce(() => {
-						try {
-							const updatedRawMarkdown = readFileSync(file, "utf8");
-							const { frontmatter: updatedFrontmatter, body: updatedMarkdown } =
-								parseFrontmatter(updatedRawMarkdown);
-							const { colors: updatedThemeColors } = computeEffectiveTheme(
-								updatedFrontmatter.theme,
-								options.theme,
-								customCss,
-							);
-							const { name: updatedTransitionName } =
-								computeEffectiveTransition(
-									updatedFrontmatter.transition,
-									options.transition,
+						const result = runWatchedRerender(
+							() => readFileSync(file, "utf8"),
+							(updatedRawMarkdown) => {
+								const {
+									frontmatter: updatedFrontmatter,
+									body: updatedMarkdown,
+								} = parseFrontmatter(updatedRawMarkdown);
+								const { colors: updatedThemeColors } = computeEffectiveTheme(
+									updatedFrontmatter.theme,
+									options.theme,
 									customCss,
 								);
-							updateHtml(
-								generateHtml(
-									updatedMarkdown,
-									file,
-									customCss,
-									updatedThemeColors,
-									updatedTransitionName,
-									effectiveCssVars,
-								),
+								const { name: updatedTransitionName } =
+									computeEffectiveTransition(
+										updatedFrontmatter.transition,
+										options.transition,
+										customCss,
+									);
+								updateHtml(
+									generateHtml(
+										updatedMarkdown,
+										file,
+										customCss,
+										updatedThemeColors,
+										updatedTransitionName,
+										effectiveCssVars,
+									),
+								);
+							},
+						);
+						if (result.status === "success") {
+							process.stdout.write(
+								`${style("green", `nh-deck: rebuilt ${file}`)}\n`,
 							);
-						} catch {
-							// A transient read failure (e.g. mid-save) is not fatal — the
-							// next file-change event retries.
+						} else if (result.status === "error") {
+							process.stderr.write(
+								`${style("red", formatActionError(result.error, file))}\n`,
+							);
 						}
 					}, 100);
 					const watcher = watchFileForChanges(file, rerender);

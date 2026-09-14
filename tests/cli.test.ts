@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { runWatchedRerender } from "../src/cliHelpers.js";
 import { generateHtml } from "../src/render.js";
 
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
@@ -1836,6 +1837,12 @@ describe("CLI: nh-deck render --watch", () => {
 				{ cwd: repoRoot },
 			);
 			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
 			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
 			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
 			if (!url) {
@@ -1847,8 +1854,9 @@ describe("CLI: nh-deck render --watch", () => {
 
 			// Delete the watched file right as a change event fires, so the
 			// debounced re-render's readFileSync hits ENOENT mid-"save" -- the
-			// exact transient-failure shape the empty catch in the --watch
-			// rerender closure (src/index.ts) exists to survive.
+			// exact transient-failure shape runWatchedRerender's ENOENT check
+			// (src/cliHelpers.ts), wired up from src/index.ts's --watch block,
+			// exists to survive.
 			rmSync(deckPath, { force: true });
 			// Wait comfortably past the 100ms debounce window so the failed
 			// re-render attempt actually runs before asserting survival.
@@ -1863,6 +1871,11 @@ describe("CLI: nh-deck render --watch", () => {
 			const bodyAfterFailure = await fetchBody(url);
 			expect(bodyAfterFailure).toContain("Original");
 
+			// This transient, mid-rename ENOENT must stay exactly as silent as
+			// it always has been -- no stderr output at all, unlike a genuine
+			// render error (see the runWatchedRerender describe block below).
+			expect(stderr).toBe("");
+
 			// A subsequent valid save must still be picked up: this proves the
 			// watcher/server genuinely survived (retried on the next change
 			// event), not merely that it hadn't crashed yet.
@@ -1871,6 +1884,62 @@ describe("CLI: nh-deck render --watch", () => {
 
 			const recoveredBody = await fetchBody(url);
 			expect(recoveredBody).toContain("Recovered");
+
+			// Still silent even after the recovery -- the earlier ENOENT never
+			// produced a delayed/queued warning either.
+			expect(stderr).toBe("");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"prints a short stdout note on each successful debounced re-render, naming the changed file",
+		async () => {
+			const dir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-watch-rebuilt-note-"),
+			);
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "# Original\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const rebuiltCount = () =>
+				(stdout.match(/nh-deck: rebuilt/g) ?? []).length;
+
+			// Not printed on the initial render -- only on a debounced
+			// re-render triggered by an actual file-change event.
+			expect(rebuiltCount()).toBe(0);
+
+			writeFileSync(deckPath, "# Changed\n");
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			expect(rebuiltCount()).toBe(1);
+			expect(stdout).toContain(`nh-deck: rebuilt ${deckPath}`);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -1937,6 +2006,81 @@ describe("CLI: nh-deck render --watch", () => {
 		},
 		WATCH_TEST_TIMEOUT_MS,
 	);
+
+	// The three cases below exercise runWatchedRerender (src/cliHelpers.ts)
+	// directly rather than through a spawned CLI process. index.ts's --watch
+	// block wires this same function up to real readFileSync/generateHtml
+	// calls; there is currently no real Markdown/frontmatter input that makes
+	// generateHtml (or the frontmatter/theme/transition computation around
+	// it) throw for a genuine reason -- parseFrontmatter and
+	// resolveThemeName/resolveTransitionName all degrade gracefully instead of
+	// throwing, and the one spot generateHtml does throw (a --css-vars file
+	// containing a literal "</style") is fixed content read once at startup,
+	// not something a watched *deck* file save can trigger. A mocked `render`
+	// callback is the reliable way to exercise the "a real render error
+	// happened" branch, matching this file's own precedent of importing
+	// generateHtml directly (see the top-of-file import) rather than only ever
+	// driving behavior through a spawned subprocess.
+	describe("runWatchedRerender", () => {
+		it("reports success and applies the new HTML when the render step completes", () => {
+			const applied: string[] = [];
+			const result = runWatchedRerender(
+				() => "# still valid markdown",
+				(content) => {
+					applied.push(content);
+				},
+			);
+
+			expect(result.status).toBe("success");
+			expect(applied).toEqual(["# still valid markdown"]);
+		});
+
+		it("classifies an ENOENT read failure as transient, matching today's silent retry", () => {
+			const readFile = (): string => {
+				const error = new Error(
+					"ENOENT: no such file or directory, open 'deck.md'",
+				) as NodeJS.ErrnoException;
+				error.code = "ENOENT";
+				throw error;
+			};
+
+			const result = runWatchedRerender(readFile, () => {
+				throw new Error(
+					"render must not be reached when the read itself failed",
+				);
+			});
+
+			expect(result.status).toBe("transient");
+		});
+
+		it(
+			"reports a genuine render-step failure (a mocked generateHtml rejection) as an error, " +
+				"without ever applying it",
+			() => {
+				const applied: string[] = [];
+				const renderError = new Error(
+					"mocked: a construct generateHtml itself rejects",
+				);
+
+				const result = runWatchedRerender(
+					() => "# content generateHtml will reject",
+					() => {
+						// Mirrors index.ts's own shape -- updateHtml(generateHtml(...))
+						// -- where a throw from generateHtml means updateHtml's argument
+						// never finishes evaluating, so updateHtml is never called at
+						// all and the previously-served HTML is left untouched.
+						throw renderError;
+					},
+				);
+
+				expect(result.status).toBe("error");
+				expect((result as { status: "error"; error: unknown }).error).toBe(
+					renderError,
+				);
+				expect(applied).toEqual([]);
+			},
+		);
+	});
 });
 
 describe("CLI: theme selection", () => {
