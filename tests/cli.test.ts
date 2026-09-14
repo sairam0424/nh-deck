@@ -2066,7 +2066,20 @@ describe("CLI: nh-deck render --watch", () => {
 				stdout += chunk.toString();
 			});
 
-			await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			// Every sibling --watch test below fetches the served body once
+			// before writing a changed file, and this is the one test in this
+			// group that did not -- observed live to matter: on some CI jobs
+			// this test's rebuilt-note poll ran its full timeout and still saw
+			// zero events, while every sibling test using this exact fetch
+			// warm-up passed reliably on the same jobs. Discarding the result
+			// here still exercises the same warm-up the passing tests get for
+			// free from their own initial-body assertion.
+			await fetchBody(url);
 			const rebuiltCount = () =>
 				(stdout.match(/nh-deck: rebuilt/g) ?? []).length;
 
