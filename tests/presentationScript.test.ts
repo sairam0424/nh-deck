@@ -282,12 +282,25 @@ describe("PRESENTATION_SCRIPT — presenter view", () => {
 		);
 	});
 
-	it("runs a plain count-up timer via setInterval and Date.now(), with no pause/resume/color-coding logic (an explicit v1 scope cut)", () => {
+	it("runs a pausable count-up timer via setInterval and Date.now(), with an opt-in target-duration color coding, not a fixed elapsed-time threshold", () => {
 		expect(PRESENTATION_SCRIPT).toContain("presenter-timer");
 		expect(PRESENTATION_SCRIPT).toContain(
 			"setInterval(updateTimerDisplay, 1000)",
 		);
-		expect(PRESENTATION_SCRIPT).toContain("Date.now() - timerStartMs");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"(pausedAtMs ?? Date.now()) - timerStartMs - accumulatedPausedMs",
+		);
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-paused"');
+		// Color coding must be gated on a presenter-typed target duration --
+		// never on elapsed time alone -- so a deck with no duration configured
+		// gets zero color change, matching the local-first opt-in convention
+		// every other presentation-mode feature already follows.
+		expect(PRESENTATION_SCRIPT).toContain("presenter-timer-duration");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"nh-deck-presenter-timer-duration-minutes",
+		);
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-near-target"');
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-over-target"');
 	});
 
 	it("never references an external CDN from the presenter-view feature either (local-first constraint)", () => {

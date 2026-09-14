@@ -608,6 +608,9 @@ const PRESENTER_VIEW_STYLE = `
       position: fixed;
       top: 1rem;
       right: 1rem;
+      display: flex;
+      align-items: center;
+      gap: 0.4rem;
       background: var(--nh-code-bg);
       color: var(--nh-fg);
       border: 1px solid var(--nh-border);
@@ -615,6 +618,45 @@ const PRESENTER_VIEW_STYLE = `
       padding: 0.25rem 0.6rem;
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.9rem;
+    }
+    /* A <button>, not a <span> (see presentationScript.ts), for real
+       keyboard operability -- these resets strip the browser's own default
+       button chrome (background/border/padding/font) back to plain
+       styled text so it reads identically to before this was a button. */
+    .presenter-timer-display {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      font: inherit;
+      color: inherit;
+      cursor: pointer;
+    }
+    .presenter-timer.is-paused .presenter-timer-display {
+      opacity: 0.55;
+    }
+    /* Fixed amber/red, not theme-derived: this project's theme palette
+       (themes.ts) has no warning/danger semantic to reference, and a
+       presenter needs "running late" to look the same regardless of which
+       of the 4 themes is active -- matching pdfExport.ts's own hardcoded
+       page-number-footer gray for the same "no theme-appropriate variable
+       exists for this" reason. */
+    .presenter-timer.is-near-target .presenter-timer-display {
+      color: #d97706;
+    }
+    .presenter-timer.is-over-target .presenter-timer-display {
+      color: #dc2626;
+    }
+    .presenter-timer-duration {
+      width: 3.4rem;
+      background: transparent;
+      color: var(--nh-muted);
+      border: 1px solid var(--nh-border);
+      border-radius: 3px;
+      font: inherit;
+      font-size: 0.75rem;
+      padding: 0.1rem 0.3rem;
+      cursor: text;
     }
     body.presenter-view .presenter-preview .slide {
       display: block !important;
