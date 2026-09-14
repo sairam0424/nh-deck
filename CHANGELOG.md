@@ -16,9 +16,10 @@ the presenter-view window shipped in v1.3.0.
   display to freeze it, click again to resume from where it left off.
 - An optional target duration (in minutes), typed into a small field next
   to the timer, recolors the display amber past 80% of that duration and
-  red once over it. Entirely opt-in and local to the browser (persisted
-  to localStorage, no CLI flag or frontmatter key) -- with no duration
-  set, the timer looks exactly as it always has.
+  red once it reaches or exceeds the full duration. Entirely opt-in and
+  local to the browser (persisted to localStorage, no CLI flag or
+  frontmatter key) -- with no duration set, the timer looks exactly as
+  it always has.
 
 ## [1.4.1] - 2026-09-14
 
