@@ -1479,6 +1479,69 @@ describe("generateHtml — fragment (incremental reveal) markers", () => {
 		expect(html).toMatch(/<li class="fragment"><p>Item 1<\/p>\s*<\/li>/);
 	});
 
+	// Regression: a marker trailing on the SAME LINE as its bullet/paragraph
+	// text -- the exact syntax CHANGELOG.md documents ("mark a bullet ...
+	// with a trailing <!-- fragment --> comment") and the most natural way
+	// to author one -- used to be silently dropped with no fragment class
+	// applied anywhere. Root cause: marked's lexer wraps a single-line
+	// bullet's content in an extra "text" (tight list) or "paragraph"
+	// (loose list, and any top-level paragraph) block token, nesting the
+	// marker ONE level deeper inside that wrapper's own inline `.tokens`
+	// array rather than as a direct sibling -- one level past where the
+	// original trailing-marker check looked.
+	it('applies class="fragment" to a tight bullet with a same-line trailing marker (the documented syntax)', () => {
+		const html = generateHtml(
+			"- Item 1 <!-- fragment -->\n- Item 2\n- Item 3\n",
+		);
+
+		// The trailing space before "</li>" is marked's own inline text run
+		// (the literal text between "Item 1" and the marker) -- nh-deck does
+		// not rewrite user content, so it is preserved rather than trimmed.
+		expect(html).toContain('<li class="fragment">Item 1 </li>');
+		expect(html).toContain("<li>Item 2</li>");
+		expect(html).toContain("<li>Item 3</li>");
+		expect(html).not.toContain("<!-- fragment -->");
+		expect((html.match(/<ul>/g) ?? []).length).toBe(1);
+	});
+
+	it("marks each bullet independently when every item has its own same-line trailing marker", () => {
+		const html = generateHtml(
+			"- Item 1 <!-- fragment -->\n- Item 2 <!-- fragment -->\n- Item 3\n",
+		);
+
+		expect(html).toContain('<li class="fragment">Item 1 </li>');
+		expect(html).toContain('<li class="fragment">Item 2 </li>');
+		expect(html).toContain("<li>Item 3</li>");
+	});
+
+	it("marks a loose list item the same way when its trailing marker is same-line rather than on its own line", () => {
+		const html = generateHtml("- Item 1 <!-- fragment -->\n\n- Item 2\n");
+
+		expect(html).toMatch(/<li class="fragment"><p>Item 1 <\/p>\s*<\/li>/);
+	});
+
+	it("marks the whole bullet, not just the paragraph, when a same-line trailing marker ends a multi-paragraph list item", () => {
+		const html = generateHtml(
+			"- First paragraph.\n\n  Second paragraph. <!-- fragment -->\n- Item 2\n",
+		);
+
+		expect(html).toContain("<p>First paragraph.</p>");
+		expect(html).toContain("<p>Second paragraph. </p>");
+		expect(html).toMatch(/<li class="fragment">/);
+		expect(html).not.toMatch(/<p class="fragment">/);
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
+	it('applies class="fragment" to a top-level paragraph with a same-line trailing marker', () => {
+		const html = generateHtml(
+			"First paragraph. <!-- fragment -->\n\nSecond paragraph.\n",
+		);
+
+		expect(html).toContain('<p class="fragment">First paragraph. </p>');
+		expect(html).toContain("<p>Second paragraph.</p>");
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
 	it('applies class="fragment" to a code fence immediately preceded by a marker', () => {
 		const html = generateHtml("<!-- fragment -->\n\n```\nsome code\n```\n");
 
