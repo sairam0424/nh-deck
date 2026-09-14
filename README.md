@@ -130,6 +130,8 @@ nh-deck render deck.md --transition fade
 
 Transitions only apply inside presentation mode on `render` — `pdf` and `png` never read the flag, since a static export has no discrete slide changes to animate between. `--css` wins over both layout and transition CSS, same as it wins over themes. Slide transitions also respect `prefers-reduced-motion`, substituting a fast crossfade instead of the full animation. See `docs/adr/0009-templates-transitions-presentation-mode.md` for the full design rationale.
 
+Presentation mode is fully keyboard-operable, with a `?`-triggered shortcuts overlay and screen-reader-facing `aria-hidden` sync for fragment reveal. See `ACCESSIBILITY.md` for this project's full accessibility posture — what's actually supported today and what isn't yet verified.
+
 ## Current limitations
 
 - **The 4 themes, 4 layouts, and 2 transitions are fixed sets, not user-extensible** — `--css` is the only escape hatch beyond them (a full stylesheet replacement, not a per-color or per-layout override).
