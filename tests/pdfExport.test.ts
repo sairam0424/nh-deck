@@ -282,6 +282,89 @@ describe("exportToPdf", () => {
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);
+
+	it(
+		"adds a real PDF outline (bookmarks) derived from the deck's own headings, with each entry's destination pointing at the page its own slide actually landed on",
+		async () => {
+			// Three slides, each with one distinct top-level heading -- Chromium's
+			// document-outline generation (CDP Page.printToPDF's
+			// generateDocumentOutline, reached via Puppeteer's outline: true)
+			// derives one outline entry per real <h1>-<h6> in the page's own
+			// accessibility tree, so three distinct headings are expected to
+			// produce three real outline entries, in the same order.
+			const headings = [
+				"Distinctive Outline Heading Alpha",
+				"Distinctive Outline Heading Beta",
+				"Distinctive Outline Heading Gamma",
+			];
+			const html = generateHtml(
+				headings
+					.map((heading) => `# ${heading}\n\nSlide body.`)
+					.join("\n\n---\n\n"),
+			);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-outline-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			await exportToPdf(html, outputPath);
+
+			const pdfText = readFileSync(outputPath).toString("latin1");
+
+			// A bare "/Outlines" substring match alone would also pass for an
+			// empty or degenerate outline dictionary, or a same-named key on
+			// some unrelated object -- this test needs real entries with real
+			// destinations, so it walks the actual outline/page structure
+			// below rather than stopping at this presence check.
+			expect(pdfText).toContain("/Outlines");
+
+			// The /Pages tree's /Kids array is the authoritative, already-
+			// in-page-order list of page object numbers -- same
+			// follow-the-real-structure approach as the /Info Title test
+			// above, which follows /Info's object reference rather than
+			// trusting a bare substring match.
+			const kidsMatch = pdfText.match(
+				/\/Type\s*\/Pages[\s\S]*?\/Kids\s*\[([^\]]+)\]/,
+			);
+			expect(kidsMatch).not.toBeNull();
+			const pageObjectNumbers = Array.from(
+				(kidsMatch as RegExpMatchArray)[1].matchAll(/(\d+)\s+0\s+R/g),
+			).map((match) => Number(match[1]));
+			expect(pageObjectNumbers.length).toBe(3);
+
+			headings.forEach((heading, slideIndex) => {
+				// Each outline entry is its own PDF object, e.g.
+				// "<</Title (Distinctive Outline Heading Alpha)\n/Dest [2 0 R ...".
+				// Matching the /Title -> /Dest pair inside one object (not just
+				// searching for the heading text anywhere in the file) is what
+				// actually rules out the wrong-page regression this test exists
+				// to catch: a title string with no real destination, or a
+				// destination pointing at some unrelated object, would both
+				// fail this specific match.
+				const entryMatch = pdfText.match(
+					new RegExp(`/Title \\(${heading}\\)[^]*?/Dest \\[(\\d+) 0 R`),
+				);
+				expect(
+					entryMatch,
+					`expected an outline entry for "${heading}"`,
+				).not.toBeNull();
+				const destPageObjectNumber = Number(
+					(entryMatch as RegExpMatchArray)[1],
+				);
+
+				// The heading's own outline destination must resolve to the
+				// same page its own slide actually landed on (slideIndex here,
+				// 0-based, matching the deck's own slide order) -- this is the
+				// exact destination-on-the-wrong-page failure mode a real
+				// Chromium regression shortly after this feature's mid-2024
+				// rollout produced, so this asserts real page correlation, not
+				// just "some destination exists somewhere".
+				expect(pageObjectNumbers[slideIndex]).toBe(destPageObjectNumber);
+			});
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
 });
 
 // Cross-platform check for whether an OS process is still alive. Signal 0

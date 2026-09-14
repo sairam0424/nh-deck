@@ -103,6 +103,39 @@ export async function exportToPdf(
 			displayHeaderFooter: true,
 			footerTemplate: PDF_FOOTER_TEMPLATE,
 			margin: { top: "0in", bottom: "0.3in", left: "0in", right: "0in" },
+			// Generates a real PDF outline (the bookmarks/table-of-contents
+			// sidebar every major PDF viewer -- Preview, Acrobat, Chrome's own
+			// viewer -- already has UI for). This `outline` field maps directly
+			// to Chromium's own CDP `Page.printToPDF` `generateDocumentOutline`
+			// parameter: Chromium builds the outline straight from the
+			// already-rendered page's own accessibility tree -- its real
+			// <h1>-<h6> heading structure, the same tree screen readers use --
+			// not from any separate authored table of contents this codebase
+			// would have to build and keep in sync itself.
+			//
+			// This needs no launch-arg change alongside it: puppeteer-core's
+			// ChromeLauncher already passes the `--export-tagged-pdf` and
+			// `--generate-pdf-document-outline` flags this depends on as part
+			// of its own DEFAULT launch args (verified directly in its
+			// source), and the `puppeteer.launch()` call above never sets
+			// `ignoreDefaultArgs`, so those flags are already active today,
+			// simply unused until this option asks for them.
+			//
+			// There is deliberately no authoring control here over outline
+			// granularity -- every <h1>-<h6> the deck's own Markdown produces
+			// becomes its own outline entry, however many that is. That is the
+			// correct, faithful-to-the-user's-own-content default for this
+			// project's render-faithfully-don't-editorialize identity (see
+			// SOUL.md's Non-Negotiables), not a bug to "fix" with heading-level
+			// filtering nh-deck would have to invent an opinion about.
+			//
+			// Depends on the locally-detected browser being Chrome/Chromium/
+			// Edge/Brave M126+ (stable since mid-2024) -- true for virtually
+			// every real install as of 2026. On an unusually old detected
+			// browser this is silently ignored by Chromium: the exported PDF
+			// just keeps today's empty-outline status quo, never a crash or a
+			// thrown error.
+			outline: true,
 		});
 		await page.close();
 	} catch (error) {
