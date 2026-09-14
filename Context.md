@@ -13,7 +13,7 @@ nh-skills (`../nh-skills/`) and daily-dose (`../daily-dose/`) have both also shi
 ## Current state (as of 2026-09-14, v1.4.1)
 
 - **The original 12-item Roadmap (below) fully shipped as of v1.0.0** — render → serve → PDF/PNG export, KaTeX, Mermaid, named themes, per-slide layouts, transitions, and presentation mode all landed and are covered in detail in `CHANGELOG.md`, which is the authoritative record for everything since. This file's Roadmap section is kept below as a closed historical record; do not add new items to it — track new work in `CHANGELOG.md` and this section instead.
-- **Four backlog-prioritization releases have shipped since v1.0.0**, each a research-informed pass fixing real gaps and adding real features, not just polish:
+- **Five backlog-prioritization releases have shipped since v1.0.0**, each a research-informed pass fixing real gaps and adding real features, not just polish:
   - **v1.1.0** — WCAG-contrast fixes, a presentation-mode progress bar, `prefers-reduced-motion` support, Home/End/Escape navigation, a grid-overview mode, touch swipe, colorized CLI output.
   - **v1.2.0** — fixed a real, shipped-broken bug (PDF/PNG export was portrait A4, not landscape 16:9); added fragment (incremental reveal) markers, a keyboard-shortcuts help overlay, `--css-vars` layered theme overrides.
   - **v1.3.0** — `--with-notes` export, `nh-deck init` (starter-deck scaffold), a genuine second-screen presenter-view window synced via `BroadcastChannel`.
