@@ -172,6 +172,43 @@
  * the top-level gate above), so "&presenter" is always syntactically safe
  * to append to it as one more bare flag, matching the bare (no "=value")
  * style "present"/"notes" already use elsewhere in this project.
+ *
+ * A "g" keypress starts a short-lived slide-jump: subsequent digit
+ * keypresses (0-9) accumulate into jumpDigits (a plain string, not yet a
+ * number -- see that variable's own comment below) shown live via a small
+ * on-screen indicator (render.ts's JUMP_INDICATOR_STYLE) -- the same
+ * "a hidden keybinding alone just relocates the discoverability problem"
+ * reasoning that already motivated the "? controls" hint button above,
+ * applied here to a keybinding that, unlike "?"/"o"/"p", has no natural
+ * always-visible button of its own to click (there is nothing to click to
+ * "start typing a slide number"). Enter confirms the jump via confirmJump()
+ * below, which parses the typed digits as a 1-indexed slide number --
+ * matching the visible counter's own 1-indexed "N / M" display, the exact
+ * convention a viewer is already looking at -- converts that to goTo()'s
+ * 0-indexed convention, and clamps it into the valid slide range with
+ * Math.min/Math.max rather than doing nothing or throwing on a too-large or
+ * too-small number. This is the same clamping spirit Home/End already get
+ * for free (they always compute an in-range index directly, so goTo()'s own
+ * `index < 0 || index >= slides.length` guard never actually has to reject
+ * either of them) applied explicitly, since an arbitrary typed number has
+ * no such built-in guarantee. Escape cancels a pending jump without
+ * navigating anywhere (cancelJump() below) -- folded into the keydown
+ * listener's pre-existing Escape branch as its FIRST, highest-precedence
+ * case, ahead of that branch's existing helpOpen/overviewOpen checks, since
+ * starting a jump is itself only ever possible once both of those are
+ * already confirmed closed (see startJump()'s own check site, gated behind
+ * the same helpOpen/overviewOpen early-returns that already suppress "o"
+ * and ordinary slide navigation) -- the two states can therefore never
+ * actually overlap in practice, but the ordering is still written this way
+ * on purpose, matching how carefully this file already orders every other
+ * modal-ish precedence decision. While a jump is pending, every key this
+ * listener understands other than a digit or Enter -- "?", "p", "o", the
+ * arrows, Home, End, Space -- is swallowed outright, and a plain click or
+ * touch swipe do nothing either (see the jumpDigits early-returns in the
+ * keydown/click/touchend listeners below): a pending jump behaves like its
+ * own small, most tightly-scoped modal state, layered on top of (never a
+ * replacement for) the plain-presenting/overview/help precedence this file
+ * already establishes above.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -239,6 +276,19 @@ export const PRESENTATION_SCRIPT = `<script>
   progress.className = "presentation-progress";
   document.body.appendChild(progress);
 
+  // Visible feedback for an in-progress "g"-then-digits-then-Enter slide
+  // jump -- see this file's own module docstring and startJump()/
+  // appendJumpDigit()/confirmJump()/cancelJump() below for the full design.
+  // Styled like the pre-existing .presentation-counter/.presenter-timer
+  // chrome (render.ts's JUMP_INDICATOR_STYLE) but kept OUT of chromeRow
+  // above: unlike the counter/hint, which are always visible while
+  // presenting, this only appears for the brief window an actual jump is
+  // being typed, via the "is-active" class renderJumpIndicator() below
+  // toggles.
+  const jumpIndicator = document.createElement("div");
+  jumpIndicator.className = "presentation-jump-indicator";
+  document.body.appendChild(jumpIndicator);
+
   // Full-screen keyboard-shortcuts overlay, opened by "?" (see the keydown
   // listener below) or a helpHint click, and closed the same two ways.
   // Grouped into "Navigate" (the keys/gestures that move between slides)
@@ -252,6 +302,7 @@ export const PRESENTATION_SCRIPT = `<script>
     "<dl>" +
     "<dt>Navigate</dt>" +
     "<dd>→ / Space / ← / Home / End / click / swipe</dd>" +
+    "<dd>G, digits, Enter — jump to slide</dd>" +
     "<dt>View</dt>" +
     "<dd>O — overview</dd>" +
     "<dd>? — this help</dd>" +
@@ -373,6 +424,16 @@ export const PRESENTATION_SCRIPT = `<script>
   let overviewOpen = false;
   let indexBeforeOverview = current;
   let helpOpen = false;
+
+  // Jump-to-slide state ("g" then digits then Enter/Escape -- see this
+  // file's own module docstring for the full design). "null" means no jump
+  // is in progress; once "g" starts one (startJump() below), this holds the
+  // digits typed so far as a plain STRING, never a number -- so a leading
+  // zero, or the brief moment right after "g" itself (no digit typed yet,
+  // jumpDigits === ""), both round-trip through the on-screen indicator
+  // exactly as typed rather than being silently coerced by a numeric type
+  // before Enter is even pressed.
+  let jumpDigits = null;
 
   // Fragment (incremental reveal) helpers -- see this file's own module
   // docstring above for the full state-machine explanation. Fragments are
@@ -681,6 +742,83 @@ export const PRESENTATION_SCRIPT = `<script>
     window.open(presenterUrl, PRESENTER_WINDOW_NAME);
   };
 
+  // True while a slide-jump's digits are being typed -- one named check
+  // shared by the keydown, click, and touchend listeners below (each needs
+  // to suppress its own normal behavior while a jump is pending, the same
+  // "one modal-ish state governs every input channel" treatment
+  // helpOpen/overviewOpen already get in each of those three listeners),
+  // rather than re-writing the same "jumpDigits !== null" condition three
+  // separate times.
+  const isJumpPending = () => jumpDigits !== null;
+
+  // Refreshes the on-screen digit indicator from jumpDigits -- called by
+  // every function below that changes it, rather than folded into render()
+  // (which every goTo() call already runs for the slide/counter/progress
+  // bar/presenter-console): jumpDigits changes independently of the
+  // current slide index, and piggybacking on render()'s much larger body
+  // for every single digit keypress would be wasted work with no upside.
+  const renderJumpIndicator = () => {
+    jumpIndicator.classList.toggle("is-active", isJumpPending());
+    jumpIndicator.textContent = isJumpPending() ? "Go to: " + jumpDigits : "";
+  };
+
+  // Starts capturing a jump target. See the keydown listener's own
+  // precedence comment below for why "g" is only ever reachable once
+  // help/overview are both confirmed closed.
+  const startJump = () => {
+    jumpDigits = "";
+    renderJumpIndicator();
+  };
+
+  // Appends one more typed digit (already validated as "0"-"9" by the
+  // keydown listener's own jumpDigits block below) to the number being
+  // built.
+  const appendJumpDigit = (digit) => {
+    jumpDigits += digit;
+    renderJumpIndicator();
+  };
+
+  // Cancels a pending jump WITHOUT navigating anywhere -- used by Escape
+  // (folded into the keydown listener's existing Escape branch below, as
+  // its first, highest-precedence case) and by confirmJump() itself when
+  // Enter is pressed with no digits typed yet: nothing to jump to, so it
+  // cancels exactly like Escape rather than jumping to some arbitrary
+  // default slide.
+  const cancelJump = () => {
+    jumpDigits = null;
+    renderJumpIndicator();
+  };
+
+  // Confirms a pending jump: parses the accumulated digits as a 1-indexed
+  // slide number (matching the visible counter's own 1-indexed "N / M"
+  // display), converts that to goTo()'s 0-indexed convention, and clamps
+  // it into the valid slide range with Math.min/Math.max -- an
+  // out-of-range number (e.g. past the last slide) lands on the nearest
+  // valid slide instead of doing nothing or throwing, the same clamping
+  // spirit Home/End already get for free (see this file's own module
+  // docstring) applied explicitly here, since an arbitrary typed number has
+  // no such built-in guarantee.
+  const confirmJump = () => {
+    const digits = jumpDigits;
+    cancelJump();
+    if (!digits) {
+      return;
+    }
+    const requestedSlideNumber = Number.parseInt(digits, 10);
+    const targetIndex = Math.min(
+      Math.max(requestedSlideNumber - 1, 0),
+      slides.length - 1,
+    );
+    // A jump lands "backward" (in goTo()'s own fragment-reset sense -- see
+    // this file's own module docstring) only when it moves to an EARLIER
+    // slide than the one currently showing. This differs from Home (always
+    // backward) and End (always forward): an arbitrary typed jump can move
+    // either direction depending on where the viewer currently is, so the
+    // direction has to be computed from the actual indices instead of
+    // hardcoded like those two.
+    goTo(targetIndex, targetIndex < current);
+  };
+
   document.addEventListener("keydown", (event) => {
     // Inert once exitPresentationMode() has removed body.presenting -- this
     // listener, like every listener in this script, is attached once and
@@ -695,10 +833,10 @@ export const PRESENTATION_SCRIPT = `<script>
     // A presenter-view window is a read-only mirror of the MAIN window's
     // state (see this file's own module docstring's presenter-view
     // section) -- every key this listener handles below (Escape/"?"/"p"/
-    // "o"/arrows/Home/End/Space) exists to drive or view THIS window's own
-    // slide state, which a presenter-view window must never do. Checked
-    // here, once, before any of those branches, rather than duplicated
-    // inside each one individually.
+    // "o"/"g"/digits/Enter/arrows/Home/End/Space) exists to drive or view
+    // THIS window's own slide state, which a presenter-view window must
+    // never do. Checked here, once, before any of those branches, rather
+    // than duplicated inside each one individually.
     if (document.body.classList.contains("presenter-view")) {
       return;
     }
@@ -721,20 +859,60 @@ export const PRESENTATION_SCRIPT = `<script>
     //    completely unchanged from before this feature existed: they
     //    resolve purely between overviewOpen and exitPresentationMode, per
     //    exitPresentationMode's own docstring.
-    // 3. "o" and all slide-to-slide navigation (arrows/Home/End/Space) are
-    //    BOTH suppressed while help is open, not just navigation -- letting
-    //    "o" open the grid overview underneath a still-open help modal
-    //    would silently do a second thing on top of whatever "?" or the
-    //    helpHint click already did, which is exactly the
-    //    one-keypress-one-effect rule this whole ordering exists to
-    //    preserve.
+    // 3. "o", "g", and all slide-to-slide navigation (arrows/Home/End/
+    //    Space) are ALL suppressed while help is open, not just
+    //    navigation -- letting "o" open the grid overview, or "g" start a
+    //    new slide jump, underneath a still-open help modal would silently
+    //    do a second thing on top of whatever "?" or the helpHint click
+    //    already did, which is exactly the one-keypress-one-effect rule
+    //    this whole ordering exists to preserve.
+    //
+    // A pending slide jump (jumpDigits !== null, started by "g" -- see this
+    // file's own module docstring, and the jumpDigits block right below,
+    // which is checked BEFORE the "?" branch so a pending jump swallows
+    // "?" too) is a FOURTH modal-ish state, layered on top of the three
+    // above: cancelJump() is folded into this very Escape branch as
+    // its first, highest-precedence case, ahead of helpOpen/overviewOpen,
+    // since Escape while a jump is pending means "cancel this jump", never
+    // "close help"/"close overview"/"exit presentation mode". In practice
+    // helpOpen/overviewOpen are always false whenever jumpDigits isn't
+    // null -- starting a jump via "g" is itself gated behind both of those
+    // being closed already (see that check's own comment, near the bottom
+    // of this listener) -- but the ordering is written defensively anyway,
+    // matching how carefully this file already orders every other
+    // precedence decision here.
     if (event.key === "Escape") {
-      if (helpOpen) {
+      if (isJumpPending()) {
+        cancelJump();
+      } else if (helpOpen) {
         closeHelp();
       } else if (overviewOpen) {
         closeOverviewToPreviousSlide();
       } else {
         exitPresentationMode();
+      }
+      return;
+    }
+    // Digits and Enter for an in-progress slide jump are resolved here,
+    // immediately after Escape's own cancelJump() branch above and before
+    // every other key this listener understands ("?"/"p"/"o"/arrows/Home/
+    // End/Space): while a jump is pending, a digit accumulates into the
+    // number being typed (appendJumpDigit()) and Enter confirms it
+    // (confirmJump()) -- but EVERY other key, including ones that would
+    // normally open help/overview or navigate, is swallowed outright via
+    // the bare "return" at the end of this block, rather than also doing
+    // whatever it would normally do underneath an in-progress digit entry.
+    // This mirrors the helpOpen/overviewOpen early-returns further down
+    // (which suppress "o"/"g" and slide navigation the same blanket way
+    // while THEIR modal is open). This block MUST come before the "?"
+    // branch below -- checking "?" first would let it open/close help
+    // while a jump is still pending, breaking the "every other key is
+    // swallowed" guarantee for exactly one key.
+    if (isJumpPending()) {
+      if (event.key === "Enter") {
+        confirmJump();
+      } else if (event.key >= "0" && event.key <= "9") {
+        appendJumpDigit(event.key);
       }
       return;
     }
@@ -772,12 +950,23 @@ export const PRESENTATION_SCRIPT = `<script>
       }
       return;
     }
-    // Slide-to-slide navigation is suppressed while the grid overview is
-    // open -- it has no "one active slide" to move between, and silently
-    // changing current underneath the grid would make
-    // closeOverviewToPreviousSlide's "return to the slide from before
-    // opening" guarantee ambiguous.
+    // Slide-to-slide navigation, and starting a NEW slide jump via "g", are
+    // both suppressed while the grid overview is open -- it has no "one
+    // active slide" to move between or jump from, and silently changing
+    // current underneath the grid would make closeOverviewToPreviousSlide's
+    // "return to the slide from before opening" guarantee ambiguous.
     if (overviewOpen) {
+      return;
+    }
+    // Starts a new slide jump -- see startJump() above and the jumpDigits
+    // block near the top of this listener for how the digits/Enter/Escape
+    // that follow are handled. Checked only here, after BOTH the helpOpen
+    // and overviewOpen early-returns above, so "g" can never start a jump
+    // while either of those already fully occupies keyboard input -- the
+    // exact same reasoning that already gates "o" and ordinary slide
+    // navigation behind those same two guards.
+    if (event.key === "g" || event.key === "G") {
+      startJump();
       return;
     }
     if (event.key === "ArrowRight" || event.key === " ") {
@@ -804,6 +993,14 @@ export const PRESENTATION_SCRIPT = `<script>
     // presenter-view window must never advance/retreat a slide, open the
     // grid overview, or open help from a click either.
     if (document.body.classList.contains("presenter-view")) {
+      return;
+    }
+    // Mirrors the keydown listener's own jump-pending precedence (see this
+    // file's own module docstring): while a slide jump's digits are being
+    // typed, a click anywhere on the page -- including on the helpHint
+    // button checked immediately below -- must not also open help or
+    // advance the slide underneath the in-progress digit entry.
+    if (isJumpPending()) {
       return;
     }
     // Mirrors the keydown listener's own "help open" precedence: a helpHint
@@ -875,16 +1072,17 @@ export const PRESENTATION_SCRIPT = `<script>
   });
 
   document.addEventListener("touchend", (event) => {
-    // Guards mirror the keydown listener's own: suppressed while the grid
-    // overview OR the help overlay is open (same "no single active slide to
-    // move between"/modal-overlay rationale as arrow/Home/End and the click
-    // listener's own helpOpen guard above), and inert once
-    // exitPresentationMode() has removed body.presenting -- this listener,
-    // like every listener in this script, is attached once and never
-    // detached, so without this check a swipe on the normal
-    // continuous-scroll view (reached via Escape, without a page reload)
-    // would still hijack vertical scrolling.
+    // Guards mirror the keydown listener's own: suppressed while a slide
+    // jump is pending, the grid overview is open, OR the help overlay is
+    // open (same "no single active slide to move between"/modal-overlay
+    // rationale as arrow/Home/End and the click listener's own guards
+    // above), and inert once exitPresentationMode() has removed
+    // body.presenting -- this listener, like every listener in this
+    // script, is attached once and never detached, so without this check a
+    // swipe on the normal continuous-scroll view (reached via Escape,
+    // without a page reload) would still hijack vertical scrolling.
     if (
+      isJumpPending() ||
       helpOpen ||
       overviewOpen ||
       !document.body.classList.contains("presenting") ||

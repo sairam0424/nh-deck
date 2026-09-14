@@ -91,6 +91,61 @@ export function watchFileForChanges(
 }
 
 /**
+ * Outcome of a single `runWatchedRerender` attempt:
+ * - `success`: `render` completed without throwing.
+ * - `transient`: `readFile` failed with ENOENT -- an atomic-save editor's
+ *   temp-file-then-rename can briefly make the watched path disappear
+ *   mid-save. The next file-change event retries, so there is nothing to
+ *   report.
+ * - `error`: `readFile` failed for any other reason, or `render` itself
+ *   threw -- a real problem (e.g. a malformed construct the renderer
+ *   rejects), worth surfacing to the caller.
+ */
+export type WatchedRerenderResult =
+	| { status: "success" }
+	| { status: "transient" }
+	| { status: "error"; error: unknown };
+
+/**
+ * Runs one watch-triggered rerender attempt and classifies its outcome, so
+ * a caller (index.ts's `render --watch` action) knows whether to print a
+ * success note, a warning, or nothing at all.
+ *
+ * `readFile` reads the watched file's current on-disk content; `render`
+ * turns that content into new HTML and applies it (e.g. via a server's
+ * `updateHtml`). Both are injected rather than this function reaching for
+ * `readFileSync`/`generateHtml` itself, so the classification logic here is
+ * testable without a real filesystem or a real render pipeline -- see
+ * cli.test.ts's direct unit tests against this function for cases (a
+ * mocked render failure) that have no reliable real-world trigger today.
+ *
+ * If `render` throws, it is guaranteed to have done so before applying
+ * anything (mirroring index.ts's own `updateHtml(generateHtml(...))` shape,
+ * where a throw from `generateHtml` means `updateHtml` is never reached) --
+ * so the caller's last-known-good HTML is left exactly as it was.
+ */
+export function runWatchedRerender(
+	readFile: () => string,
+	render: (content: string) => void,
+): WatchedRerenderResult {
+	let content: string;
+	try {
+		content = readFile();
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+			return { status: "transient" };
+		}
+		return { status: "error", error };
+	}
+	try {
+		render(content);
+		return { status: "success" };
+	} catch (error) {
+		return { status: "error", error };
+	}
+}
+
+/**
  * Ties an fs watcher's lifetime to an HTTP server's close event, so the
  * watcher is torn down whenever the server closes — not just when the
  * whole process exits. Without this, a caller that calls `server.close()`

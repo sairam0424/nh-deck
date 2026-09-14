@@ -62,6 +62,16 @@ Slide content...
 
 nh-deck ships 4 fixed, named color themes — `light`, `dark`, `dracula`, and `nord` — that recolor the base deck (background, text, borders, code blocks), KaTeX math, and Mermaid diagrams consistently. A deck with no theme requested renders exactly as it always has. Explicitly requesting the `light` theme is close, but not identical, to that default — code-block backgrounds in particular differ noticeably (see `docs/adr/0008-named-theme-system.md`).
 
+Run `nh-deck list-themes` to print the fixed set of theme names from the command line (noting which one is the default), without rendering anything.
+
+| `light` (default) | `dark` |
+| --- | --- |
+| ![nh-deck's light theme](docs/assets/theme-light.png) | ![nh-deck's dark theme](docs/assets/theme-dark.png) |
+
+| `dracula` | `nord` |
+| --- | --- |
+| ![nh-deck's dracula theme](docs/assets/theme-dracula.png) | ![nh-deck's nord theme](docs/assets/theme-nord.png) |
+
 Select a theme either via a `--theme <name>` flag on any of `render`, `pdf`, or `png`:
 
 ```bash
@@ -119,6 +129,8 @@ nh-deck render deck.md --transition fade
 ```
 
 Transitions only apply inside presentation mode on `render` — `pdf` and `png` never read the flag, since a static export has no discrete slide changes to animate between. `--css` wins over both layout and transition CSS, same as it wins over themes. Slide transitions also respect `prefers-reduced-motion`, substituting a fast crossfade instead of the full animation. See `docs/adr/0009-templates-transitions-presentation-mode.md` for the full design rationale.
+
+Presentation mode is fully keyboard-operable, with a `?`-triggered shortcuts overlay and screen-reader-facing `aria-hidden` sync for fragment reveal. See `ACCESSIBILITY.md` for this project's full accessibility posture — what's actually supported today and what isn't yet verified.
 
 ## Current limitations
 

@@ -240,6 +240,48 @@ describe("exportToPdf", () => {
 		},
 		PDF_EXPORT_TIMEOUT_MS,
 	);
+
+	it(
+		"embeds the deck's title as the PDF's own document-level /Info Title metadata, not just the source HTML's <title> tag",
+		async () => {
+			// Verified empirically (manual probe against a real exported file,
+			// not just Puppeteer/Chromium docs) that Page.pdf() already carries
+			// document.title through to the output PDF's own /Info dictionary at
+			// print time with no extra step -- this test locks that behavior in
+			// so a future Puppeteer/Chromium upgrade that silently drops it gets
+			// caught here rather than discovered by a user's PDF viewer or a
+			// search-indexing tool showing a blank/generic title.
+			const deckTitle = "Distinctive PDF Metadata Regression Title";
+			const html = generateHtml(fixtureMarkdown, deckTitle);
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-metadata-title-test-${randomUUID()}.pdf`,
+			);
+			activeOutputPath = outputPath;
+
+			await exportToPdf(html, outputPath);
+
+			const pdfText = readFileSync(outputPath).toString("latin1");
+
+			// Follow the trailer's /Info reference to the actual PDF Info
+			// dictionary object, then assert /Title lives inside THAT object --
+			// not just that the string "/Title (...)" appears somewhere in the
+			// file, which could in principle pass even if some unrelated object
+			// happened to carry a same-named key.
+			const infoRefMatch = pdfText.match(/\/Info\s+(\d+)\s+\d+\s+R/);
+			expect(infoRefMatch).not.toBeNull();
+			const infoObjectNumber = (infoRefMatch as RegExpMatchArray)[1];
+
+			const infoObjectMatch = pdfText.match(
+				new RegExp(`\\n${infoObjectNumber} 0 obj\\s*<<([^]*?)>>\\s*endobj`),
+			);
+			expect(infoObjectMatch).not.toBeNull();
+			const infoDictionaryBody = (infoObjectMatch as RegExpMatchArray)[1];
+
+			expect(infoDictionaryBody).toContain(`/Title (${deckTitle})`);
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
 });
 
 // Cross-platform check for whether an OS process is still alive. Signal 0

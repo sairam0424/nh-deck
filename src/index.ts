@@ -10,6 +10,7 @@ import {
 	debounce,
 	parsePort,
 	resolveOutputPath,
+	runWatchedRerender,
 	watchFileForChanges,
 } from "./cliHelpers.js";
 import { parseFrontmatter } from "./frontmatter.js";
@@ -23,7 +24,7 @@ import { hasPresenterNotes } from "./presenterNotes.js";
 import { containsUnsafeHtml, generateHtml } from "./render.js";
 import { startServer } from "./server.js";
 import type { ThemeColors } from "./themes.js";
-import { resolveThemeName, THEMES } from "./themes.js";
+import { DEFAULT_THEME_NAME, resolveThemeName, THEMES } from "./themes.js";
 import type { TransitionName } from "./transitions.js";
 import { resolveTransitionName, TRANSITIONS } from "./transitions.js";
 
@@ -60,6 +61,39 @@ const UNSAFE_HTML_WARNING =
  */
 const NOTES_DROPPED_NOTE =
 	"nh-deck: note: presenter notes are not included in this export (pass --with-notes to include them)";
+
+/**
+ * Non-fatal stdout hint printed unconditionally on `render`, immediately
+ * after the "nh-deck serving ..." success line, naming the opt-in
+ * `?present` query param that starts presentation mode (see
+ * presentationScript.ts). Every deck can be presented -- this doesn't
+ * depend on the deck's own content the way PRESENTER_NOTES_HINT below
+ * does -- so it prints on every render invocation. Neither `?present` nor
+ * `?notes` has any in-terminal discoverability today: a user only learns
+ * about them by reading the README or already knowing to look. Styled the
+ * same green as the success line right above it (see style()), matching
+ * this file's existing precedent of using green for a stdout hint/note
+ * line that always follows a green success line -- NOTES_DROPPED_NOTE, and
+ * `init`'s own "Wrote starter deck.../Next: nh-deck render ..." pair --
+ * rather than inventing a third, unprecedented color for a message that
+ * isn't an error.
+ */
+const PRESENT_MODE_HINT =
+	"nh-deck: tip: add ?present to the URL above to start presentation mode";
+
+/**
+ * Non-fatal stdout hint printed on `render`, immediately after
+ * PRESENT_MODE_HINT, naming the opt-in `?notes` query param that reveals
+ * presenter notes -- but only when the deck actually has at least one note
+ * (checked via presenterNotes.ts's hasPresenterNotes(), the same
+ * whole-document check the pdf/png --with-notes warning above already
+ * makes). A deck with zero presenter notes has nothing for `?notes` to
+ * reveal, so a hint about it would point at an empty feature -- this stays
+ * unprinted in that case rather than advertising something that would show
+ * nothing.
+ */
+const PRESENTER_NOTES_HINT =
+	"nh-deck: tip: add ?notes to the URL above to reveal presenter notes";
 
 /**
  * `node:util.styleText` was added in Node 20.12.0 -- this repo's declared
@@ -283,6 +317,30 @@ program
 		}
 	});
 
+/**
+ * `list-themes` -- a read-only discovery command for nh-deck's fixed 4-theme
+ * registry (see themes.ts's own docstring for why that set is fixed, not
+ * user-extensible). Unlike render/pdf/png, this never touches the
+ * filesystem beyond argv/stdout and never launches a browser -- it exists
+ * purely so a user can answer "what are my --theme options, and which one
+ * is the default?" without first writing a deck and rendering it. Printed
+ * in THEMES' own insertion order (light, dark, dracula, nord) rather than
+ * sorted alphabetically, matching every other place in this file that
+ * lists theme names (e.g. the --theme flag's own description text via
+ * `Object.keys(THEMES).join(", ")`).
+ */
+program
+	.command("list-themes")
+	.description(
+		"List nh-deck's fixed set of named color themes, noting the default.",
+	)
+	.action(() => {
+		for (const name of Object.keys(THEMES)) {
+			const suffix = name === DEFAULT_THEME_NAME ? " (default)" : "";
+			process.stdout.write(`${name}${suffix}\n`);
+		}
+	});
+
 program
 	.command("render <file>")
 	.description("Render a Markdown deck and serve it locally.")
@@ -371,37 +429,66 @@ program
 				process.stdout.write(
 					`${style("green", `nh-deck serving ${file} at ${url}`)}\n`,
 				);
+				process.stdout.write(`${style("green", PRESENT_MODE_HINT)}\n`);
+				if (hasPresenterNotes(markdown)) {
+					process.stdout.write(`${style("green", PRESENTER_NOTES_HINT)}\n`);
+				}
 
 				if (options.watch) {
+					// Every file-change event fires this -- including, on an editor
+					// with autosave, every keystroke -- so the outcome is reported in
+					// exactly one short line, not a multi-line dump. runWatchedRerender
+					// (cliHelpers.ts) does the read-vs-render classification:
+					// - success: a brief green confirmation, so a save is never
+					//   followed by silence with no sign anything happened.
+					// - transient (ENOENT while reading `file` -- an atomic-save
+					//   editor's rename briefly making the path disappear mid-save):
+					//   stays exactly as silent as before this change; the next
+					//   change event retries.
+					// - error (anything else, including generateHtml/frontmatter/
+					//   theme/transition rejecting the new content for a real
+					//   reason): a red warning naming the actual problem, without
+					//   tearing down the server -- updateHtml is never reached in this
+					//   branch, so the last-known-good HTML keeps being served.
 					const rerender = debounce(() => {
-						try {
-							const updatedRawMarkdown = readFileSync(file, "utf8");
-							const { frontmatter: updatedFrontmatter, body: updatedMarkdown } =
-								parseFrontmatter(updatedRawMarkdown);
-							const { colors: updatedThemeColors } = computeEffectiveTheme(
-								updatedFrontmatter.theme,
-								options.theme,
-								customCss,
-							);
-							const { name: updatedTransitionName } =
-								computeEffectiveTransition(
-									updatedFrontmatter.transition,
-									options.transition,
+						const result = runWatchedRerender(
+							() => readFileSync(file, "utf8"),
+							(updatedRawMarkdown) => {
+								const {
+									frontmatter: updatedFrontmatter,
+									body: updatedMarkdown,
+								} = parseFrontmatter(updatedRawMarkdown);
+								const { colors: updatedThemeColors } = computeEffectiveTheme(
+									updatedFrontmatter.theme,
+									options.theme,
 									customCss,
 								);
-							updateHtml(
-								generateHtml(
-									updatedMarkdown,
-									file,
-									customCss,
-									updatedThemeColors,
-									updatedTransitionName,
-									effectiveCssVars,
-								),
+								const { name: updatedTransitionName } =
+									computeEffectiveTransition(
+										updatedFrontmatter.transition,
+										options.transition,
+										customCss,
+									);
+								updateHtml(
+									generateHtml(
+										updatedMarkdown,
+										file,
+										customCss,
+										updatedThemeColors,
+										updatedTransitionName,
+										effectiveCssVars,
+									),
+								);
+							},
+						);
+						if (result.status === "success") {
+							process.stdout.write(
+								`${style("green", `nh-deck: rebuilt ${file}`)}\n`,
 							);
-						} catch {
-							// A transient read failure (e.g. mid-save) is not fatal — the
-							// next file-change event retries.
+						} else if (result.status === "error") {
+							process.stderr.write(
+								`${style("red", formatActionError(result.error, file))}\n`,
+							);
 						}
 					}, 100);
 					const watcher = watchFileForChanges(file, rerender);

@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
+import { runWatchedRerender } from "../src/cliHelpers.js";
 import { generateHtml } from "../src/render.js";
 
 const repoRoot = path.resolve(fileURLToPath(import.meta.url), "..", "..");
@@ -23,7 +24,16 @@ const STARTUP_TIMEOUT_MS = 8_000;
 const EXIT_TIMEOUT_MS = 3_000;
 const TEST_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXIT_TIMEOUT_MS + 5_000;
 const PDF_EXPORT_TIMEOUT_MS = 60_000;
-const WATCH_TEST_TIMEOUT_MS = 10_000;
+// Was a flat 10_000 -- barely more than STARTUP_TIMEOUT_MS alone, leaving
+// almost no room for a debounced re-render's own wait/poll once startup
+// itself takes close to its own budget under CI load (observed live: a
+// watch test failed on some CI jobs with its poll fully elapsed and zero
+// events ever seen, not merely "ran out of time" -- consistent with
+// STARTUP_TIMEOUT_MS eating most of the old 10s before the poll even
+// started). Now follows TEST_TIMEOUT_MS's own formula with a larger margin,
+// since a watch test's real work (write, debounce, render, assert) happens
+// entirely AFTER startup, on top of it, not instead of it.
+const WATCH_TEST_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXIT_TIMEOUT_MS + 15_000;
 
 let activeChild: ChildProcess | undefined;
 
@@ -135,6 +145,35 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
 			resolve();
 		});
 	});
+}
+
+/**
+ * Polls `check` every `intervalMs` until it returns true or `timeoutMs`
+ * elapses. Used instead of a single fixed-length `setTimeout` wherever a
+ * test's assertion would otherwise run at the EXACT instant a bare wait
+ * resolves, with no slack -- a debounced re-render's full read+render+
+ * stdout-write pipeline can genuinely take longer than a short fixed wait
+ * on a slower/contended CI runner, even though the same fixed wait is
+ * ample on a fast local machine. Other tests in this file that also wait
+ * on a debounced re-render effectively get extra slack for free (their
+ * assertion is a `fetchBody(url)` HTTP round-trip AFTER the wait, not an
+ * immediate synchronous check) -- this helper gives that same slack to a
+ * synchronous check without arbitrarily inflating the wait for the common
+ * (fast) case.
+ */
+async function waitForCondition(
+	check: () => boolean,
+	timeoutMs: number,
+	intervalMs = 50,
+): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (check()) {
+			return true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+	return check();
 }
 
 /** Fetches the response body from `url` as a UTF-8 string. */
@@ -376,6 +415,68 @@ describe("CLI: nh-deck init", () => {
 	);
 });
 
+describe("CLI: nh-deck list-themes", () => {
+	it(
+		"prints all 4 fixed theme names, one per line, noting the default, and exits 0",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "list-themes"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).toBe("");
+			// Exactly the 4 fixed theme names from src/themes.ts's THEMES
+			// registry, in that registry's own insertion order, each on its
+			// own line -- "light" is annotated as the default (matching
+			// src/themes.ts's DEFAULT_THEME_NAME) and no other line is.
+			const lines = stdout.trim().split("\n");
+			expect(lines).toEqual(["light (default)", "dark", "dracula", "nord"]);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"never launches a browser or touches the filesystem -- it only reads the fixed THEMES registry",
+		async () => {
+			// No fixture path, no --port, no temp file: list-themes takes no
+			// arguments at all. This exercises that it still exits cleanly
+			// and quickly (well under STARTUP_TIMEOUT_MS, which every other
+			// test in this file needs specifically because it's waiting on a
+			// browser launch or a dev-server startup -- list-themes needs
+			// neither).
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "list-themes"],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render", () => {
 	it(
 		"prints the serving URL to stdout and shuts down cleanly on kill",
@@ -465,6 +566,107 @@ describe("CLI: nh-deck render", () => {
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
 			rmSync(cssPath, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+});
+
+describe("CLI: nh-deck render — presentation mode / presenter notes hints", () => {
+	it(
+		"prints the ?present hint but not a ?notes hint for a deck with no presenter notes",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			// The hint lines are written synchronously right after the serving
+			// line, within the same action-handler tick -- a short pause lets
+			// any remaining buffered stdout data actually arrive before
+			// asserting, the same margin other stdout-content tests in this
+			// file already give themselves (e.g. the --watch "rebuilt" test).
+			await new Promise((resolve) => setTimeout(resolve, 300));
+
+			// The pre-existing serving-line wording itself must stay unchanged.
+			const normalized = matchedLine.replace(/:\d+$/, ":<PORT>");
+			expect(normalized).toBe(
+				"nh-deck serving fixtures/sample.md at http://127.0.0.1:<PORT>",
+			);
+
+			expect(stdout).toContain(
+				"add ?present to the URL above to start presentation mode",
+			);
+			expect(stdout).not.toContain("?notes");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"prints both the ?present and ?notes hints for a deck with at least one presenter note",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-render-notes-hint-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			await new Promise((resolve) => setTimeout(resolve, 300));
+
+			expect(stdout).toContain(
+				"add ?present to the URL above to start presentation mode",
+			);
+			expect(stdout).toContain(
+				"add ?notes to the URL above to reveal presenter notes",
+			);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempFile, { force: true });
 		},
 		TEST_TIMEOUT_MS,
 	);
@@ -1774,6 +1976,12 @@ describe("CLI: nh-deck render --watch", () => {
 				{ cwd: repoRoot },
 			);
 			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
 			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
 			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
 			if (!url) {
@@ -1785,8 +1993,9 @@ describe("CLI: nh-deck render --watch", () => {
 
 			// Delete the watched file right as a change event fires, so the
 			// debounced re-render's readFileSync hits ENOENT mid-"save" -- the
-			// exact transient-failure shape the empty catch in the --watch
-			// rerender closure (src/index.ts) exists to survive.
+			// exact transient-failure shape runWatchedRerender's ENOENT check
+			// (src/cliHelpers.ts), wired up from src/index.ts's --watch block,
+			// exists to survive.
 			rmSync(deckPath, { force: true });
 			// Wait comfortably past the 100ms debounce window so the failed
 			// re-render attempt actually runs before asserting survival.
@@ -1801,6 +2010,11 @@ describe("CLI: nh-deck render --watch", () => {
 			const bodyAfterFailure = await fetchBody(url);
 			expect(bodyAfterFailure).toContain("Original");
 
+			// This transient, mid-rename ENOENT must stay exactly as silent as
+			// it always has been -- no stderr output at all, unlike a genuine
+			// render error (see the runWatchedRerender describe block below).
+			expect(stderr).toBe("");
+
 			// A subsequent valid save must still be picked up: this proves the
 			// watcher/server genuinely survived (retried on the next change
 			// event), not merely that it hadn't crashed yet.
@@ -1809,6 +2023,75 @@ describe("CLI: nh-deck render --watch", () => {
 
 			const recoveredBody = await fetchBody(url);
 			expect(recoveredBody).toContain("Recovered");
+
+			// Still silent even after the recovery -- the earlier ENOENT never
+			// produced a delayed/queued warning either.
+			expect(stderr).toBe("");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"prints a short stdout note on each successful debounced re-render, naming the changed file",
+		async () => {
+			const dir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-watch-rebuilt-note-"),
+			);
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "# Original\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			// Every sibling --watch test below fetches the served body once
+			// before writing a changed file, and this is the one test in this
+			// group that did not -- observed live to matter: on some CI jobs
+			// this test's rebuilt-note poll ran its full timeout and still saw
+			// zero events, while every sibling test using this exact fetch
+			// warm-up passed reliably on the same jobs. Discarding the result
+			// here still exercises the same warm-up the passing tests get for
+			// free from their own initial-body assertion.
+			await fetchBody(url);
+			const rebuiltCount = () =>
+				(stdout.match(/nh-deck: rebuilt/g) ?? []).length;
+
+			// Not printed on the initial render -- only on a debounced
+			// re-render triggered by an actual file-change event.
+			expect(rebuiltCount()).toBe(0);
+
+			writeFileSync(deckPath, "# Changed\n");
+			await waitForCondition(() => rebuiltCount() === 1, 15_000);
+
+			expect(rebuiltCount()).toBe(1);
+			expect(stdout).toContain(`nh-deck: rebuilt ${deckPath}`);
 
 			child.kill();
 			await waitForExit(child, EXIT_TIMEOUT_MS);
@@ -1875,6 +2158,81 @@ describe("CLI: nh-deck render --watch", () => {
 		},
 		WATCH_TEST_TIMEOUT_MS,
 	);
+
+	// The three cases below exercise runWatchedRerender (src/cliHelpers.ts)
+	// directly rather than through a spawned CLI process. index.ts's --watch
+	// block wires this same function up to real readFileSync/generateHtml
+	// calls; there is currently no real Markdown/frontmatter input that makes
+	// generateHtml (or the frontmatter/theme/transition computation around
+	// it) throw for a genuine reason -- parseFrontmatter and
+	// resolveThemeName/resolveTransitionName all degrade gracefully instead of
+	// throwing, and the one spot generateHtml does throw (a --css-vars file
+	// containing a literal "</style") is fixed content read once at startup,
+	// not something a watched *deck* file save can trigger. A mocked `render`
+	// callback is the reliable way to exercise the "a real render error
+	// happened" branch, matching this file's own precedent of importing
+	// generateHtml directly (see the top-of-file import) rather than only ever
+	// driving behavior through a spawned subprocess.
+	describe("runWatchedRerender", () => {
+		it("reports success and applies the new HTML when the render step completes", () => {
+			const applied: string[] = [];
+			const result = runWatchedRerender(
+				() => "# still valid markdown",
+				(content) => {
+					applied.push(content);
+				},
+			);
+
+			expect(result.status).toBe("success");
+			expect(applied).toEqual(["# still valid markdown"]);
+		});
+
+		it("classifies an ENOENT read failure as transient, matching today's silent retry", () => {
+			const readFile = (): string => {
+				const error = new Error(
+					"ENOENT: no such file or directory, open 'deck.md'",
+				) as NodeJS.ErrnoException;
+				error.code = "ENOENT";
+				throw error;
+			};
+
+			const result = runWatchedRerender(readFile, () => {
+				throw new Error(
+					"render must not be reached when the read itself failed",
+				);
+			});
+
+			expect(result.status).toBe("transient");
+		});
+
+		it(
+			"reports a genuine render-step failure (a mocked generateHtml rejection) as an error, " +
+				"without ever applying it",
+			() => {
+				const applied: string[] = [];
+				const renderError = new Error(
+					"mocked: a construct generateHtml itself rejects",
+				);
+
+				const result = runWatchedRerender(
+					() => "# content generateHtml will reject",
+					() => {
+						// Mirrors index.ts's own shape -- updateHtml(generateHtml(...))
+						// -- where a throw from generateHtml means updateHtml's argument
+						// never finishes evaluating, so updateHtml is never called at
+						// all and the previously-served HTML is left untouched.
+						throw renderError;
+					},
+				);
+
+				expect(result.status).toBe("error");
+				expect((result as { status: "error"; error: unknown }).error).toBe(
+					renderError,
+				);
+				expect(applied).toEqual([]);
+			},
+		);
+	});
 });
 
 describe("CLI: theme selection", () => {

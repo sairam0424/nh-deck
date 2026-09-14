@@ -439,6 +439,61 @@ const HELP_STYLE = `
     }`;
 
 /**
+ * On-screen feedback for an in-progress "g"-then-digits-then-Enter slide
+ * jump (see presentationScript.ts's own module docstring and its
+ * startJump()/appendJumpDigit()/confirmJump()/cancelJump() functions) --
+ * without this, "g" would silently swallow every digit keystroke with zero
+ * on-screen trace, exactly the discoverability gap HELP_STYLE above already
+ * exists to close for "?" itself: a hidden keybinding by itself only
+ * relocates that problem rather than solving it.
+ *
+ * Styled like the pre-existing `.presentation-counter`/`.presenter-timer`
+ * chrome (same code-bg background, monospace font, small padding/
+ * border-radius) but positioned at the OPPOSITE corner (top-right, not
+ * bottom-right): `.presentation-chrome`'s counter+hint row above already
+ * occupies the bottom-right corner, and stacking a third, only-sometimes-
+ * visible element into that same corner would either overlap it or force
+ * yet another self-sizing layout wrapper for what is, in practice, a
+ * briefly-shown transient state. The top-right corner is otherwise unused
+ * in this (non-presenter-view) layout -- PRESENTER_VIEW_STYLE's own
+ * `.presenter-timer` occupies the equivalent corner, but only ever under
+ * `body.presenter-view`, a class this element is never shown under anyway
+ * (see the hide-list at the top of PRESENTER_VIEW_STYLE below).
+ *
+ * Hidden by two independent conditions, exactly like `.presentation-counter`
+ * above: the bare `.presentation-jump-indicator` rule hides it
+ * unconditionally (so it vanishes the instant exitPresentationMode()
+ * removes body.presenting, with no JS needed to hide it explicitly), and
+ * even under body.presenting it additionally requires
+ * presentationScript.ts's own `.is-active` class (toggled by
+ * renderJumpIndicator() there) before it actually renders -- an ordinary
+ * presenting session with no jump in progress must never show an empty box
+ * in the corner.
+ *
+ * Deliberately NOT gated behind `!customCss`, for the same reason
+ * HELP_STYLE/OVERVIEW_STYLE above are not: this is the discoverability
+ * mechanism for a core interactive presentation-mode keybinding, not a
+ * suppressible decorative flourish.
+ */
+const JUMP_INDICATOR_STYLE = `
+    .presentation-jump-indicator {
+      display: none;
+    }
+    body.presenting .presentation-jump-indicator.is-active {
+      display: block;
+      position: fixed;
+      top: 1rem;
+      right: 1rem;
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
+      border: 1px solid var(--nh-border);
+      padding: 0.25rem 0.6rem;
+      border-radius: 4px;
+      font-size: 0.85rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }`;
+
+/**
  * The presenter-console layout for a genuinely separate presenter-view
  * window -- the SAME served document, opened at the SAME URL with one
  * added query flag (`&presenter`), rendering this layout instead of the
@@ -500,7 +555,8 @@ const PRESENTER_VIEW_STYLE = `
     body.presenter-view .presentation-chrome,
     body.presenter-view .presentation-progress,
     body.presenter-view .presentation-help,
-    body.presenter-view .presentation-help-hint {
+    body.presenter-view .presentation-help-hint,
+    body.presenter-view .presentation-jump-indicator {
       display: none !important;
     }
     body.presenter-view .slide {
@@ -1232,6 +1288,7 @@ ${
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
+    ${JUMP_INDICATOR_STYLE}
     ${PRESENTER_VIEW_STYLE}
     ${progressStyle}
     ${FRAGMENT_STYLE}

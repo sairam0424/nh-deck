@@ -1,6 +1,6 @@
 {
 	"name": "nh-deck",
-	"version": "1.3.0",
+	"version": "1.4.0",
 	"type": "module",
 	"license": "Apache-2.0",
 	"description": "A local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks.",
@@ -30,7 +30,8 @@
 		"test:watch": "vitest",
 		"typecheck": "tsc --noEmit && node scripts/typecheck-tests.mjs",
 		"lint": "biome ci .",
-		"check:fidelity": "node --import tsx scripts/check-pdf-fidelity.mjs"
+		"check:fidelity": "node --import tsx scripts/check-pdf-fidelity.mjs",
+		"generate:theme-gallery": "node --import tsx scripts/generate-theme-gallery.mjs"
 	},
 	"repository": {
 		"type": "git",

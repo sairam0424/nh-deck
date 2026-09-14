@@ -294,3 +294,164 @@ describe("PRESENTATION_SCRIPT — presenter view", () => {
 		expect(PRESENTATION_SCRIPT).not.toMatch(/https?:\/\/cdn\./i);
 	});
 });
+
+describe('PRESENTATION_SCRIPT — jump to slide ("g" + digits + Enter)', () => {
+	it('starts a jump on "g"/"G" and creates an on-screen digit indicator', () => {
+		expect(PRESENTATION_SCRIPT).toContain('event.key === "g"');
+		expect(PRESENTATION_SCRIPT).toContain('event.key === "G"');
+		expect(PRESENTATION_SCRIPT).toContain("startJump");
+		expect(PRESENTATION_SCRIPT).toContain("presentation-jump-indicator");
+	});
+
+	it("accumulates digit keypresses into jumpDigits via appendJumpDigit, and shows them in the indicator's text", () => {
+		expect(PRESENTATION_SCRIPT).toContain("appendJumpDigit");
+		expect(PRESENTATION_SCRIPT).toContain("jumpDigits += digit");
+		expect(PRESENTATION_SCRIPT).toContain('"Go to: " + jumpDigits');
+	});
+
+	it("confirms a pending jump on Enter via confirmJump, converting the 1-indexed typed number to goTo()'s 0-indexed convention", () => {
+		expect(PRESENTATION_SCRIPT).toContain('event.key === "Enter"');
+		expect(PRESENTATION_SCRIPT).toContain("confirmJump");
+		expect(PRESENTATION_SCRIPT).toContain("requestedSlideNumber - 1");
+	});
+
+	it("clamps an out-of-range typed slide number into the valid slide range instead of doing nothing or throwing", () => {
+		expect(PRESENTATION_SCRIPT).toContain("Math.min(");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"Math.max(requestedSlideNumber - 1, 0)",
+		);
+		expect(PRESENTATION_SCRIPT).toContain("slides.length - 1,\n    );");
+	});
+
+	it("cancels a pending jump without navigating when Enter is pressed with no digits typed", () => {
+		const confirmJumpBody = PRESENTATION_SCRIPT.slice(
+			PRESENTATION_SCRIPT.indexOf("const confirmJump = () =>"),
+			PRESENTATION_SCRIPT.indexOf("const confirmJump = () =>") + 400,
+		);
+		expect(confirmJumpBody).toContain("cancelJump();");
+		expect(confirmJumpBody).toContain("if (!digits) {");
+	});
+
+	it('folds jump-cancellation into the keydown listener\'s existing Escape branch as its FIRST, highest-precedence case, ahead of helpOpen/overviewOpen (no second "event.key === \\"Escape\\"" check is introduced)', () => {
+		const escapeOccurrences =
+			PRESENTATION_SCRIPT.split('event.key === "Escape"').length - 1;
+		expect(escapeOccurrences).toBe(1);
+
+		const escapeIndex = PRESENTATION_SCRIPT.indexOf('event.key === "Escape"');
+		const escapeBranch = PRESENTATION_SCRIPT.slice(
+			escapeIndex,
+			PRESENTATION_SCRIPT.indexOf('event.key === "?"'),
+		);
+		expect(escapeBranch).toContain("isJumpPending()");
+		expect(escapeBranch).toContain("cancelJump();");
+		expect(escapeBranch.indexOf("isJumpPending()")).toBeLessThan(
+			escapeBranch.indexOf("helpOpen"),
+		);
+	});
+
+	it('suppresses every other key (arrows/Home/End/Space/"?"/"p"/"o") while a jump is pending, via a bare return at the end of the jumpDigits block', () => {
+		const keydownListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("keydown"',
+		);
+		const questionMarkIndex = PRESENTATION_SCRIPT.indexOf(
+			'event.key === "?"',
+			keydownListenerStart,
+		);
+		// The FIRST "if (isJumpPending())" after keydownListenerStart is
+		// actually inside the Escape branch above (`if (isJumpPending()) {
+		// cancelJump(); }`) -- the standalone swallow-everything-else block this
+		// test cares about is the NEXT occurrence after that one.
+		const firstJumpPendingCheck = PRESENTATION_SCRIPT.indexOf(
+			"if (isJumpPending()) {",
+			keydownListenerStart,
+		);
+		const jumpBlockIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (isJumpPending()) {",
+			firstJumpPendingCheck + 1,
+		);
+		const pKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			'event.key === "p"',
+			keydownListenerStart,
+		);
+		expect(jumpBlockIndex).toBeGreaterThan(-1);
+		// The jumpDigits block is checked right after Escape and BEFORE "?"
+		// and "p" -- it must come before "?" specifically, or "?" would
+		// open/close help even while a jump is still pending, breaking the
+		// "every other key is swallowed" guarantee for exactly that one key.
+		// See this file's own module docstring for the full precedence
+		// reasoning.
+		expect(jumpBlockIndex).toBeLessThan(questionMarkIndex);
+		expect(jumpBlockIndex).toBeLessThan(pKeyIndex);
+	});
+
+	it('starts a new jump via "g" only after BOTH the helpOpen and overviewOpen early-returns, so "g" can never start a jump while either is open', () => {
+		const keydownListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("keydown"',
+		);
+		const gKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			'event.key === "g"',
+			keydownListenerStart,
+		);
+		// Specifically the standalone suppression guard (`if (helpOpen) {
+		// return; }`), not the Escape/"?" branches' own "helpOpen" checks
+		// (which read as "else if (helpOpen)"/"if (helpOpen)" followed by
+		// closeHelp(), not a bare return) -- see the "p"-precedence test above
+		// for the identical disambiguation concern.
+		const helpOpenGuardIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (helpOpen) {\n      return;",
+			keydownListenerStart,
+		);
+		const overviewOpenGuardIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (overviewOpen) {\n      return;",
+			keydownListenerStart,
+		);
+		expect(helpOpenGuardIndex).toBeGreaterThan(-1);
+		expect(overviewOpenGuardIndex).toBeGreaterThan(-1);
+		expect(gKeyIndex).toBeGreaterThan(helpOpenGuardIndex);
+		expect(gKeyIndex).toBeGreaterThan(overviewOpenGuardIndex);
+	});
+
+	it("suppresses the click listener's advance-to-next-slide and helpHint-open behavior while a jump is pending", () => {
+		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("click"',
+		);
+		const jumpGuardIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (isJumpPending()) {",
+			clickListenerStart,
+		);
+		const helpHintIndex = PRESENTATION_SCRIPT.indexOf(
+			'closest(".presentation-help-hint")',
+			clickListenerStart,
+		);
+		const advanceIndex = PRESENTATION_SCRIPT.indexOf(
+			"advance();",
+			clickListenerStart,
+		);
+		expect(jumpGuardIndex).toBeGreaterThan(-1);
+		expect(jumpGuardIndex).toBeLessThan(helpHintIndex);
+		expect(jumpGuardIndex).toBeLessThan(advanceIndex);
+	});
+
+	it("suppresses touch-swipe navigation while a jump is pending, same as the overview/help guards", () => {
+		const touchendListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("touchend"',
+		);
+		const guard = PRESENTATION_SCRIPT.slice(
+			touchendListenerStart,
+			touchendListenerStart + 900,
+		);
+		expect(guard).toContain("isJumpPending()");
+	});
+
+	it("adds the jump-to-slide binding to the help overlay's own shortcut list, under Navigate", () => {
+		const navigateIndex = PRESENTATION_SCRIPT.indexOf("<dt>Navigate</dt>");
+		const viewIndex = PRESENTATION_SCRIPT.indexOf("<dt>View</dt>");
+		const navigateSection = PRESENTATION_SCRIPT.slice(navigateIndex, viewIndex);
+		expect(navigateSection).toContain("jump to slide");
+		expect(navigateSection).toContain("G");
+	});
+
+	it("never uses a backtick inside the client-side script text (a stray backtick would prematurely terminate the outer template literal)", () => {
+		expect(PRESENTATION_SCRIPT).not.toContain("`");
+	});
+});
