@@ -619,7 +619,17 @@ const PRESENTER_VIEW_STYLE = `
       font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
       font-size: 0.9rem;
     }
+    /* A <button>, not a <span> (see presentationScript.ts), for real
+       keyboard operability -- these resets strip the browser's own default
+       button chrome (background/border/padding/font) back to plain
+       styled text so it reads identically to before this was a button. */
     .presenter-timer-display {
+      background: none;
+      border: none;
+      padding: 0;
+      margin: 0;
+      font: inherit;
+      color: inherit;
       cursor: pointer;
     }
     .presenter-timer.is-paused .presenter-timer-display {

@@ -365,20 +365,43 @@ export const PRESENTATION_SCRIPT = `<script>
     timerEl.className = "presenter-timer";
     presenterConsole.appendChild(timerEl);
 
-    const timerDisplay = document.createElement("span");
+    // A <button>, not a <span> -- a click-only control has no keyboard
+    // affordance at all, and this whole window is otherwise exclusively
+    // keyboard-driven (every other presentation-mode interaction goes
+    // through the keydown listener). aria-pressed is kept in sync with
+    // the pause state in updateTimerDisplay() below, mirroring how
+    // fragments keep aria-hidden in sync with .is-revealed elsewhere in
+    // this file. type="button" avoids any implicit form-submit behavior.
+    const timerDisplay = document.createElement("button");
+    timerDisplay.type = "button";
     timerDisplay.className = "presenter-timer-display";
     timerDisplay.title = "Click to pause or resume";
+    timerDisplay.setAttribute("aria-pressed", "false");
     timerEl.appendChild(timerDisplay);
 
     const durationInput = document.createElement("input");
     durationInput.className = "presenter-timer-duration";
     durationInput.type = "number";
-    durationInput.min = "1";
+    // Fractional minutes are genuinely supported (the change handler below
+    // accepts any value > 0), not just permitted by an oversight -- a
+    // short target duration is legitimate for a lightning talk, so min is
+    // intentionally well below "1" rather than the more obvious-looking
+    // "1", which would contradict the actual accepted range.
+    durationInput.min = "0.01";
+    durationInput.step = "0.01";
     durationInput.placeholder = "min";
     durationInput.title = "Target duration in minutes (optional)";
-    const storedDurationMinutes = Number(
-      localStorage.getItem(TIMER_DURATION_STORAGE_KEY),
-    );
+    // localStorage.getItem can throw (private-browsing/storage-disabled
+    // modes in some browsers) -- a thrown read here must not abort the
+    // rest of presenter-view setup; degrading to "no stored duration" is
+    // the correct fallback, same as never having one typed in at all.
+    let storedDurationRaw = null;
+    try {
+      storedDurationRaw = localStorage.getItem(TIMER_DURATION_STORAGE_KEY);
+    } catch (error) {
+      console.warn("nh-deck: could not read presenter timer duration from localStorage.", error);
+    }
+    const storedDurationMinutes = Number(storedDurationRaw);
     if (Number.isFinite(storedDurationMinutes) && storedDurationMinutes > 0) {
       durationInput.value = String(storedDurationMinutes);
     }
@@ -401,6 +424,7 @@ export const PRESENTATION_SCRIPT = `<script>
         String(seconds).padStart(2, "0");
 
       timerEl.classList.toggle("is-paused", pausedAtMs !== null);
+      timerDisplay.setAttribute("aria-pressed", String(pausedAtMs !== null));
 
       const targetMinutes = Number(durationInput.value);
       const hasTarget = Number.isFinite(targetMinutes) && targetMinutes > 0;
@@ -414,22 +438,31 @@ export const PRESENTATION_SCRIPT = `<script>
     setInterval(updateTimerDisplay, 1000);
 
     // The pause-toggle click listener lives on timerDisplay (the mm:ss
-    // span) specifically, not the whole flex-laid-out timerEl container --
+    // button) specifically, not the whole flex-laid-out timerEl container --
     // Puppeteer/a real click at the CENTER of the full timer box (spanning
     // both the display and the duration input side by side) can land on
     // either child depending on their relative widths, and there is no
     // layout-independent way to tell "the presenter meant to pause" from
     // "the presenter meant to click into the input" from a single
-    // container-level listener. Scoping to the display span removes the
+    // container-level listener. Scoping to the display button removes the
     // ambiguity entirely: clicking the time itself always pauses, clicking
     // the input always focuses it for typing, with no stopPropagation
     // coordination needed between the two.
     durationInput.addEventListener("change", () => {
       const value = durationInput.value.trim();
-      if (value === "") {
-        localStorage.removeItem(TIMER_DURATION_STORAGE_KEY);
-      } else {
-        localStorage.setItem(TIMER_DURATION_STORAGE_KEY, value);
+      // localStorage.setItem/removeItem can throw (private-browsing/quota-
+      // exceeded modes) -- a thrown write here must not stop
+      // updateTimerDisplay() from running below, since the in-memory
+      // durationInput.value it reads is already correct regardless of
+      // whether persisting that value to disk succeeded.
+      try {
+        if (value === "") {
+          localStorage.removeItem(TIMER_DURATION_STORAGE_KEY);
+        } else {
+          localStorage.setItem(TIMER_DURATION_STORAGE_KEY, value);
+        }
+      } catch (error) {
+        console.warn("nh-deck: could not persist presenter timer duration to localStorage.", error);
       }
       updateTimerDisplay();
     });
