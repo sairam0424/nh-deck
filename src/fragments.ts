@@ -323,12 +323,19 @@ function transformSelfMarkableToken(
  * unlike extractSlideLayout/extractNotes, which only ever scan a single
  * slide's TOP-LEVEL token array.
  *
- * "list_item" and "paragraph" both route through transformSelfMarkableToken
- * first -- see that function's own docstring for why a same-line trailing
- * marker needs a dedicated check rather than the generic sibling-based
- * resolveMarkersInArray call below, which only ever looks at DIRECT
- * siblings and would never find a marker nested one level inside either
- * token's own inline content.
+ * "list_item", "paragraph", and "blockquote" all route through
+ * transformSelfMarkableToken first -- see that function's own docstring
+ * for why a same-line trailing marker needs a dedicated check rather than
+ * the generic sibling-based resolveMarkersInArray call below, which only
+ * ever looks at DIRECT siblings and would never find a marker nested one
+ * level inside any of these tokens' own content. "blockquote" specifically
+ * needs this too (found by review, not by the original design): a marker
+ * trailing on a blockquote's own single-paragraph text would otherwise
+ * reach and be consumed by that NESTED paragraph first (paragraph is
+ * itself self-markable), leaving the blockquote's own frame permanently
+ * visible while only its text fragment-reveals -- checking blockquote
+ * here first means the WHOLE quote reveals together, consistent with the
+ * existing marker-precedes-blockquote convention.
  */
 function transformNode(node: unknown, onFragmentFound: () => void): unknown {
 	if (Array.isArray(node)) {
@@ -340,7 +347,9 @@ function transformNode(node: unknown, onFragmentFound: () => void): unknown {
 	}
 	const obj = node as Record<string, unknown>;
 	if (
-		(obj.type === "list_item" || obj.type === "paragraph") &&
+		(obj.type === "list_item" ||
+			obj.type === "paragraph" ||
+			obj.type === "blockquote") &&
 		Array.isArray(obj.tokens)
 	) {
 		return transformSelfMarkableToken(obj, onFragmentFound);

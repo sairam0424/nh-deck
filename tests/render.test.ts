@@ -1573,6 +1573,22 @@ describe("generateHtml — fragment (incremental reveal) markers", () => {
 		expect(html).toContain("<p>Quote line 2.</p>");
 	});
 
+	// Regression (found by CodeRabbit review): a marker trailing on the same
+	// line as a blockquote's own text was reaching the blockquote's nested
+	// paragraph FIRST (via transformSelfMarkableToken's paragraph handling),
+	// so the paragraph consumed and self-flagged on the marker before the
+	// blockquote itself ever got a chance to -- leaving the quote's own
+	// frame always visible while only its text faded in, unlike the
+	// existing marker-precedes-blockquote convention above, which marks the
+	// whole blockquote.
+	it('applies class="fragment" to the whole blockquote, not just its nested paragraph, for a same-line trailing marker', () => {
+		const html = generateHtml("> A quote. <!-- fragment -->\n");
+
+		expect(html).toMatch(/<blockquote class="fragment">\s*<p>A quote\. <\/p>/);
+		expect(html).not.toMatch(/<p class="fragment">/);
+		expect(html).not.toContain("<!-- fragment -->");
+	});
+
 	it('applies class="fragment" to a Mermaid diagram (a code token with lang mermaid) preceded by a marker, composed onto its root <svg>', () => {
 		const html = generateHtml(
 			"<!-- fragment -->\n\n```mermaid\nflowchart TD\n  A --> B\n```\n",
