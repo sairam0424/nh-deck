@@ -360,23 +360,27 @@ describe('PRESENTATION_SCRIPT — jump to slide ("g" + digits + Enter)', () => {
 		// The FIRST "if (isJumpPending())" after keydownListenerStart is
 		// actually inside the Escape branch above (`if (isJumpPending()) {
 		// cancelJump(); }`) -- the standalone swallow-everything-else block this
-		// test cares about only comes after the "?" branch, so search from
-		// questionMarkIndex, not keydownListenerStart, to find that one
-		// specifically (mirrors the "p"-precedence test's own identical
-		// disambiguation below).
+		// test cares about is the NEXT occurrence after that one.
+		const firstJumpPendingCheck = PRESENTATION_SCRIPT.indexOf(
+			"if (isJumpPending()) {",
+			keydownListenerStart,
+		);
 		const jumpBlockIndex = PRESENTATION_SCRIPT.indexOf(
 			"if (isJumpPending()) {",
-			questionMarkIndex,
+			firstJumpPendingCheck + 1,
 		);
 		const pKeyIndex = PRESENTATION_SCRIPT.indexOf(
 			'event.key === "p"',
 			keydownListenerStart,
 		);
 		expect(jumpBlockIndex).toBeGreaterThan(-1);
-		// The jumpDigits block is checked right after "?" and before "p" --
-		// see this file's own module docstring for the full precedence
+		// The jumpDigits block is checked right after Escape and BEFORE "?"
+		// and "p" -- it must come before "?" specifically, or "?" would
+		// open/close help even while a jump is still pending, breaking the
+		// "every other key is swallowed" guarantee for exactly that one key.
+		// See this file's own module docstring for the full precedence
 		// reasoning.
-		expect(jumpBlockIndex).toBeGreaterThan(questionMarkIndex);
+		expect(jumpBlockIndex).toBeLessThan(questionMarkIndex);
 		expect(jumpBlockIndex).toBeLessThan(pKeyIndex);
 	});
 

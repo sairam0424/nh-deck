@@ -1607,6 +1607,28 @@ describe('presentation mode — jump to slide ("g" + digits + Enter)', () => {
 	);
 
 	it(
+		'swallows "?" while a jump is pending instead of opening the help overlay -- a pending jump must suppress every other key, "?" included',
+		async () => {
+			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));
+
+			await page.keyboard.press("g");
+			await page.keyboard.press("1");
+			await page.keyboard.press("?");
+
+			const helpOpen = await page.evaluate(() =>
+				document.body.classList.contains("help-open"),
+			);
+			expect(helpOpen).toBe(false);
+			expect(await isJumpIndicatorActive(page)).toBe(true);
+			expect(await jumpIndicatorText(page)).toContain("1");
+
+			await page.keyboard.press("Enter");
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"cancels silently, without navigating, when Enter is pressed with no digits typed yet",
 		async () => {
 			const page = await openPresentationPage(generateHtml(FIFTEEN_SLIDE_DECK));

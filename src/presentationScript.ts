@@ -868,9 +868,10 @@ export const PRESENTATION_SCRIPT = `<script>
     //    this whole ordering exists to preserve.
     //
     // A pending slide jump (jumpDigits !== null, started by "g" -- see this
-    // file's own module docstring, and the jumpDigits block right after the
-    // "?" branch below) is a FOURTH modal-ish state, layered on top of the
-    // three above: cancelJump() is folded into this very Escape branch as
+    // file's own module docstring, and the jumpDigits block right below,
+    // which is checked BEFORE the "?" branch so a pending jump swallows
+    // "?" too) is a FOURTH modal-ish state, layered on top of the three
+    // above: cancelJump() is folded into this very Escape branch as
     // its first, highest-precedence case, ahead of helpOpen/overviewOpen,
     // since Escape while a jump is pending means "cancel this jump", never
     // "close help"/"close overview"/"exit presentation mode". In practice
@@ -892,14 +893,6 @@ export const PRESENTATION_SCRIPT = `<script>
       }
       return;
     }
-    if (event.key === "?") {
-      if (helpOpen) {
-        closeHelp();
-      } else {
-        openHelp();
-      }
-      return;
-    }
     // Digits and Enter for an in-progress slide jump are resolved here,
     // immediately after Escape's own cancelJump() branch above and before
     // every other key this listener understands ("?"/"p"/"o"/arrows/Home/
@@ -911,12 +904,23 @@ export const PRESENTATION_SCRIPT = `<script>
     // whatever it would normally do underneath an in-progress digit entry.
     // This mirrors the helpOpen/overviewOpen early-returns further down
     // (which suppress "o"/"g" and slide navigation the same blanket way
-    // while THEIR modal is open).
+    // while THEIR modal is open). This block MUST come before the "?"
+    // branch below -- checking "?" first would let it open/close help
+    // while a jump is still pending, breaking the "every other key is
+    // swallowed" guarantee for exactly one key.
     if (isJumpPending()) {
       if (event.key === "Enter") {
         confirmJump();
       } else if (event.key >= "0" && event.key <= "9") {
         appendJumpDigit(event.key);
+      }
+      return;
+    }
+    if (event.key === "?") {
+      if (helpOpen) {
+        closeHelp();
+      } else {
+        openHelp();
       }
       return;
     }
