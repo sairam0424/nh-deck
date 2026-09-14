@@ -98,6 +98,79 @@ function lastNonSpaceIndex(items: unknown[]): number {
 }
 
 /**
+ * Block-level token types whose OWN `.tokens` is that token's inline
+ * content (not further block-level children) -- the wrapper shapes
+ * marked's lexer produces for a single line of text with nothing else
+ * around it: "paragraph" for a loose list item or a top-level paragraph,
+ * "text" for a tight list item specifically. extractOwnTrailingMarker
+ * below drills exactly one level into either shape looking for a marker
+ * nested inside it; recursion stops naturally past that because a plain
+ * inline token (the actual text run) has no `.tokens` array of its own.
+ */
+const WRAPPED_INLINE_CONTENT_TYPES = new Set(["paragraph", "text"]);
+
+/**
+ * Detects and strips a fragment marker that marks a self-contained
+ * content unit (a list item, or a top-level paragraph) AS A WHOLE,
+ * checked on the RAW tokens before any recursive transform could
+ * otherwise reach and silently drop the marker. Handles two shapes:
+ *
+ * Shape 1 -- marker on its own separate line: a direct sibling, the last
+ * non-space entry in `items` itself (e.g. "- Item 1\n  <!-- fragment
+ * -->\n", or "First.\n\n<!-- fragment -->\n\nSecond.").
+ *
+ * Shape 2 -- marker trailing on the SAME line as the unit's own text
+ * (e.g. "- Item 1 <!-- fragment -->\n", or "First. <!-- fragment -->\n\n
+ * Second."): marked's lexer wraps a single line of content in one extra
+ * block token (see WRAPPED_INLINE_CONTENT_TYPES) whose OWN inline
+ * `.tokens` is `[...text, marker]` -- one level deeper than Shape 1. A
+ * multi-paragraph list item's LAST paragraph ending in a same-line marker
+ * reaches this same check too, since that paragraph is itself the last
+ * entry in `items` -- which is why it correctly marks the whole item
+ * rather than just that trailing paragraph.
+ *
+ * Returns the marker removed from wherever it was actually found (Shape 1
+ * removes it from `items` directly; Shape 2 rebuilds only the one nested
+ * wrapper token, immutably, leaving every sibling untouched) alongside
+ * whether one was found at all.
+ */
+function extractOwnTrailingMarker(items: unknown[]): {
+	tokens: unknown[];
+	foundTrailingMarker: boolean;
+} {
+	const lastIndex = lastNonSpaceIndex(items);
+	if (lastIndex === -1) {
+		return { tokens: items, foundTrailingMarker: false };
+	}
+
+	if (isFragmentMarkerToken(items[lastIndex])) {
+		return {
+			tokens: [...items.slice(0, lastIndex), ...items.slice(lastIndex + 1)],
+			foundTrailingMarker: true,
+		};
+	}
+
+	const lastEntry = items[lastIndex];
+	const lastEntryType = tokenType(lastEntry);
+	if (
+		lastEntryType !== undefined &&
+		WRAPPED_INLINE_CONTENT_TYPES.has(lastEntryType) &&
+		isTokenLike(lastEntry) &&
+		Array.isArray(lastEntry.tokens)
+	) {
+		const inner = extractOwnTrailingMarker(lastEntry.tokens);
+		if (inner.foundTrailingMarker) {
+			const updatedLastEntry = { ...lastEntry, tokens: inner.tokens };
+			const newItems = [...items];
+			newItems[lastIndex] = updatedLastEntry;
+			return { tokens: newItems, foundTrailingMarker: true };
+		}
+	}
+
+	return { tokens: items, foundTrailingMarker: false };
+}
+
+/**
  * Resolves every fragment marker found directly inside `items` (already
  * recursively transformed by transformNode below) by flagging the nearest
  * adjacent sibling within this SAME array, then returns a new array with
@@ -174,42 +247,50 @@ function resolveMarkersInArray(
 
 /**
  * Special-cased ahead of (and instead of, when it applies) the generic
- * resolveMarkersInArray above: a fragment marker nested directly inside a
- * list item's own `.tokens` array -- the ONLY way CommonMark lets a
- * marker bind to ONE specific bullet without splitting the enclosing list
- * into two separate `<ul>`/`<ol>` tokens (verified directly against
- * marked's own lexer output; an unindented marker between two list items
- * with no blank line, or with one, both terminate the list instead) --
- * marks the WHOLE bullet (`<li>`), not whichever bare, unwrapped "text"/
- * "paragraph" token happens to be that item's own content. Only a
- * TRAILING marker (the last non-space entry in the item's own tokens)
- * bubbles up this way; a marker anywhere else inside the item (e.g.
- * between its own text and a nested sub-list) falls through to the
- * generic sibling-based resolution instead, which -- per
- * FRAGMENT_TARGET_TYPES -- has no supported target for that shape and
- * drops it with no visual effect rather than guessing.
+ * resolveMarkersInArray above: a fragment marker that marks a whole
+ * self-contained content unit -- a list item, or a top-level paragraph --
+ * rather than merely one of its siblings. For a list item, this is the
+ * ONLY way CommonMark lets a marker bind to ONE specific bullet without
+ * splitting the enclosing list into two separate `<ul>`/`<ol>` tokens
+ * (verified directly against marked's own lexer output; an unindented
+ * marker between two list items with no blank line, or with one, both
+ * terminate the list instead) -- marks the WHOLE bullet (`<li>`), not
+ * whichever bare, unwrapped "text"/"paragraph" token happens to be that
+ * item's own content. For a top-level paragraph, this is simply "does
+ * this paragraph's own trailing content end in a marker" -- see
+ * extractOwnTrailingMarker's Shape 2 for why a SAME-LINE trailing marker
+ * needs this dedicated check rather than the generic sibling-based
+ * resolution below: the marker is nested one level inside the token's
+ * own inline `.tokens`, not present as a direct sibling anywhere
+ * resolveMarkersInArray would ever look.
+ *
+ * Only a TRAILING marker (the last non-space entry, checked via
+ * extractOwnTrailingMarker on the RAW tokens before any recursive
+ * transform could otherwise silently drop it) is resolved this way; a
+ * marker anywhere else inside the token (e.g. between its own text and a
+ * nested sub-list) falls through to the generic sibling-based resolution
+ * instead, which -- per FRAGMENT_TARGET_TYPES -- has no supported target
+ * for that shape and drops it with no visual effect rather than guessing.
  */
-function transformListItem(
-	listItem: Record<string, unknown>,
+function transformSelfMarkableToken(
+	token: Record<string, unknown>,
 	onFragmentFound: () => void,
 ): Record<string, unknown> {
-	const rawTokens = listItem.tokens as unknown[];
-	const transformedTokens = rawTokens.map((child) =>
+	const rawTokens = token.tokens as unknown[];
+	const { tokens: tokensWithMarkerRemoved, foundTrailingMarker } =
+		extractOwnTrailingMarker(rawTokens);
+	const transformedTokens = tokensWithMarkerRemoved.map((child) =>
 		transformNode(child, onFragmentFound),
 	);
 
-	const lastIndex = lastNonSpaceIndex(transformedTokens);
-	const hasTrailingMarker =
-		lastIndex !== -1 && isFragmentMarkerToken(transformedTokens[lastIndex]);
-
-	const otherEntries = Object.entries(listItem)
+	const otherEntries = Object.entries(token)
 		.filter(([key]) => key !== "tokens")
 		.map(
 			([key, value]) => [key, transformNode(value, onFragmentFound)] as const,
 		);
 	const otherFields = Object.fromEntries(otherEntries);
 
-	if (!hasTrailingMarker) {
+	if (!foundTrailingMarker) {
 		return {
 			...otherFields,
 			tokens: resolveMarkersInArray(transformedTokens, onFragmentFound),
@@ -217,21 +298,15 @@ function transformListItem(
 	}
 
 	onFragmentFound();
-	const newTokens = [
-		...transformedTokens.slice(0, lastIndex),
-		...transformedTokens.slice(lastIndex + 1),
-	];
-	// The trailing marker above is only ONE marker this list item's own
-	// tokens might contain -- an earlier direct marker (e.g. two paragraphs
-	// in one bullet, the first followed by its own marker, the second being
+	// The trailing marker above is only ONE marker this token's own tokens
+	// might contain -- an earlier direct marker (e.g. two paragraphs in one
+	// list item, the first followed by its own marker, the second being
 	// this trailing one) would otherwise survive untouched and leak through
-	// as a literal HTML comment inside the rendered <li>, since only
-	// transformNode (not the sibling-relative resolveMarkersInArray) has
-	// run over transformedTokens so far. Resolving again here removes it,
-	// mirroring what the !hasTrailingMarker branch above already does.
+	// as a literal HTML comment. Resolving again here removes it, mirroring
+	// what the !foundTrailingMarker branch above already does.
 	return {
 		...otherFields,
-		tokens: resolveMarkersInArray(newTokens, onFragmentFound),
+		tokens: resolveMarkersInArray(transformedTokens, onFragmentFound),
 		fragment: true,
 	};
 }
@@ -247,6 +322,20 @@ function transformListItem(
  * deeply nested it is (inside a list item, inside a blockquote, ...),
  * unlike extractSlideLayout/extractNotes, which only ever scan a single
  * slide's TOP-LEVEL token array.
+ *
+ * "list_item", "paragraph", and "blockquote" all route through
+ * transformSelfMarkableToken first -- see that function's own docstring
+ * for why a same-line trailing marker needs a dedicated check rather than
+ * the generic sibling-based resolveMarkersInArray call below, which only
+ * ever looks at DIRECT siblings and would never find a marker nested one
+ * level inside any of these tokens' own content. "blockquote" specifically
+ * needs this too (found by review, not by the original design): a marker
+ * trailing on a blockquote's own single-paragraph text would otherwise
+ * reach and be consumed by that NESTED paragraph first (paragraph is
+ * itself self-markable), leaving the blockquote's own frame permanently
+ * visible while only its text fragment-reveals -- checking blockquote
+ * here first means the WHOLE quote reveals together, consistent with the
+ * existing marker-precedes-blockquote convention.
  */
 function transformNode(node: unknown, onFragmentFound: () => void): unknown {
 	if (Array.isArray(node)) {
@@ -257,8 +346,13 @@ function transformNode(node: unknown, onFragmentFound: () => void): unknown {
 		return node;
 	}
 	const obj = node as Record<string, unknown>;
-	if (obj.type === "list_item" && Array.isArray(obj.tokens)) {
-		return transformListItem(obj, onFragmentFound);
+	if (
+		(obj.type === "list_item" ||
+			obj.type === "paragraph" ||
+			obj.type === "blockquote") &&
+		Array.isArray(obj.tokens)
+	) {
+		return transformSelfMarkableToken(obj, onFragmentFound);
 	}
 	const entries = Object.entries(obj).map(
 		([key, value]) => [key, transformNode(value, onFragmentFound)] as const,

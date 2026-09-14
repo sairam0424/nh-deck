@@ -247,6 +247,13 @@ describe("CLI: nh-deck init", () => {
 			expect(written).toContain("?notes");
 			expect(written).toContain("→ / Space / ← / Home / End / click / swipe");
 			expect(written).toContain("Esc");
+			// Regression (found by CodeRabbit review): this starter deck's own
+			// shortcut list is a separate, hardcoded copy of the in-app help
+			// overlay's list -- it drifted out of sync when jump-to-slide and
+			// presenter view shipped, so a new user reading their own starter
+			// deck would never learn either exists.
+			expect(written).toContain("jump to slide");
+			expect(written).toContain("presenter view");
 
 			rmSync(tempFile, { force: true });
 		},

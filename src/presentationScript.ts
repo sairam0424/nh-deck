@@ -305,6 +305,7 @@ export const PRESENTATION_SCRIPT = `<script>
     "<dd>G, digits, Enter — jump to slide</dd>" +
     "<dt>View</dt>" +
     "<dd>O — overview</dd>" +
+    "<dd>P — presenter view</dd>" +
     "<dd>? — this help</dd>" +
     "<dd>Esc — exit or close</dd>" +
     "</dl>" +
