@@ -459,3 +459,76 @@ describe("startServer — watch mode", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 });
+
+describe("startServer — theme preview endpoint", () => {
+	it("responds 204 and invokes onThemePreview with the exact name from the query string, when watch is on and onThemePreview is provided", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=dracula`);
+		const body = await response.text();
+
+		expect(response.status).toBe(204);
+		expect(body).toBe("");
+		expect(received).toEqual(["dracula"]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("is not exposed (falls through to serving the page) when watch is off, even with onThemePreview provided", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=dracula`);
+		const body = await response.text();
+
+		expect(response.status).toBe(200);
+		expect(body).toBe("<p>x</p>");
+		expect(received).toEqual([]);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("is not exposed (falls through to serving the page) when watch is on but no onThemePreview is given", async () => {
+		const { server, url } = await startServer("<p>x</p>", 0, { watch: true });
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=dracula`);
+		const body = await response.text();
+
+		expect(response.status).toBe(200);
+		expect(body).toContain("<p>x</p>");
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("does not invoke onThemePreview for a missing or empty name query param, but still responds 204", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const noQueryResponse = await fetch(`${url}/__nh-deck-theme`);
+		const emptyNameResponse = await fetch(`${url}/__nh-deck-theme?name=`);
+
+		expect(noQueryResponse.status).toBe(204);
+		expect(emptyNameResponse.status).toBe(204);
+		expect(received).toEqual([]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+});

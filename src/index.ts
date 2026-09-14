@@ -418,11 +418,36 @@ program
 					transitionName,
 					effectiveCssVars,
 				);
+
+				// Set by a theme-preview click (wired up below via
+				// onThemePreview), never by anything else -- a deliberate
+				// live-preview click is a more specific, more recent user
+				// action than either the --theme flag or the deck's own
+				// frontmatter theme: key, so once set it wins over both on
+				// every subsequent re-render, including ones triggered by an
+				// unrelated file save. It is only ever replaced by another
+				// preview click, never automatically cleared.
+				let previewThemeOverride: string | undefined;
+				// Forward-declared: onThemePreview (passed into startServer
+				// just below) needs to trigger the real debounced re-render,
+				// but that re-render's own closure needs `updateHtml`, which
+				// only exists once startServer has already resolved. Stays a
+				// no-op unless options.watch is set, at which point the
+				// `if (options.watch)` block below replaces it with the real
+				// debounced function -- matching server.ts's own
+				// `options.watch && options.onThemePreview` gate, since the
+				// preview endpoint is never reachable at all when watch is off.
+				let rerender: () => void = () => {};
+
 				const { url, updateHtml, server } = await startServer(
 					html,
 					options.port,
 					{
 						watch: options.watch,
+						onThemePreview: (name) => {
+							previewThemeOverride = name;
+							rerender();
+						},
 					},
 				);
 
@@ -450,7 +475,7 @@ program
 					//   reason): a red warning naming the actual problem, without
 					//   tearing down the server -- updateHtml is never reached in this
 					//   branch, so the last-known-good HTML keeps being served.
-					const rerender = debounce(() => {
+					rerender = debounce(() => {
 						const result = runWatchedRerender(
 							() => readFileSync(file, "utf8"),
 							(updatedRawMarkdown) => {
@@ -458,9 +483,15 @@ program
 									frontmatter: updatedFrontmatter,
 									body: updatedMarkdown,
 								} = parseFrontmatter(updatedRawMarkdown);
+								// A theme-preview override, once set by a click, wins over
+								// BOTH the --theme flag and the deck's own frontmatter
+								// theme: value -- passed here as the "flag" argument since
+								// computeEffectiveTheme's own precedence is
+								// flagTheme ?? frontmatterTheme, and a preview override
+								// must beat both.
 								const { colors: updatedThemeColors } = computeEffectiveTheme(
 									updatedFrontmatter.theme,
-									options.theme,
+									previewThemeOverride ?? options.theme,
 									customCss,
 								);
 								const { name: updatedTransitionName } =

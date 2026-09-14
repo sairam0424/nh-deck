@@ -2240,6 +2240,103 @@ describe("CLI: nh-deck render --watch", () => {
 			},
 		);
 	});
+
+	it(
+		"lets a theme-preview click win over the frontmatter theme, re-coloring both the page CSS variables and the mermaid diagrams own baked SVG colors, and the override persists across a later file-triggered re-render",
+		async () => {
+			const dir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-theme-preview-test-"),
+			);
+			const deckPath = path.join(dir, "deck.md");
+			const deckWithMermaid = (heading: string) =>
+				`---\ntheme: dracula\n---\n# ${heading}\n\n\`\`\`mermaid\nflowchart TD\n  A[Start] --> B[End]\n\`\`\`\n`;
+			writeFileSync(deckPath, deckWithMermaid("Original"));
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			// The mermaid diagram bakes its theme colors into its own <svg
+			// style="..."> attribute at render time (see mermaidRenderer.ts) --
+			// distinct from the page-level --nh-* custom properties, which live
+			// in a separate :root block. Isolating this attribute is what lets
+			// this test tell "only the CSS variables changed" apart from "the
+			// diagram was actually re-rendered with the new theme too".
+			const extractSvgStyle = (body: string): string => {
+				const match = body.match(/<svg[^>]*\sstyle="([^"]*)"/);
+				if (!match) {
+					throw new Error('No <svg style="..."> found in the served body');
+				}
+				return match[1];
+			};
+
+			const initialBody = await fetchBody(url);
+			// The deck's own frontmatter theme ("dracula") applies with no
+			// --theme flag given -- both the page-level CSS variable and the
+			// mermaid diagram's own baked SVG colors.
+			expect(initialBody).toContain("--nh-bg: #282a36");
+			expect(extractSvgStyle(initialBody)).toContain("--accent:#bd93f9");
+
+			// A deliberate theme-preview click for a DIFFERENT theme ("nord") --
+			// exactly the request the on-page control's own fetch() call makes.
+			const previewResponse = await fetch(`${url}/__nh-deck-theme?name=nord`);
+			expect(previewResponse.status).toBe(204);
+
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const previewedBody = await fetchBody(url);
+			// The page-level CSS variable now reflects the previewed theme, not
+			// the frontmatter one.
+			expect(previewedBody).toContain("--nh-bg: #2e3440");
+			expect(previewedBody).not.toContain("--nh-bg: #282a36");
+			// The whole reason Design A-full (reusing the SSE reload channel)
+			// was chosen over a CSS-only approach: the mermaid diagram's own SVG
+			// bakes theme colors in at render time, so it must be re-rendered
+			// with the new theme too -- not just a page-level CSS variable swap.
+			const previewedSvgStyle = extractSvgStyle(previewedBody);
+			expect(previewedSvgStyle).toContain("--accent:#88c0d0");
+			expect(previewedSvgStyle).not.toContain("--accent:#bd93f9");
+
+			// An unrelated edit to the watched file (a heading change) must not
+			// reset the preview: the override persists across a subsequent
+			// file-triggered re-render, since it is only ever changed by another
+			// preview click, never automatically cleared.
+			writeFileSync(deckPath, deckWithMermaid("Changed"));
+			await new Promise((resolve) => setTimeout(resolve, 500));
+
+			const afterEditBody = await fetchBody(url);
+			expect(afterEditBody).toContain("Changed");
+			expect(afterEditBody).toContain("--nh-bg: #2e3440");
+			expect(afterEditBody).not.toContain("--nh-bg: #282a36");
+			const afterEditSvgStyle = extractSvgStyle(afterEditBody);
+			expect(afterEditSvgStyle).toContain("--accent:#88c0d0");
+			expect(afterEditSvgStyle).not.toContain("--accent:#bd93f9");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: theme selection", () => {
