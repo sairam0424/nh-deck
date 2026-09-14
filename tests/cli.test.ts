@@ -24,7 +24,16 @@ const STARTUP_TIMEOUT_MS = 8_000;
 const EXIT_TIMEOUT_MS = 3_000;
 const TEST_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXIT_TIMEOUT_MS + 5_000;
 const PDF_EXPORT_TIMEOUT_MS = 60_000;
-const WATCH_TEST_TIMEOUT_MS = 10_000;
+// Was a flat 10_000 -- barely more than STARTUP_TIMEOUT_MS alone, leaving
+// almost no room for a debounced re-render's own wait/poll once startup
+// itself takes close to its own budget under CI load (observed live: a
+// watch test failed on some CI jobs with its poll fully elapsed and zero
+// events ever seen, not merely "ran out of time" -- consistent with
+// STARTUP_TIMEOUT_MS eating most of the old 10s before the poll even
+// started). Now follows TEST_TIMEOUT_MS's own formula with a larger margin,
+// since a watch test's real work (write, debounce, render, assert) happens
+// entirely AFTER startup, on top of it, not instead of it.
+const WATCH_TEST_TIMEOUT_MS = STARTUP_TIMEOUT_MS + EXIT_TIMEOUT_MS + 15_000;
 
 let activeChild: ChildProcess | undefined;
 
@@ -2066,7 +2075,7 @@ describe("CLI: nh-deck render --watch", () => {
 			expect(rebuiltCount()).toBe(0);
 
 			writeFileSync(deckPath, "# Changed\n");
-			await waitForCondition(() => rebuiltCount() === 1, 5000);
+			await waitForCondition(() => rebuiltCount() === 1, 15_000);
 
 			expect(rebuiltCount()).toBe(1);
 			expect(stdout).toContain(`nh-deck: rebuilt ${deckPath}`);
