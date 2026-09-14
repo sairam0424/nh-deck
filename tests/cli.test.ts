@@ -533,6 +533,107 @@ describe("CLI: nh-deck render", () => {
 	);
 });
 
+describe("CLI: nh-deck render — presentation mode / presenter notes hints", () => {
+	it(
+		"prints the ?present hint but not a ?notes hint for a deck with no presenter notes",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			// The hint lines are written synchronously right after the serving
+			// line, within the same action-handler tick -- a short pause lets
+			// any remaining buffered stdout data actually arrive before
+			// asserting, the same margin other stdout-content tests in this
+			// file already give themselves (e.g. the --watch "rebuilt" test).
+			await new Promise((resolve) => setTimeout(resolve, 300));
+
+			// The pre-existing serving-line wording itself must stay unchanged.
+			const normalized = matchedLine.replace(/:\d+$/, ":<PORT>");
+			expect(normalized).toBe(
+				"nh-deck serving fixtures/sample.md at http://127.0.0.1:<PORT>",
+			);
+
+			expect(stdout).toContain(
+				"add ?present to the URL above to start presentation mode",
+			);
+			expect(stdout).not.toContain("?notes");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"prints both the ?present and ?notes hints for a deck with at least one presenter note",
+		async () => {
+			const tempFile = path.join(
+				tmpdir(),
+				`nh-deck-render-notes-hint-test-${randomUUID()}.md`,
+			);
+			writeFileSync(
+				tempFile,
+				"# Slide\n\nBody text.\n\n<!-- remember to smile -->\n",
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			await new Promise((resolve) => setTimeout(resolve, 300));
+
+			expect(stdout).toContain(
+				"add ?present to the URL above to start presentation mode",
+			);
+			expect(stdout).toContain(
+				"add ?notes to the URL above to reveal presenter notes",
+			);
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempFile, { force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render — unsafe HTML warning", () => {
 	it(
 		"writes the raw-HTML warning to stderr (not stdout) for a deck containing a genuine <script> tag",

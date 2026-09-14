@@ -63,6 +63,39 @@ const NOTES_DROPPED_NOTE =
 	"nh-deck: note: presenter notes are not included in this export (pass --with-notes to include them)";
 
 /**
+ * Non-fatal stdout hint printed unconditionally on `render`, immediately
+ * after the "nh-deck serving ..." success line, naming the opt-in
+ * `?present` query param that starts presentation mode (see
+ * presentationScript.ts). Every deck can be presented -- this doesn't
+ * depend on the deck's own content the way PRESENTER_NOTES_HINT below
+ * does -- so it prints on every render invocation. Neither `?present` nor
+ * `?notes` has any in-terminal discoverability today: a user only learns
+ * about them by reading the README or already knowing to look. Styled the
+ * same green as the success line right above it (see style()), matching
+ * this file's existing precedent of using green for a stdout hint/note
+ * line that always follows a green success line -- NOTES_DROPPED_NOTE, and
+ * `init`'s own "Wrote starter deck.../Next: nh-deck render ..." pair --
+ * rather than inventing a third, unprecedented color for a message that
+ * isn't an error.
+ */
+const PRESENT_MODE_HINT =
+	"nh-deck: tip: add ?present to the URL above to start presentation mode";
+
+/**
+ * Non-fatal stdout hint printed on `render`, immediately after
+ * PRESENT_MODE_HINT, naming the opt-in `?notes` query param that reveals
+ * presenter notes -- but only when the deck actually has at least one note
+ * (checked via presenterNotes.ts's hasPresenterNotes(), the same
+ * whole-document check the pdf/png --with-notes warning above already
+ * makes). A deck with zero presenter notes has nothing for `?notes` to
+ * reveal, so a hint about it would point at an empty feature -- this stays
+ * unprinted in that case rather than advertising something that would show
+ * nothing.
+ */
+const PRESENTER_NOTES_HINT =
+	"nh-deck: tip: add ?notes to the URL above to reveal presenter notes";
+
+/**
  * `node:util.styleText` was added in Node 20.12.0 -- this repo's declared
  * `engines.node` floor is `>=20`, which includes earlier 20.x patches where
  * the named export doesn't exist. Accessing it through the namespace import
@@ -396,6 +429,10 @@ program
 				process.stdout.write(
 					`${style("green", `nh-deck serving ${file} at ${url}`)}\n`,
 				);
+				process.stdout.write(`${style("green", PRESENT_MODE_HINT)}\n`);
+				if (hasPresenterNotes(markdown)) {
+					process.stdout.write(`${style("green", PRESENTER_NOTES_HINT)}\n`);
+				}
 
 				if (options.watch) {
 					// Every file-change event fires this -- including, on an editor
