@@ -138,6 +138,35 @@ function waitForExit(child: ChildProcess, timeoutMs: number): Promise<void> {
 	});
 }
 
+/**
+ * Polls `check` every `intervalMs` until it returns true or `timeoutMs`
+ * elapses. Used instead of a single fixed-length `setTimeout` wherever a
+ * test's assertion would otherwise run at the EXACT instant a bare wait
+ * resolves, with no slack -- a debounced re-render's full read+render+
+ * stdout-write pipeline can genuinely take longer than a short fixed wait
+ * on a slower/contended CI runner, even though the same fixed wait is
+ * ample on a fast local machine. Other tests in this file that also wait
+ * on a debounced re-render effectively get extra slack for free (their
+ * assertion is a `fetchBody(url)` HTTP round-trip AFTER the wait, not an
+ * immediate synchronous check) -- this helper gives that same slack to a
+ * synchronous check without arbitrarily inflating the wait for the common
+ * (fast) case.
+ */
+async function waitForCondition(
+	check: () => boolean,
+	timeoutMs: number,
+	intervalMs = 50,
+): Promise<boolean> {
+	const deadline = Date.now() + timeoutMs;
+	while (Date.now() < deadline) {
+		if (check()) {
+			return true;
+		}
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+	}
+	return check();
+}
+
 /** Fetches the response body from `url` as a UTF-8 string. */
 function fetchBody(url: string): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -2037,7 +2066,7 @@ describe("CLI: nh-deck render --watch", () => {
 			expect(rebuiltCount()).toBe(0);
 
 			writeFileSync(deckPath, "# Changed\n");
-			await new Promise((resolve) => setTimeout(resolve, 500));
+			await waitForCondition(() => rebuiltCount() === 1, 5000);
 
 			expect(rebuiltCount()).toBe(1);
 			expect(stdout).toContain(`nh-deck: rebuilt ${deckPath}`);
