@@ -30,6 +30,14 @@ this multi-phase effort closed out. Patch release, no new features.
   `p`/`P` presenter-view shortcut, even though presenter view (shipped in
   v1.3.0) is a fully working, keyboard-wired feature -- a presenter
   relying on in-app help had no way to discover it exists.
+- A same-line trailing marker on a blockquote's own single paragraph
+  (e.g. `> A quote <!-- fragment -->`) was consumed by that nested
+  paragraph before the blockquote itself got a chance, leaving the quote
+  frame always visible while only its text faded in. Found by CodeRabbit
+  during this release's own review.
+- `nh-deck init`'s starter deck documents presentation-mode shortcuts as
+  slide content, and that list had drifted out of sync with the real
+  help overlay, missing both jump-to-slide and presenter-view entirely.
 
 ### Documentation
 
