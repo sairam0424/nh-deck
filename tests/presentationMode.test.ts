@@ -782,6 +782,10 @@ describe("presentation mode — keyboard-shortcuts help overlay", () => {
 			expect(helpText).toContain("View");
 			expect(helpText).toContain("swipe");
 			expect(helpText).toContain("overview");
+			// Regression: presenter view ("p"/"P") is a real, fully wired
+			// feature in this same file, but the help panel never listed it --
+			// a presenter relying on in-app help would never learn it exists.
+			expect(helpText).toContain("presenter view");
 
 			expect(await isPresenting(page)).toBe(true);
 		},
