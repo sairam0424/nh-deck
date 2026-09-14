@@ -20,6 +20,11 @@ the presenter-view window shipped in v1.3.0.
   local to the browser (persisted to localStorage, no CLI flag or
   frontmatter key) -- with no duration set, the timer looks exactly as
   it always has.
+- The pause control is a real, keyboard-operable button (not just a
+  mouse-only click target), with `aria-pressed` kept in sync with the
+  pause state. Reading or writing the target duration now degrades
+  gracefully, rather than breaking presenter view, if `localStorage` is
+  unavailable (private browsing, storage disabled).
 
 ## [1.4.1] - 2026-09-14
 
