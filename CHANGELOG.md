@@ -5,6 +5,43 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-09-14
+
+A production dry run against real decks (real CLI usage, real browser
+interaction, real exported files) found one critical rendering bug before
+this multi-phase effort closed out. Patch release, no new features.
+
+### Fixed
+
+- **Fragment (incremental reveal) markers did not work when written the
+  way this project's own docs describe** -- a marker trailing on the SAME
+  line as its bullet or paragraph text (`- Bullet text <!-- fragment -->`),
+  exactly as shown in the v1.2.0 entry below. The marker was silently
+  dropped with no `class="fragment"` applied anywhere, so an author
+  following the documented syntax got their whole slide's content at once
+  in presentation mode instead of an incremental reveal, with no error or
+  warning. Only the marker-on-its-own-separate-line variant
+  (`- Bullet text\n  <!-- fragment -->`) previously worked. Root cause:
+  `marked`'s lexer wraps a single line of bullet/paragraph content in an
+  extra block token, nesting a same-line marker one level deeper than the
+  fragment-extraction logic checked. Both syntaxes are now equivalent and
+  covered by regression tests, including a top-level paragraph case.
+- The `?`-triggered keyboard-shortcuts help overlay never listed the
+  `p`/`P` presenter-view shortcut, even though presenter view (shipped in
+  v1.3.0) is a fully working, keyboard-wired feature -- a presenter
+  relying on in-app help had no way to discover it exists.
+
+### Documentation
+
+- Corrected two changelog entries below (v1.2.0, v1.4.0) that inaccurately
+  claimed PNG export produces identical per-slide dimensions unconditionally.
+  Per `docs/adr/0006-phase-5-polish.md`'s own documented trade-off, PNG
+  dimensions follow each slide's own rendered content height under the
+  default stylesheet, so plain and two-column slides can legitimately
+  differ in height from slides using a layout with a fixed `min-height`
+  (title/section/quote) -- this was never fully fixed, and the earlier
+  wording overstated what the v1.2.0 change actually verified.
+
 ## [1.4.0] - 2026-09-14
 
 Phase 2 of the backlog-prioritization pass: the remaining ranked quick wins.
@@ -42,8 +79,13 @@ Phase 2 of the backlog-prioritization pass: the remaining ranked quick wins.
   metadata (the file's own `/Info Title`, not just the source HTML's
   `<title>` tag) — confirmed against a real exported file and locked in
   with a regression test.
-- PNG dimension-uniformity coverage (the v1.2.0 landscape-geometry fix)
-  already runs on every PR across the full CI matrix; no gap found.
+- ~~PNG dimension-uniformity coverage (the v1.2.0 landscape-geometry fix)
+  already runs on every PR across the full CI matrix; no gap found.~~
+  **Corrected in v1.4.1** — a production dry run against real, varied-content
+  decks found this claim too narrow: the existing test only covers a
+  controlled-CSS harness, not the real-world content-height variance
+  `docs/adr/0006-phase-5-polish.md` already documents as an accepted
+  trade-off. See v1.4.1's Documentation section.
 
 ## [1.3.0] - 2026-09-14
 
@@ -81,9 +123,13 @@ tools, both fixed here.
 - **PDF and PNG export now produce landscape 16:9 pages instead of portrait
   A4.** Every export was previously broken this way -- slide content came out
   vertically stacked in a narrow portrait column, not a slide-shaped page.
-  PNG exports also now share identical dimensions across every slide in one
-  export (previously varied with content height, since no viewport was
-  locked).
+  ~~PNG exports also now share identical dimensions across every slide in
+  one export (previously varied with content height, since no viewport
+  was locked).~~ **Corrected in v1.4.1** — a fixed viewport was added, but
+  each PNG is still cropped to its own slide's rendered content height, so
+  dimensions can still legitimately vary across slides of differing
+  natural height under the default stylesheet; see
+  `docs/adr/0006-phase-5-polish.md`.
 - The two-column layout no longer stays stuck at 2 columns inside the grid
   overview mode's shrunk thumbnails -- its responsive breakpoint now queries
   the slide's own box (a CSS container query) instead of the browser
@@ -233,6 +279,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.4.1]: https://github.com/sairam0424/nh-deck/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/sairam0424/nh-deck/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/sairam0424/nh-deck/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/sairam0424/nh-deck/compare/v1.1.0...v1.2.0
