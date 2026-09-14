@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-09-14
+
+A small fast-follow, closing out the last item deliberately deferred from
+the presenter-view window shipped in v1.3.0.
+
+### Added
+
+- The presenter-view timer can now be paused: click the elapsed-time
+  display to freeze it, click again to resume from where it left off.
+- An optional target duration (in minutes), typed into a small field next
+  to the timer, recolors the display amber past 80% of that duration and
+  red once over it. Entirely opt-in and local to the browser (persisted
+  to localStorage, no CLI flag or frontmatter key) -- with no duration
+  set, the timer looks exactly as it always has.
+
 ## [1.4.1] - 2026-09-14
 
 A production dry run against real decks (real CLI usage, real browser
@@ -287,6 +302,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.5.0]: https://github.com/sairam0424/nh-deck/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/sairam0424/nh-deck/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/sairam0424/nh-deck/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/sairam0424/nh-deck/compare/v1.2.0...v1.3.0
