@@ -348,26 +348,100 @@ export const PRESENTATION_SCRIPT = `<script>
     notesPanel.className = "presenter-notes-panel";
     presenterConsole.appendChild(notesPanel);
 
+    // A count-up timer, pausable by clicking it, with an optional target
+    // duration (typed into the adjacent input, in minutes) that recolors
+    // the display amber past 80% of that duration and red once over it.
+    // The duration is entirely opt-in and local to this browser -- there
+    // is no CLI flag or frontmatter key for it, and no color change at all
+    // happens unless a presenter actually types one in. Persisted to
+    // localStorage (same pattern as CURRENT_SLIDE_STORAGE_KEY above) so a
+    // reload of this same presenter-view window does not lose it; NOT
+    // synced over presenterChannel, since a target duration is a per-
+    // presenter-view-window preference, not shared navigation state.
+    const TIMER_DURATION_STORAGE_KEY = "nh-deck-presenter-timer-duration-minutes";
+    const NEAR_TARGET_RATIO = 0.8;
+
     const timerEl = document.createElement("div");
     timerEl.className = "presenter-timer";
     presenterConsole.appendChild(timerEl);
 
-    // A plain count-up timer -- starts counting from when THIS window
-    // opens, via setInterval computing Date.now() minus a stored start
-    // time. Deliberately no pause/resume and no duration-based color
-    // coding for this v1 -- both are explicit fast-follows, not built here.
+    const timerDisplay = document.createElement("span");
+    timerDisplay.className = "presenter-timer-display";
+    timerDisplay.title = "Click to pause or resume";
+    timerEl.appendChild(timerDisplay);
+
+    const durationInput = document.createElement("input");
+    durationInput.className = "presenter-timer-duration";
+    durationInput.type = "number";
+    durationInput.min = "1";
+    durationInput.placeholder = "min";
+    durationInput.title = "Target duration in minutes (optional)";
+    const storedDurationMinutes = Number(
+      localStorage.getItem(TIMER_DURATION_STORAGE_KEY),
+    );
+    if (Number.isFinite(storedDurationMinutes) && storedDurationMinutes > 0) {
+      durationInput.value = String(storedDurationMinutes);
+    }
+    timerEl.appendChild(durationInput);
+
     const timerStartMs = Date.now();
+    let pausedAtMs = null;
+    let accumulatedPausedMs = 0;
+
+    const elapsedMs = () =>
+      (pausedAtMs ?? Date.now()) - timerStartMs - accumulatedPausedMs;
+
     const updateTimerDisplay = () => {
-      const elapsedSeconds = Math.floor((Date.now() - timerStartMs) / 1000);
+      const elapsedSeconds = Math.floor(elapsedMs() / 1000);
       const minutes = Math.floor(elapsedSeconds / 60);
       const seconds = elapsedSeconds % 60;
-      timerEl.textContent =
+      timerDisplay.textContent =
         String(minutes).padStart(2, "0") +
         ":" +
         String(seconds).padStart(2, "0");
+
+      timerEl.classList.toggle("is-paused", pausedAtMs !== null);
+
+      const targetMinutes = Number(durationInput.value);
+      const hasTarget = Number.isFinite(targetMinutes) && targetMinutes > 0;
+      const ratio = hasTarget ? elapsedMs() / (targetMinutes * 60_000) : 0;
+      const isOverTarget = hasTarget && ratio >= 1;
+      const isNearTarget = hasTarget && ratio >= NEAR_TARGET_RATIO && !isOverTarget;
+      timerEl.classList.toggle("is-over-target", isOverTarget);
+      timerEl.classList.toggle("is-near-target", isNearTarget);
     };
     updateTimerDisplay();
     setInterval(updateTimerDisplay, 1000);
+
+    // The pause-toggle click listener lives on timerDisplay (the mm:ss
+    // span) specifically, not the whole flex-laid-out timerEl container --
+    // Puppeteer/a real click at the CENTER of the full timer box (spanning
+    // both the display and the duration input side by side) can land on
+    // either child depending on their relative widths, and there is no
+    // layout-independent way to tell "the presenter meant to pause" from
+    // "the presenter meant to click into the input" from a single
+    // container-level listener. Scoping to the display span removes the
+    // ambiguity entirely: clicking the time itself always pauses, clicking
+    // the input always focuses it for typing, with no stopPropagation
+    // coordination needed between the two.
+    durationInput.addEventListener("change", () => {
+      const value = durationInput.value.trim();
+      if (value === "") {
+        localStorage.removeItem(TIMER_DURATION_STORAGE_KEY);
+      } else {
+        localStorage.setItem(TIMER_DURATION_STORAGE_KEY, value);
+      }
+      updateTimerDisplay();
+    });
+    timerDisplay.addEventListener("click", () => {
+      if (pausedAtMs === null) {
+        pausedAtMs = Date.now();
+      } else {
+        accumulatedPausedMs += Date.now() - pausedAtMs;
+        pausedAtMs = null;
+      }
+      updateTimerDisplay();
+    });
 
     // The read-only half of the sync mechanism (see this file's own module
     // docstring): a "slide" message means the MAIN window just navigated,

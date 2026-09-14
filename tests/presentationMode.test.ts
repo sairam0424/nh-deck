@@ -1476,7 +1476,9 @@ describe("presentation mode — presenter view (separate window)", () => {
 
 			const readTimerSeconds = async () => {
 				const text = await presenterPage.evaluate(
-					() => document.querySelector(".presenter-timer")?.textContent ?? "",
+					() =>
+						document.querySelector(".presenter-timer-display")?.textContent ??
+						"",
 				);
 				const [minutes, seconds] = text.split(":").map(Number);
 				return minutes * 60 + seconds;
@@ -1487,6 +1489,113 @@ describe("presentation mode — presenter view (separate window)", () => {
 			const laterSeconds = await readTimerSeconds();
 
 			expect(laterSeconds).toBeGreaterThan(initialSeconds);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"pauses and resumes the presenter timer on click, freezing and then resuming the display",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			const readTimerSeconds = async () => {
+				const text = await presenterPage.evaluate(
+					() =>
+						document.querySelector(".presenter-timer-display")?.textContent ??
+						"",
+				);
+				const [minutes, seconds] = text.split(":").map(Number);
+				return minutes * 60 + seconds;
+			};
+			const isPaused = () =>
+				presenterPage.evaluate(() =>
+					document
+						.querySelector(".presenter-timer")
+						?.classList.contains("is-paused"),
+				);
+
+			await presenterPage.click(".presenter-timer-display");
+			expect(await isPaused()).toBe(true);
+
+			const secondsWhilePaused = await readTimerSeconds();
+			await new Promise((resolve) => setTimeout(resolve, 1500));
+			expect(await readTimerSeconds()).toBe(secondsWhilePaused);
+
+			await presenterPage.click(".presenter-timer-display");
+			expect(await isPaused()).toBe(false);
+
+			await new Promise((resolve) => setTimeout(resolve, 1500));
+			expect(await readTimerSeconds()).toBeGreaterThan(secondsWhilePaused);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"recolors the presenter timer amber near a typed target duration and red once over it, but not before either threshold",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			const timerClasses = () =>
+				presenterPage.evaluate(() =>
+					Array.from(
+						document.querySelector(".presenter-timer")?.classList ?? [],
+					),
+				);
+
+			// No target typed yet -- neither color class should ever apply,
+			// regardless of elapsed time. This is the default, opt-in-only
+			// behavior every deck gets with zero duration configured.
+			expect(await timerClasses()).not.toContain("is-near-target");
+			expect(await timerClasses()).not.toContain("is-over-target");
+
+			// A tiny target (0.02 minutes ~= 1.2s) so both thresholds are
+			// crossed within this test's own real-time budget rather than
+			// waiting minutes for a realistic value.
+			await presenterPage.click(".presenter-timer-duration");
+			await presenterPage.type(".presenter-timer-duration", "0.02");
+			await presenterPage.keyboard.press("Tab");
+
+			await presenterPage.waitForFunction(() =>
+				document
+					.querySelector(".presenter-timer")
+					?.classList.contains("is-near-target"),
+			);
+			expect(await timerClasses()).not.toContain("is-over-target");
+
+			await presenterPage.waitForFunction(
+				() =>
+					document
+						.querySelector(".presenter-timer")
+						?.classList.contains("is-over-target"),
+				{ timeout: 5000 },
+			);
+			expect(await timerClasses()).not.toContain("is-near-target");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"persists a typed target duration to localStorage, scoped to this browser rather than any CLI flag or frontmatter",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			await presenterPage.click(".presenter-timer-duration");
+			await presenterPage.type(".presenter-timer-duration", "15");
+			await presenterPage.keyboard.press("Tab");
+
+			const stored = await presenterPage.evaluate(() =>
+				localStorage.getItem("nh-deck-presenter-timer-duration-minutes"),
+			);
+			expect(stored).toBe("15");
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
