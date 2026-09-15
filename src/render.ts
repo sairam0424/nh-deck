@@ -711,6 +711,24 @@ const PRESENTER_VIEW_STYLE = `
       padding: 0.1rem 0.3rem;
       cursor: text;
     }
+    /* Per-slide pacing indicator (presentationScript.ts's own
+       updatePacingDisplay()) -- sits inside .presenter-timer's own flex row,
+       right after the duration input, so it needs no positioning rule of
+       its own. Neutral/muted by default (ahead-of-pace and on-pace are both
+       "nothing to worry about" states); behind-pace reuses the exact same
+       #dc2626 warning-red .presenter-timer.is-over-target already uses
+       above, since running behind schedule is that same "you need to speed
+       up" signal, just derived from slide position instead of elapsed time.
+       There is deliberately no amber "near-behind" state to mirror
+       is-near-target -- unlike a countdown timer, pacing has no natural
+       halfway-warning point, only "ahead", "on pace", or "behind". */
+    .presenter-pacing {
+      font-size: 0.75rem;
+      color: var(--nh-muted);
+    }
+    .presenter-pacing.is-behind {
+      color: #dc2626;
+    }
     body.presenter-view .presenter-preview .slide {
       display: block !important;
       position: static !important;

@@ -235,6 +235,25 @@ export const PRESENTATION_SCRIPT = `<script>
     return;
   }
 
+  // Parses the 1-indexed slide number out of location.hash (e.g. "#3" ->
+  // index 2), falling back to slide 0 for a missing/invalid/out-of-range
+  // hash. Declared here, immediately after slides itself -- moved up from
+  // further down in this file (where the rest of "current"'s startup
+  // logic still lives, below the isPresenterView block) specifically so
+  // the pacing-display logic added to that block can read "current"
+  // synchronously, from its own initial render call, the same way
+  // updateTimerDisplay() already does for the timer. A "let current"
+  // declared AFTER that block would leave "current" in the temporal dead
+  // zone at the point that synchronous call needs to read it. Nothing
+  // between here and the isPresenterView block reads "current" itself, so
+  // this reordering is behavior-neutral on its own.
+  const parseHashIndex = () => {
+    const n = parseInt(location.hash.slice(1), 10);
+    return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
+  };
+
+  let current = parseHashIndex();
+
   // Grabbed once, here, at setup time -- render.ts's own generateHtml()
   // always emits this div in <body> unconditionally, regardless of
   // presentation mode (see render.ts's SR_ONLY_STYLE/#nh-deck-live-region
@@ -347,6 +366,14 @@ export const PRESENTATION_SCRIPT = `<script>
   let nextPreview;
   let notesPanel;
 
+  // The per-slide pacing indicator's own render function -- same "only ever
+  // assigned when isPresenterView is true" treatment as currentPreview/
+  // nextPreview/notesPanel above, and for the same reason: render() below
+  // calls it (guarded by the same isPresenterView check that already guards
+  // its updatePresenterConsole() call) regardless of where in this file the
+  // real assignment happens to live.
+  let updatePacingDisplay;
+
   // Presenter-console UI: the current slide (scaled down), a preview
   // of the next slide (scaled down further), the current slide's own
   // presenter notes (always visible here, unlike the main view's
@@ -431,6 +458,18 @@ export const PRESENTATION_SCRIPT = `<script>
     }
     timerEl.appendChild(durationInput);
 
+    // A per-slide pacing indicator, sitting right next to the timer/
+    // duration-input pair it depends on -- inheriting timerEl's own flex
+    // row layout for free rather than needing its own positioning rule.
+    // Entirely text (never innerHTML), and rendered/updated by
+    // updatePacingDisplay() below, which -- like updateTimerDisplay() above
+    // it -- is opt-in on the exact same typed target duration: no duration
+    // typed in means no pacing text at all, matching the timer's own
+    // color-coding opt-out.
+    const pacingEl = document.createElement("div");
+    pacingEl.className = "presenter-pacing";
+    timerEl.appendChild(pacingEl);
+
     const timerStartMs = Date.now();
     let pausedAtMs = null;
     let accumulatedPausedMs = 0;
@@ -458,8 +497,50 @@ export const PRESENTATION_SCRIPT = `<script>
       timerEl.classList.toggle("is-over-target", isOverTarget);
       timerEl.classList.toggle("is-near-target", isNearTarget);
     };
+
+    // Compares where the presenter SHOULD be by now (expectedIndex, derived
+    // from elapsed time against the same typed target duration
+    // updateTimerDisplay() above already reads) against where they ACTUALLY
+    // are (current, the shared navigation-index variable -- see this file's
+    // own module docstring for why that had to move above the
+    // isPresenterView block for exactly this read). delta > 0 means fewer
+    // slides than expected have gone by, i.e. running ahead of pace; delta <
+    // 0 means behind. Same opt-in-only convention as updateTimerDisplay():
+    // no target duration typed in means no pacing text at all, cleared via
+    // an early return rather than showing a number derived from a target
+    // that does not exist.
+    updatePacingDisplay = () => {
+      const targetMinutes = Number(durationInput.value);
+      const hasTarget = Number.isFinite(targetMinutes) && targetMinutes > 0;
+      if (!hasTarget) {
+        pacingEl.textContent = "";
+        pacingEl.classList.remove("is-ahead", "is-behind", "is-on-pace");
+        return;
+      }
+      const expectedIndex =
+        (elapsedMs() / (targetMinutes * 60_000)) * slides.length;
+      const delta = Math.round(current - expectedIndex);
+      pacingEl.classList.toggle("is-ahead", delta > 0);
+      pacingEl.classList.toggle("is-behind", delta < 0);
+      pacingEl.classList.toggle("is-on-pace", delta === 0);
+      if (delta > 0) {
+        pacingEl.textContent = "+" + delta + " ahead";
+      } else if (delta < 0) {
+        pacingEl.textContent = Math.abs(delta) + " behind";
+      } else {
+        pacingEl.textContent = "on pace";
+      }
+    };
+
     updateTimerDisplay();
-    setInterval(updateTimerDisplay, 1000);
+    updatePacingDisplay();
+    // One shared interval ticks both the timer and the pacing indicator --
+    // pacing depends on the same elapsed-time clock the timer already polls
+    // once a second, so there is no reason to run a second timer for it.
+    setInterval(() => {
+      updateTimerDisplay();
+      updatePacingDisplay();
+    }, 1000);
 
     // The pause-toggle click listener lives on timerDisplay (the mm:ss
     // button) specifically, not the whole flex-laid-out timerEl container --
@@ -514,13 +595,6 @@ export const PRESENTATION_SCRIPT = `<script>
       }
     });
   }
-
-  const parseHashIndex = () => {
-    const n = parseInt(location.hash.slice(1), 10);
-    return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
-  };
-
-  let current = parseHashIndex();
 
   // A presenter-view window opened or reloaded AFTER navigation has already
   // happened in the main window has no hash of its own to resume from --
@@ -743,6 +817,11 @@ export const PRESENTATION_SCRIPT = `<script>
     location.hash = String(current + 1);
     if (isPresenterView) {
       updatePresenterConsole();
+      // Refreshes the pacing indicator on every real navigation, not just
+      // once a second from the setInterval in the isPresenterView block
+      // above -- without this, pacing would lag up to a full second behind
+      // an actual slide change instead of updating the instant current does.
+      updatePacingDisplay();
     }
     // Screen-reader slide-change announcement + slide-focus management --
     // both gated the same way: MAIN presenting window only (a
