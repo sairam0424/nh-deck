@@ -36,7 +36,7 @@ Export a deck to PDF:
 nh-deck pdf deck.md
 ```
 
-Exported PDFs also get real bookmark/outline navigation in the sidebar (Preview, Acrobat, Chrome's own viewer all show it), derived automatically from the deck's own heading structure — no flag needed, and every heading becomes its own entry.
+Exported PDFs also get real bookmark/outline navigation in the sidebar (Preview, Acrobat, Chrome's own viewer all show it), derived automatically from the deck's own heading structure — no flag needed, and every heading becomes its own entry. This depends on the locally-detected browser being Chrome/Chromium/Edge/Brave M126+ (stable since mid-2024, true for virtually any real install today); on an unusually old browser the PDF still exports fine, just without an outline — never a crash or an error.
 
 Export a deck to one PNG per slide:
 
