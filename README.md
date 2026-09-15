@@ -36,6 +36,8 @@ Export a deck to PDF:
 nh-deck pdf deck.md
 ```
 
+Exported PDFs also get real bookmark/outline navigation in the sidebar (Preview, Acrobat, Chrome's own viewer all show it), derived automatically from the deck's own heading structure — no flag needed, and every heading becomes its own entry. This depends on the locally-detected browser being Chrome/Chromium/Edge/Brave M126+ (stable since mid-2024, true for virtually any real install today); on an unusually old browser the PDF still exports fine, just without an outline — never a crash or an error.
+
 Export a deck to one PNG per slide:
 
 ```bash
@@ -91,7 +93,30 @@ Slide content...
 
 If both are given, `--theme` wins over the frontmatter value. An unrecognized theme name prints a non-fatal warning to stderr and falls back to `light` — it never blocks rendering or export.
 
+While using `render --watch`, a small on-page control lets you click through all 4 themes live against your own deck content — including Mermaid diagram recoloring, which a CSS-only preview could not do — without hand-editing frontmatter. It's a preview only (the choice does not get written back to your file) and is absent entirely outside `--watch`.
+
 `--css <path>` always wins over any requested theme (flag or frontmatter) — the two are mutually exclusive, with no CSS-cascade layering. If you pass both, nh-deck prints a stderr note and uses your custom stylesheet, not the theme's colors. See `docs/adr/0008-named-theme-system.md` for the full design rationale.
+
+## Text direction (RTL)
+
+Render a deck's content right-to-left, for Arabic, Hebrew, Farsi, Urdu, and similar scripts, via a `--dir <name>` flag on any of `render`, `pdf`, or `png`:
+
+```bash
+nh-deck render deck.md --dir rtl
+```
+
+or via a `dir:` key in the deck's own frontmatter:
+
+```markdown
+---
+dir: rtl
+---
+# My deck
+
+Slide content...
+```
+
+If both are given, `--dir` wins over the frontmatter value, mirroring `--theme`'s own precedence. The only two recognized values are `ltr` (the default) and `rtl`; an unrecognized value prints a non-fatal warning to stderr and falls back to `ltr`. A deck with neither renders byte-identical to before this feature. Scoped to text direction only — presentation-mode navigation keys and chrome positioning (help hint, presenter timer, jump indicator) are unchanged regardless of direction.
 
 ## Layouts
 
