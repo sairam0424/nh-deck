@@ -261,6 +261,38 @@ const LAYOUT_STYLE = `
       display: flex;
     }`;
 
+/**
+ * The standard visually-hidden-but-still-announced-by-a-screen-reader
+ * pattern, applied to `#nh-deck-live-region` (see generateHtml's `<body>`
+ * below) and reusable for any future element that needs the same
+ * treatment. Deliberately NOT `display: none` or `visibility: hidden` --
+ * both of those remove an element from the accessibility tree entirely,
+ * which would defeat the one purpose this element exists for (a screen
+ * reader announcing text a sighted viewer never needs to see). Clipping the
+ * element to a 1x1 box with `overflow: hidden` instead keeps it fully
+ * present in the accessibility tree while occupying no visible space.
+ *
+ * Always included, unconditionally -- unlike LAYOUT_STYLE/transitionStyle/
+ * progressStyle, this is not suppressible by a custom --css: the live
+ * region itself is always emitted in `<body>` regardless of presentation
+ * mode (see generateHtml below), so its own styling must never depend on
+ * whether a custom --css replaced the rest of this `<style>` block.
+ */
+const SR_ONLY_STYLE = `
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }
+    @media print {
+      .sr-only {
+        display: none;
+      }
+    }`;
+
 const PRESENTATION_STYLE = `
     body.presenting .slide {
       display: none;
@@ -413,6 +445,7 @@ const HELP_STYLE = `
       background: rgba(0, 0, 0, 0.6);
     }
     .presentation-help-panel {
+      position: relative;
       background: var(--nh-bg);
       color: var(--nh-fg);
       border: 1px solid var(--nh-border);
@@ -420,6 +453,25 @@ const HELP_STYLE = `
       padding: 1.5rem 2rem;
       max-width: 28rem;
       box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    }
+    .presentation-help-close {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      width: 1.75rem;
+      height: 1.75rem;
+      background: transparent;
+      color: var(--nh-muted);
+      border: none;
+      border-radius: 4px;
+      font-size: 1.25rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .presentation-help-close:hover,
+    .presentation-help-close:focus-visible {
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
     }
     .presentation-help-panel h2 {
       margin-top: 0;
@@ -1367,6 +1419,7 @@ ${
     ${NOTES_STYLE}
     ${NOTES_PAGE_STYLE}
     ${PRINT_PAGINATION_STYLE}
+    ${SR_ONLY_STYLE}
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
@@ -1381,6 +1434,7 @@ ${
 </head>
 <body>
 ${slidesHtml}
+  <div id="nh-deck-live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <script>
     if (new URLSearchParams(location.search).has("notes")) {
       document.querySelectorAll(".notes").forEach((el) => {

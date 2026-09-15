@@ -829,6 +829,33 @@ describe("presentation mode — keyboard-shortcuts help overlay", () => {
 	);
 
 	it(
+		"closes the help overlay on a real click of a pointer-accessible close button, without exiting presentation mode",
+		async () => {
+			// Regression: openHelp()/closeHelp() previously had no pointer
+			// affordance at all -- Escape and a second "?" both worked, but a
+			// mouse/touch-only user (no keyboard) had no click target that
+			// reached closeHelp(), since every other click while helpOpen is
+			// true is deliberately swallowed. Found by CodeRabbit review.
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			const closeButtonExists = await page.evaluate(
+				() =>
+					document.querySelector(".presentation-help-panel button") !== null,
+			);
+			expect(closeButtonExists).toBe(true);
+
+			await page.click(".presentation-help-panel button");
+
+			expect(await isHelpOpen(page)).toBe(false);
+			expect(await isPresenting(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"suppresses slide navigation (arrows, Space, End) while the help overlay is open, and does not close it either",
 		async () => {
 			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
@@ -1922,6 +1949,105 @@ describe('presentation mode — jump to slide ("g" + digits + Enter)', () => {
 
 			await page.keyboard.press("g");
 			expect(await isJumpIndicatorActive(page)).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("presentation mode — accessibility: live region + focus management", () => {
+	function liveRegionText(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(
+			() => document.getElementById("nh-deck-live-region")?.textContent ?? "",
+		);
+	}
+
+	it(
+		"announces the newly-active slide on a real ArrowRight keypress, with different text for two different slides",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			const firstAnnouncement = await liveRegionText(page);
+			expect(firstAnnouncement.length).toBeGreaterThan(0);
+
+			await page.keyboard.press("ArrowRight");
+			const secondAnnouncement = await liveRegionText(page);
+			expect(secondAnnouncement.length).toBeGreaterThan(0);
+			expect(secondAnnouncement).not.toBe(firstAnnouncement);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"moves focus onto the newly-active slide element after a real navigation",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+
+			const activeElementIsActiveSlide = await page.evaluate(
+				() => document.activeElement?.classList.contains("is-active") ?? false,
+			);
+			expect(activeElementIsActiveSlide).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"does not move focus away from document.body on the very first paint, before any navigation happens",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			const isBodyFocused = await page.evaluate(
+				() => document.activeElement === document.body,
+			);
+			expect(isBodyFocused).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"opening the help overlay marks its container as a dialog and moves focus into its panel, and closing it via Escape restores focus to wherever it was before",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			const isBodyFocusedBeforeOpen = await page.evaluate(
+				() => document.activeElement === document.body,
+			);
+			expect(isBodyFocusedBeforeOpen).toBe(true);
+
+			await page.keyboard.press("?");
+
+			const helpRole = await page.evaluate(() =>
+				document.querySelector(".presentation-help")?.getAttribute("role"),
+			);
+			expect(helpRole).toBe("dialog");
+
+			const helpAriaModal = await page.evaluate(() =>
+				document
+					.querySelector(".presentation-help")
+					?.getAttribute("aria-modal"),
+			);
+			expect(helpAriaModal).toBe("true");
+
+			const focusLandedInsidePanel = await page.evaluate(() => {
+				const panel = document.querySelector(".presentation-help-panel");
+				return (
+					panel !== null &&
+					(document.activeElement === panel ||
+						panel.contains(document.activeElement))
+				);
+			});
+			expect(focusLandedInsidePanel).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			const focusRestoredToBody = await page.evaluate(
+				() => document.activeElement === document.body,
+			);
+			expect(focusRestoredToBody).toBe(true);
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);

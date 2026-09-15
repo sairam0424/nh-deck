@@ -1,6 +1,6 @@
 {
 	"name": "nh-deck",
-	"version": "1.6.0",
+	"version": "1.7.0",
 	"type": "module",
 	"license": "Apache-2.0",
 	"description": "A local-first CLI tool for writing, presenting, and exporting Markdown-based slide decks.",
@@ -21,7 +21,7 @@
 		"dist"
 	],
 	"engines": {
-		"node": ">=20"
+		"node": ">=22"
 	},
 	"scripts": {
 		"build": "tsc",
@@ -31,6 +31,7 @@
 		"typecheck": "tsc --noEmit && node scripts/typecheck-tests.mjs",
 		"lint": "biome ci .",
 		"check:fidelity": "node --import tsx scripts/check-pdf-fidelity.mjs",
+		"check:a11y": "node --import tsx scripts/check-a11y.mjs",
 		"generate:theme-gallery": "node --import tsx scripts/generate-theme-gallery.mjs"
 	},
 	"repository": {
@@ -46,19 +47,20 @@
 		"chrome-launcher": "^1.1.2",
 		"commander": "^15.0.0",
 		"katex": "^0.18.7",
-		"marked": "^18.0.12",
+		"marked": "^18.0.13",
 		"marked-katex-extension": "^5.1.12",
-		"open": "^11.0.2",
-		"puppeteer-core": "^25.10.0",
+		"open": "^11.0.4",
+		"puppeteer-core": "^25.11.0",
 		"svgo": "^4.1.0"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.13",
-		"@types/node": "^26.5.0",
+		"@types/node": "^26.5.1",
 		"@types/pngjs": "^6.0.5",
+		"axe-core": "^4.13.0",
 		"pngjs": "^7.0.0",
 		"tsx": "^4.19.1",
 		"typescript": "^7.0.2",
-		"vitest": "^5.0.0"
+		"vitest": "^5.0.1"
 	}
 }

@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-09-15
+
+Housekeeping plus real accessibility work: closing out Node 20 now that its
+own upstream lifecycle has ended, and turning presentation mode's
+screen-reader gaps -- honestly disclosed as open in `ACCESSIBILITY.md` since
+v1.4.0 -- into shipped, tested behavior.
+
+### Added
+
+- **axe-core accessibility scanning in CI**: a new `a11y-check` job renders
+  every theme, every layout, the opt-in RTL direction, and presentation mode
+  through a real local browser and runs axe-core against each, failing the
+  build on any "serious" or "critical" violation. This closes the gap
+  between the existing snapshot/string-assertion test suite -- which only
+  asserts specific, hand-picked properties like theme contrast ratios -- and
+  what a real accessibility-rule engine flags against the actual rendered
+  DOM. axe-core is injected from its own built `node_modules` file, never
+  fetched from a CDN, so this stays consistent with the local-first
+  constraint even though it is dev/CI-only tooling that never ships.
+- **Slide-change announcements for screen readers**: presentation mode now
+  speaks each navigation to assistive technology via a visually-hidden live
+  region, announcing the newly active slide's own first heading (or a
+  "Slide N of M" fallback when a slide has none). Previously, a
+  screen-reader user navigating `?present` had no signal a slide change had
+  happened at all -- the deck looked identical to them before and after
+  every arrow-key press.
+- **Focus management in presentation mode**: the newly active slide now
+  receives real keyboard focus on every navigation, where previously focus
+  never moved anywhere during a presentation. The help overlay and grid
+  overview also gained proper dialog semantics -- `role="dialog"` and
+  `aria-modal="true"` on their own container, focus moved into the panel the
+  moment either opens, and focus restored to wherever it was right
+  beforehand once either closes -- so a keyboard or screen-reader user is
+  never left stranded inside, or locked out of, either overlay.
+
+### Changed
+
+- **Dropped Node 20 support** (`engines.node` is now `>=22`): Node 20
+  reached its own upstream end-of-life on 2026-04-30, so this project no
+  longer carries support for an unmaintained runtime. The CI matrix drops
+  from 9 to 6 build-and-test combinations (`ubuntu-latest`/`macos-14`/
+  `windows-latest` x Node 22/latest).
+- **Five dependency patch bumps**: `marked` ^18.0.12 -> ^18.0.13,
+  `puppeteer-core` ^25.10.0 -> ^25.11.0, `vitest` ^5.0.0 -> ^5.0.1, `open`
+  ^11.0.2 -> ^11.0.4, and `@types/node` ^26.5.0 -> ^26.5.1 -- zero known
+  CVEs, confirmed via `npm audit`.
+
 ## [1.6.0] - 2026-09-15
 
 Three items from a deep-research pass on the deferred backlog, all confirmed
@@ -334,6 +381,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.7.0]: https://github.com/sairam0424/nh-deck/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/sairam0424/nh-deck/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/sairam0424/nh-deck/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/sairam0424/nh-deck/compare/v1.4.0...v1.4.1
