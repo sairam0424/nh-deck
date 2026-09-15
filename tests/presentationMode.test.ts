@@ -2146,3 +2146,157 @@ describe("presentation mode — accessibility: live region + focus management", 
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
 });
+
+describe("presentation mode — Alt+click-to-zoom", () => {
+	// A real image (a well-known, valid 1x1 transparent GIF data URI -- no
+	// network fetch, matching this project's own local-first testing
+	// convention) plus a fenced code block, so both of ZOOM_TARGET_SELECTOR's
+	// listed element kinds are exercised by a single deck.
+	const ZOOMABLE_DECK =
+		"# Slide 1\n\n" +
+		"![test image](data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAACAUwAOw==)\n\n" +
+		"```js\nconsole.log('hi');\n```\n\n" +
+		"---\n\n# Slide 2\n\nSecond.";
+
+	async function isZoomOpen(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => document.body.classList.contains("zoom-open"));
+	}
+
+	it(
+		"Alt+click on a code block moves it into the zoom overlay and marks body with zoom-open, without also advancing the slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active pre");
+			await page.keyboard.up("Alt");
+
+			expect(await isZoomOpen(page)).toBe(true);
+			const overlayHasPre = await page.evaluate(
+				() => document.querySelector(".presentation-zoom-overlay pre") !== null,
+			);
+			expect(overlayHasPre).toBe(true);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"Alt+click on an image moves it into the zoom overlay too, not just code blocks",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active img");
+			await page.keyboard.up("Alt");
+
+			expect(await isZoomOpen(page)).toBe(true);
+			const overlayHasImg = await page.evaluate(
+				() => document.querySelector(".presentation-zoom-overlay img") !== null,
+			);
+			expect(overlayHasImg).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"an Alt+click that misses every zoomable target is a silent no-op -- it neither opens the zoom overlay nor advances the slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active h1");
+			await page.keyboard.up("Alt");
+
+			expect(await isZoomOpen(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"clicking the overlay backdrop restores the zoomed element to its exact original DOM position (compared by live reference, not just by appearance)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			// Captures the real parentElement/previousSibling references live in
+			// the page's own context (never serialized across the Puppeteer
+			// boundary), so the later comparison is a genuine reference-equality
+			// check, not a superficial "looks the same" one.
+			await page.evaluate(() => {
+				const pre = document.querySelector(".slide.is-active pre");
+				const globals = window as unknown as Record<string, unknown>;
+				globals.__nhDeckOriginalParent = pre?.parentElement;
+				globals.__nhDeckOriginalPreviousSibling = pre?.previousSibling;
+			});
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active pre");
+			await page.keyboard.up("Alt");
+			expect(await isZoomOpen(page)).toBe(true);
+
+			// Clicks the backdrop itself, well away from the moved <pre> (which
+			// sits centered, away from this corner), so this click cannot land
+			// on the moved content instead of the overlay behind it.
+			await page.mouse.click(5, 5);
+
+			expect(await isZoomOpen(page)).toBe(false);
+
+			const restoredExactly = await page.evaluate(() => {
+				const pre = document.querySelector(".slide.is-active pre");
+				const globals = window as unknown as Record<string, unknown>;
+				return {
+					sameParent: pre?.parentElement === globals.__nhDeckOriginalParent,
+					samePreviousSibling:
+						pre?.previousSibling === globals.__nhDeckOriginalPreviousSibling,
+					stillInOverlay:
+						document.querySelector(".presentation-zoom-overlay pre") !== null,
+				};
+			});
+			expect(restoredExactly.sameParent).toBe(true);
+			expect(restoredExactly.samePreviousSibling).toBe(true);
+			expect(restoredExactly.stillInOverlay).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"Escape closes the zoom overlay as its highest-precedence case, without also exiting presentation mode in the same keypress",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active pre");
+			await page.keyboard.up("Alt");
+			expect(await isZoomOpen(page)).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			expect(await isZoomOpen(page)).toBe(false);
+			const isPresenting = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresenting).toBe(true);
+			const hasPresentParam = await page.evaluate(() =>
+				new URLSearchParams(location.search).has("present"),
+			);
+			expect(hasPresentParam).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"a plain click (no Alt) on the same zoomable element still advances the slide exactly as before this feature existed (regression guard)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.click(".slide.is-active pre");
+
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await isZoomOpen(page)).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});

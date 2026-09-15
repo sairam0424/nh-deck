@@ -209,6 +209,49 @@
  * own small, most tightly-scoped modal state, layered on top of (never a
  * replacement for) the plain-presenting/overview/help precedence this file
  * already establishes above.
+ *
+ * Alt+click (also Option+click on macOS -- altKey is true for either
+ * physical key there automatically, with no extra detection needed) zooms
+ * in on dense content -- an image, a Mermaid diagram (raw <svg>), a fenced
+ * code block, a table, or a block-math element (.katex-display) -- via
+ * openZoom()/closeZoom() below. Deliberately NOT double-click: a real
+ * double-click fires two ordinary "click" events before the browser's own
+ * "dblclick" event, and each of those would independently trigger
+ * advance() before zoom even had a chance to intervene, making
+ * double-click-to-zoom a genuinely broken interaction rather than a
+ * stylistic alternative -- a held-modifier check evaluated on the click
+ * event itself has no such ordering problem. The click listener's own
+ * altKey branch (see below) resolves the actual zoom target via
+ * event.target.closest() against a fixed selector list, checked as the
+ * LAST guard before the plain fallthrough advance() call, so an ordinary
+ * (non-Alt) click still advances exactly as before this feature existed --
+ * and returns unconditionally once altKey is true, target found or not, so
+ * an Alt+click that misses every zoomable target is a silent no-op rather
+ * than an accidental slide advance.
+ *
+ * openZoom() moves the REAL clicked element (never a clone) into a
+ * full-screen overlay -- cloning is unsafe here specifically because a
+ * Mermaid diagram renders as raw <svg> with document-wide-unique ids (a
+ * marker with id="arrowhead", say), and a clone would duplicate that id,
+ * letting markers/references leak between the original and the clone (the
+ * exact same hazard updatePresenterConsole() above already avoids, for the
+ * identical reason). Before moving it, a placeholder Comment node is
+ * inserted at the element's exact original position (insertBefore on its
+ * own parent, using the element itself as the reference node), so
+ * closeZoom() can restore it there later via Comment.replaceWith(element)
+ * -- necessary because a zoomable element can be arbitrarily nested (inside
+ * a list item inside a two-column layout, say), not just a direct child of
+ * its own slide.
+ *
+ * Closing works two ways: a click on the overlay's own backdrop (a
+ * dedicated listener on the overlay element itself, which stops the click
+ * from also reaching the document-level listener below -- otherwise the
+ * same click that closes the zoom would fall straight through to advance()
+ * too, one click doing two things at once), and Escape -- folded into the
+ * keydown listener's existing Escape branch as its new FIRST,
+ * highest-precedence case, ahead of even isJumpPending(), so an open zoom
+ * overlay always closes first, before any other Escape behavior (closing
+ * help/overview, or exiting presentation mode) gets a chance to fire.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -354,6 +397,18 @@ export const PRESENTATION_SCRIPT = `<script>
   // (see this file's own module docstring's updated overlay-focus section)
   // can move focus into it without a fresh querySelector on every open.
   const helpPanel = help.querySelector(".presentation-help-panel");
+
+  // Full-screen overlay for Alt+click-to-zoom on dense content -- see this
+  // file's own module docstring for the full design. Created once, empty,
+  // here; openZoom()/closeZoom() further down move the REAL clicked
+  // element in and out of it (never cloning it -- see their own
+  // docstrings for why that matters specifically for Mermaid's raw <svg>
+  // output). Its own backdrop-click close-trigger listener is registered
+  // separately, right after the main document click listener below (see
+  // that listener's own comment for why the ordering matters).
+  const zoomOverlay = document.createElement("div");
+  zoomOverlay.className = "presentation-zoom-overlay";
+  document.body.appendChild(zoomOverlay);
 
   // Presenter-console DOM refs -- only ever assigned (and only ever read by
   // updatePresenterConsole() below) when isPresenterView is true; see the
@@ -665,6 +720,16 @@ export const PRESENTATION_SCRIPT = `<script>
   // exactly as typed rather than being silently coerced by a numeric type
   // before Enter is even pressed.
   let jumpDigits = null;
+
+  // Alt+click-to-zoom state -- see this file's own module docstring for the
+  // full design. "null" means zoom is not open; openZoom() below sets this
+  // to the placeholder Comment node it left behind at the zoomed element's
+  // original position, and closeZoom() reads it to restore that position
+  // before resetting it back to null. Doubles as the single source of
+  // truth for "is zoom open" via isZoomOpen() below -- no separate boolean
+  // flag needed, since this is only ever non-null between an openZoom()
+  // call and its matching closeZoom().
+  let zoomPlaceholder = null;
 
   // Fragment (incremental reveal) helpers -- see this file's own module
   // docstring above for the full state-machine explanation. Fragments are
@@ -1107,6 +1172,51 @@ export const PRESENTATION_SCRIPT = `<script>
     window.open(presenterUrl, PRESENTER_WINDOW_NAME);
   };
 
+  // True while the zoom overlay holds a moved element -- see
+  // zoomPlaceholder's own declaration comment above for why this reads
+  // that variable directly rather than a separate boolean flag.
+  const isZoomOpen = () => zoomPlaceholder !== null;
+
+  // Moves the REAL zoomed element (never a clone) into the full-screen zoom
+  // overlay -- see this file's own module docstring for why cloning is
+  // unsafe here specifically: a Mermaid diagram renders as raw <svg> with
+  // document-wide-unique ids (a marker with id="arrowhead", say), and a
+  // clone would duplicate that id, letting markers/references leak between
+  // the original and the clone. A placeholder Comment node is inserted at
+  // element's exact original position FIRST -- via insertBefore on its own
+  // parent, using element itself as the reference node -- so closeZoom()
+  // below can restore element to that exact position later, however deeply
+  // nested it started out (e.g. inside a list item inside a two-column
+  // layout), not just as a direct child of its own slide.
+  const openZoom = (element) => {
+    zoomPlaceholder = document.createComment("nh-deck-zoom-placeholder");
+    element.parentNode.insertBefore(zoomPlaceholder, element);
+    zoomOverlay.appendChild(element);
+    document.body.classList.add("zoom-open");
+  };
+
+  // Restores the zoomed element to its exact original position by
+  // replacing the placeholder Comment node openZoom() left behind with it
+  // -- Comment.replaceWith() both removes element from the overlay (its
+  // current parent) and reinserts it exactly where the placeholder was, in
+  // one step. A no-op when zoom is not actually open (zoomPlaceholder is
+  // null), since both the overlay's own backdrop-click listener above and
+  // the keydown listener's Escape branch below can reach this even when
+  // nothing is currently zoomed.
+  const closeZoom = () => {
+    if (!zoomPlaceholder) {
+      return;
+    }
+    const element = zoomOverlay.firstChild;
+    if (element) {
+      zoomPlaceholder.replaceWith(element);
+    } else {
+      zoomPlaceholder.remove();
+    }
+    document.body.classList.remove("zoom-open");
+    zoomPlaceholder = null;
+  };
+
   // True while a slide-jump's digits are being typed -- one named check
   // shared by the keydown, click, and touchend listeners below (each needs
   // to suppress its own normal behavior while a jump is pending, the same
@@ -1246,8 +1356,23 @@ export const PRESENTATION_SCRIPT = `<script>
     // of this listener) -- but the ordering is written defensively anyway,
     // matching how carefully this file already orders every other
     // precedence decision here.
+    //
+    // Layered on top of even that jump-pending state is the zoom overlay
+    // (Alt+click-to-zoom on dense content -- see this file's own module
+    // docstring, and openZoom()/closeZoom() above): closeZoom() is folded
+    // into this very Escape branch as its new FIRST, highest-precedence
+    // case, ahead of isJumpPending() itself, since closing an open zoom
+    // must never also cancel a jump/close help/close overview/exit
+    // presentation mode in the same keypress. In practice jumpDigits is
+    // always null whenever zoom is open -- Alt+click only ever fires from
+    // the click listener's own final guard below, itself unreachable while
+    // a jump is pending (see that listener's own isJumpPending() early
+    // return) -- but, as with every other precedence decision in this
+    // file, the ordering is still written defensively.
     if (event.key === "Escape") {
-      if (isJumpPending()) {
+      if (isZoomOpen()) {
+        closeZoom();
+      } else if (isJumpPending()) {
         cancelJump();
       } else if (helpOpen) {
         closeHelp();
@@ -1345,6 +1470,14 @@ export const PRESENTATION_SCRIPT = `<script>
     }
   });
 
+  // Alt+click-to-zoom's own fixed target list -- see this file's own
+  // module docstring for the full design. Matched via Element.closest()
+  // against the actual click target inside the click listener's own altKey
+  // branch below, so a click anywhere inside one of these (not just on its
+  // exact outermost element) still resolves to the right ancestor-or-self
+  // to zoom.
+  const ZOOM_TARGET_SELECTOR = "img, svg, pre, table, .katex-display";
+
   document.addEventListener("click", (event) => {
     // Same "inert once exitPresentationMode() has removed body.presenting"
     // guard as the keydown listener above -- without it, clicking anywhere
@@ -1415,7 +1548,48 @@ export const PRESENTATION_SCRIPT = `<script>
     if (event.target.closest("a")) {
       return;
     }
+    // Alt+click (Option+click on macOS -- altKey is true for either
+    // physical key there) zooms in on whichever zoomable element (image,
+    // Mermaid SVG diagram, code block, table, or block math) is closest to
+    // the actual click target -- see this file's own module docstring for
+    // the full design. Checked here, as the LAST guard before the plain
+    // fallthrough advance() call below, so an ordinary (non-Alt) click
+    // still advances exactly as before this feature existed. Always
+    // returns once altKey is true, target found or not -- an Alt+click
+    // that misses every zoomable target is a silent no-op, never an
+    // accidental slide advance.
+    if (event.altKey) {
+      const zoomTarget = event.target.closest(ZOOM_TARGET_SELECTOR);
+      if (zoomTarget) {
+        event.preventDefault();
+        openZoom(zoomTarget);
+      }
+      return;
+    }
     advance();
+  });
+
+  // The zoom overlay's own backdrop-click close trigger (see openZoom()/
+  // closeZoom()'s own docstrings above for the other close trigger,
+  // Escape). Registered here, on the overlay element itself rather than
+  // folded into the document-level click listener above, and
+  // event.stopPropagation() is required, not optional: without it this
+  // same click would keep bubbling up to that document-level listener,
+  // which -- having no idea a zoom overlay even exists -- would fall
+  // straight through to advance(), silently advancing the slide underneath
+  // the very click that just closed the zoom. Checking
+  // event.target === zoomOverlay (rather than just "any click reaching
+  // this listener") is what tells an actual backdrop click apart from a
+  // click ON the zoomed content itself sitting on top of it -- event.target
+  // stays the real clicked descendant even while this listener runs during
+  // bubbling, so clicking the zoomed image/diagram/etc. leaves the zoom
+  // open (and, thanks to the same stopPropagation() above, still never
+  // reaches advance() either).
+  zoomOverlay.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target === zoomOverlay) {
+      closeZoom();
+    }
   });
 
   // Touch swipe navigation, for presenting from a phone/tablet with no

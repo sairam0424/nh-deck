@@ -632,3 +632,110 @@ describe('PRESENTATION_SCRIPT — jump to slide ("g" + digits + Enter)', () => {
 		expect(PRESENTATION_SCRIPT).not.toContain("`");
 	});
 });
+
+describe("PRESENTATION_SCRIPT — Alt+click-to-zoom", () => {
+	it("checks event.altKey as the very last guard in the click listener, after the link exclusion and before the plain fallthrough advance() call", () => {
+		// Deliberately "document.addEventListener", not the bare
+		// 'addEventListener("click"' -- the timerDisplay pause-toggle listener
+		// and the zoom overlay's own backdrop-click listener both also match
+		// that bare string, elsewhere in this file, so anchoring on it here
+		// would risk landing on the wrong one.
+		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'document.addEventListener("click"',
+		);
+		const linkExclusionIndex = PRESENTATION_SCRIPT.indexOf(
+			'closest("a")',
+			clickListenerStart,
+		);
+		const altKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			"event.altKey",
+			clickListenerStart,
+		);
+		const advanceIndex = PRESENTATION_SCRIPT.indexOf(
+			"advance();",
+			clickListenerStart,
+		);
+		expect(linkExclusionIndex).toBeGreaterThan(-1);
+		expect(altKeyIndex).toBeGreaterThan(-1);
+		expect(linkExclusionIndex).toBeLessThan(altKeyIndex);
+		expect(altKeyIndex).toBeLessThan(advanceIndex);
+	});
+
+	it("resolves the actual zoom target via closest() against the fixed selector list (images, Mermaid SVGs, code blocks, tables, block math)", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'"img, svg, pre, table, .katex-display"',
+		);
+		expect(PRESENTATION_SCRIPT).toContain("event.target.closest(");
+	});
+
+	it("returns unconditionally once altKey is true, whether or not a zoom target was found -- a miss must never fall through to advance()", () => {
+		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("click"',
+		);
+		const altKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			"event.altKey",
+			clickListenerStart,
+		);
+		const altKeyBranch = PRESENTATION_SCRIPT.slice(
+			altKeyIndex,
+			altKeyIndex + 350,
+		);
+		expect(altKeyBranch).toContain("openZoom");
+		expect(altKeyBranch).toContain("event.preventDefault();");
+		expect(altKeyBranch).toContain("return;");
+	});
+
+	it("moves the real clicked element into a dedicated zoom overlay (never cloning it) via openZoom/closeZoom", () => {
+		expect(PRESENTATION_SCRIPT).toContain("const openZoom = (element)");
+		expect(PRESENTATION_SCRIPT).toContain("const closeZoom = ()");
+		expect(PRESENTATION_SCRIPT).toContain("presentation-zoom-overlay");
+	});
+
+	it("inserts a placeholder Comment node at the zoomed element's exact original position before moving it, so closeZoom can restore it there via Comment.replaceWith", () => {
+		const openZoomIndex = PRESENTATION_SCRIPT.indexOf(
+			"const openZoom = (element)",
+		);
+		const openZoomBody = PRESENTATION_SCRIPT.slice(
+			openZoomIndex,
+			openZoomIndex + 500,
+		);
+		expect(openZoomBody).toContain("document.createComment(");
+		expect(openZoomBody).toContain(
+			"element.parentNode.insertBefore(zoomPlaceholder, element)",
+		);
+
+		const closeZoomIndex = PRESENTATION_SCRIPT.indexOf("const closeZoom = ()");
+		const closeZoomBody = PRESENTATION_SCRIPT.slice(
+			closeZoomIndex,
+			closeZoomIndex + 500,
+		);
+		expect(closeZoomBody).toContain("zoomPlaceholder.replaceWith(");
+	});
+
+	it("closes the zoom overlay via a dedicated click listener on the overlay backdrop itself, stopping propagation so the same click never also advances the slide underneath it", () => {
+		const overlayListenerIndex = PRESENTATION_SCRIPT.indexOf(
+			'zoomOverlay.addEventListener("click"',
+		);
+		expect(overlayListenerIndex).toBeGreaterThan(-1);
+		const overlayListenerBody = PRESENTATION_SCRIPT.slice(
+			overlayListenerIndex,
+			overlayListenerIndex + 400,
+		);
+		expect(overlayListenerBody).toContain("event.stopPropagation();");
+		expect(overlayListenerBody).toContain("event.target === zoomOverlay");
+		expect(overlayListenerBody).toContain("closeZoom();");
+	});
+
+	it("gives the zoom overlay the new HIGHEST precedence in the keydown listener's Escape branch, ahead of even isJumpPending()", () => {
+		const escapeIndex = PRESENTATION_SCRIPT.indexOf('event.key === "Escape"');
+		const escapeBranch = PRESENTATION_SCRIPT.slice(
+			escapeIndex,
+			PRESENTATION_SCRIPT.indexOf('event.key === "?"'),
+		);
+		expect(escapeBranch).toContain("isZoomOpen()");
+		expect(escapeBranch).toContain("closeZoom();");
+		expect(escapeBranch.indexOf("isZoomOpen()")).toBeLessThan(
+			escapeBranch.indexOf("isJumpPending()"),
+		);
+	});
+});

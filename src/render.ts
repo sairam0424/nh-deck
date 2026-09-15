@@ -547,6 +547,48 @@ const JUMP_INDICATOR_STYLE = `
     }`;
 
 /**
+ * The full-screen overlay for presentationScript.ts's Alt+click-to-zoom on
+ * dense content (images, Mermaid SVG diagrams, code blocks, tables, block
+ * math) -- see that file's own module docstring and its openZoom()/
+ * closeZoom() for the full design. `.presentation-zoom-overlay` itself is
+ * always present in the DOM (presentationScript.ts creates it once, empty,
+ * at setup time regardless of whether anything is ever zoomed) but hidden
+ * by the bare rule below; `body.zoom-open` (toggled by openZoom()/
+ * closeZoom()) is what actually shows it, flex-centering whatever real
+ * element openZoom() moved inside it.
+ *
+ * The moved element is capped at `max-width: 90vw`/`max-height: 90vh` --
+ * regardless of its natural size (a wide table, a tall Mermaid diagram, a
+ * long code block) it can never overflow the viewport once zoomed. Scoped
+ * to the overlay's own direct child (`> *`), not the overlay itself, since
+ * the overlay itself needs to stay full-viewport (`inset: 0`) for its own
+ * flex-centering to work.
+ *
+ * Deliberately NOT gated behind `!customCss`, for the same reason
+ * HELP_STYLE/OVERVIEW_STYLE/JUMP_INDICATOR_STYLE above are not: this is
+ * core interactive presentation-mode chrome (the zoom mechanic itself, not
+ * a suppressible decorative flourish), so a custom --css should not be
+ * able to silently break it.
+ */
+const ZOOM_STYLE = `
+    .presentation-zoom-overlay {
+      display: none;
+    }
+    body.zoom-open .presentation-zoom-overlay {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.8);
+    }
+    .presentation-zoom-overlay > * {
+      max-width: 90vw;
+      max-height: 90vh;
+    }`;
+
+/**
  * The presenter-console layout for a genuinely separate presenter-view
  * window -- the SAME served document, opened at the SAME URL with one
  * added query flag (`&presenter`), rendering this layout instead of the
@@ -1442,6 +1484,7 @@ ${
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
     ${JUMP_INDICATOR_STYLE}
+    ${ZOOM_STYLE}
     ${PRESENTER_VIEW_STYLE}
     ${progressStyle}
     ${FRAGMENT_STYLE}
