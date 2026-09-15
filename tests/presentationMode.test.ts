@@ -2300,3 +2300,106 @@ describe("presentation mode — Alt+click-to-zoom", () => {
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
 });
+
+describe("presentation mode — auto-advance", () => {
+	// Calls generateHtml directly with the new trailing autoAdvanceSeconds
+	// argument, rather than going through the CLI -- matching this file's
+	// own established pattern (e.g. the transition-effect describe block
+	// above, which calls generateHtml with a transitionName argument
+	// directly) for exercising a generateHtml-level opt-in without spinning
+	// up the whole Commander parsing path.
+	function generateHtmlWithAutoAdvance(markdown: string, seconds: number) {
+		return generateHtml(
+			markdown,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			seconds,
+		);
+	}
+
+	it(
+		"auto-advances to the next slide on its own, with no simulated input, within a bounded time window",
+		async () => {
+			const page = await openPresentationPage(
+				generateHtmlWithAutoAdvance(THREE_SLIDE_DECK, 1),
+			);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			await page.waitForFunction(
+				() =>
+					document.querySelector(".slide.is-active h1")?.textContent ===
+					"Slide 2",
+				{ timeout: 5000 },
+			);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"resets the countdown on a manual navigation mid-countdown -- auto-advance does not fire again until a full fresh interval has elapsed after that press",
+		async () => {
+			const page = await openPresentationPage(
+				generateHtmlWithAutoAdvance(THREE_SLIDE_DECK, 2.5),
+			);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			// Presses well before the UN-RESET 2500ms deadline (from page load)
+			// would fire on its own.
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			// The un-reset timer would have fired at 2500ms after page load (i.e.
+			// 1500ms after this press). Waiting well past that point, but still
+			// comfortably before the RESET timer's own fresh 2500ms-from-the-press
+			// deadline (3500ms after load, 2500ms after the press), proves the
+			// countdown genuinely restarted rather than continuing on its old
+			// schedule.
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			// ...and it does still eventually fire again, proving the timer was
+			// reset -- not stopped outright.
+			await page.waitForFunction(
+				() =>
+					document.querySelector(".slide.is-active h1")?.textContent ===
+					"Slide 3",
+				{ timeout: 5000 },
+			);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"stops the timer without looping back to slide 1 once already on the last (and only) slide with no fragments left",
+		async () => {
+			const ONE_SLIDE_DECK = "# Only slide\n\nNo fragments here.";
+			const page = await openPresentationPage(
+				generateHtmlWithAutoAdvance(ONE_SLIDE_DECK, 1),
+			);
+
+			const pageErrors: string[] = [];
+			page.on("pageerror", (error) => pageErrors.push(String(error)));
+
+			expect(await activeSlideHeading(page)).toBe("Only slide");
+
+			// Comfortably past several would-be tick intervals -- if the timer
+			// looped back to slide 1 (a bug) or threw inside its own callback,
+			// this window is generous enough to catch it.
+			await new Promise((resolve) => setTimeout(resolve, 3500));
+
+			expect(await activeSlideHeading(page)).toBe("Only slide");
+			expect(pageErrors).toHaveLength(0);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});

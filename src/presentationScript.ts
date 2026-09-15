@@ -429,6 +429,24 @@ export const PRESENTATION_SCRIPT = `<script>
   // real assignment happens to live.
   let updatePacingDisplay;
 
+  // Auto-advance (see this file's own module docstring's presentation-mode
+  // section for the general "any real navigation resets the timer" design):
+  // autoAdvanceTimer holds the current setInterval handle (undefined once
+  // stopped or before auto-advance is ever enabled), and
+  // startAutoAdvanceTimer is the function that (re)starts it. Both forward-
+  // declared here, at the outer scope, for the same reason
+  // currentPreview/nextPreview/notesPanel/updatePacingDisplay above are:
+  // goTo() -- defined further down this file, but reachable from every
+  // navigation input (arrows, click, jump-to-slide, a grid-overview
+  // thumbnail click) -- needs to read/clear autoAdvanceTimer and call
+  // startAutoAdvanceTimer() to reset the countdown on every real navigation,
+  // but the actual function value (and the very first interval it starts)
+  // is only ever assigned much further down, by the auto-advance guard near
+  // the end of this script's setup -- and only when that guard confirms the
+  // feature is actually enabled for this window at all.
+  let autoAdvanceTimer;
+  let startAutoAdvanceTimer;
+
   // Presenter-console UI: the current slide (scaled down), a preview
   // of the next slide (scaled down further), the current slide's own
   // presenter notes (always visible here, unlike the main view's
@@ -956,6 +974,25 @@ export const PRESENTATION_SCRIPT = `<script>
     // window alone.
     localStorage.setItem(CURRENT_SLIDE_STORAGE_KEY, String(current));
     presenterChannel.postMessage({ type: "slide", index: current });
+    // Auto-advance timer reset: ANY real navigation, from ANY input source
+    // (arrows, click, jump-to-slide, a grid-overview thumbnail click) --
+    // every one of them already funnels through this one shared function --
+    // restarts the countdown from full, so navigating manually mid-countdown
+    // gets a full fresh interval before auto-advance fires again, rather
+    // than firing almost immediately on whatever was left of the old one.
+    // Only ever set (autoAdvanceTimer truthy) once auto-advance's own
+    // enablement guard near the end of this script has actually started it
+    // once already -- a no-op otherwise, so this line does nothing at all
+    // for a window that never opted into auto-advance in the first place.
+    // Deliberately NOT reachable from a fragment-only reveal step
+    // (revealNextFragment/concealLastFragment) -- see advance()/retreat()
+    // just below, neither of which calls goTo() at all when a fragment was
+    // revealed/concealed -- so a fragment-only step does NOT reset this
+    // timer; a documented simplification, not a bug.
+    if (autoAdvanceTimer) {
+      clearInterval(autoAdvanceTimer);
+      startAutoAdvanceTimer();
+    }
   };
 
   // Forward navigation: reveal the current slide's next fragment (if any
@@ -1658,6 +1695,63 @@ export const PRESENTATION_SCRIPT = `<script>
       retreat();
     }
   });
+
+  // Auto-advance: on a timer, moves forward through the deck exactly the way
+  // arrow-key/click navigation already does -- via advance(), never a raw
+  // goTo() jump -- so a fragment-bearing slide still reveals its fragments
+  // one at a time under auto-advance instead of skipping straight past
+  // them. Read from the auto-advance dataset attribute render.ts's own
+  // generateHtml conditionally emits on <body> (see that function's own
+  // docstring): absent entirely unless a deck's "auto-advance:" frontmatter
+  // key or a --auto-advance flag actually opted in, in which case
+  // Number(undefined) is NaN and the guard below stays false -- matching
+  // every other opt-in presentation-mode feature's own
+  // "byte-identical/inert when unused" discipline. Deliberately NOT spelled
+  // out here as a literal HTML attribute name -- see this file's own PRESENTATION_SCRIPT
+  // constant, which is embedded verbatim into EVERY rendered document
+  // regardless of whether auto-advance was ever requested, so writing that
+  // exact string in a comment here would itself defeat the very
+  // byte-identical-when-unused guarantee this feature is built to keep.
+  //
+  // Scoped to the MAIN presenting window only, never a presenter-view
+  // window -- see this file's own module docstring's presenter-view
+  // section: a presenter-view window never calls goTo()/advance() itself
+  // (its own keydown/click/touchend listeners all bail out first), and
+  // auto-advancing that read-only mirror on its own independent timer,
+  // rather than simply receiving the main window's broadcasts like every
+  // other piece of navigation state, would desync the two immediately.
+  const autoAdvanceMs = Number(document.body.dataset.autoAdvanceMs);
+  if (!isPresenterView && Number.isFinite(autoAdvanceMs) && autoAdvanceMs > 0) {
+    startAutoAdvanceTimer = () => {
+      autoAdvanceTimer = setInterval(() => {
+        // fragmentsInSlide -- the exact same fragment-lookup helper
+        // revealNextFragment/concealLastFragment/setFragmentsRevealed
+        // already share (see this file's own module docstring: fragments
+        // are looked up fresh from the live DOM every time, never tracked
+        // via a second, parallel JS counter) -- tells us, WITHOUT revealing
+        // anything itself, whether the current slide still has an
+        // unrevealed fragment left. Checked directly (rather than via
+        // revealNextFragment's own return value) specifically so this tick
+        // never double-reveals: advance() below already calls
+        // revealNextFragment itself when it runs, so this check must stay
+        // read-only.
+        const hasUnrevealedFragment = fragmentsInSlide(slides[current]).some(
+          (fragment) => !fragment.classList.contains("is-revealed"),
+        );
+        // No looping in this version -- a deliberate, documented scope
+        // limit, not an oversight: reaching the last slide with nothing
+        // left to reveal stops the timer outright rather than wrapping
+        // back around to slide 1.
+        if (current === slides.length - 1 && !hasUnrevealedFragment) {
+          clearInterval(autoAdvanceTimer);
+          autoAdvanceTimer = undefined;
+          return;
+        }
+        advance();
+      }, autoAdvanceMs);
+    };
+    startAutoAdvanceTimer();
+  }
 
   render();
 })();

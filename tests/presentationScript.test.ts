@@ -739,3 +739,75 @@ describe("PRESENTATION_SCRIPT — Alt+click-to-zoom", () => {
 		);
 	});
 });
+
+describe("PRESENTATION_SCRIPT — auto-advance timer", () => {
+	it("forward-declares the interval handle and the startAutoAdvanceTimer function before goTo() is defined, mirroring updatePacingDisplay's own forward-declaration pattern", () => {
+		const autoAdvanceTimerDeclIndex = PRESENTATION_SCRIPT.indexOf(
+			"let autoAdvanceTimer;",
+		);
+		const startAutoAdvanceTimerDeclIndex = PRESENTATION_SCRIPT.indexOf(
+			"let startAutoAdvanceTimer;",
+		);
+		const goToDefIndex = PRESENTATION_SCRIPT.indexOf(
+			"const goTo = (index, isBackward)",
+		);
+		expect(autoAdvanceTimerDeclIndex).toBeGreaterThan(-1);
+		expect(startAutoAdvanceTimerDeclIndex).toBeGreaterThan(-1);
+		expect(goToDefIndex).toBeGreaterThan(-1);
+		expect(autoAdvanceTimerDeclIndex).toBeLessThan(goToDefIndex);
+		expect(startAutoAdvanceTimerDeclIndex).toBeLessThan(goToDefIndex);
+	});
+
+	it("reads the auto-advance duration from body.dataset.autoAdvanceMs, gated on being finite, positive, and never for a presenter-view window", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			"const autoAdvanceMs = Number(document.body.dataset.autoAdvanceMs);",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"if (!isPresenterView && Number.isFinite(autoAdvanceMs) && autoAdvanceMs > 0)",
+		);
+	});
+
+	it("calls startAutoAdvanceTimer() once, unconditionally, right after the enablement guard -- and before the final initial render() call", () => {
+		const guardIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (!isPresenterView && Number.isFinite(autoAdvanceMs) && autoAdvanceMs > 0)",
+		);
+		expect(guardIndex).toBeGreaterThan(-1);
+		const finalRenderIndex = PRESENTATION_SCRIPT.lastIndexOf("render();");
+		expect(finalRenderIndex).toBeGreaterThan(guardIndex);
+		const guardBody = PRESENTATION_SCRIPT.slice(guardIndex, finalRenderIndex);
+		expect(guardBody).toContain("startAutoAdvanceTimer();");
+	});
+
+	it("on each tick, stops (via clearInterval) without looping once the current slide is the last slide with no more fragments left to reveal -- otherwise falls through to the fragment-aware advance() function, never a raw goTo() jump", () => {
+		const startFnIndex = PRESENTATION_SCRIPT.indexOf(
+			"startAutoAdvanceTimer = ()",
+		);
+		expect(startFnIndex).toBeGreaterThan(-1);
+		const startFnBody = PRESENTATION_SCRIPT.slice(
+			startFnIndex,
+			startFnIndex + 2000,
+		);
+		expect(startFnBody).toContain("setInterval(");
+		expect(startFnBody).toContain("current === slides.length - 1");
+		// Reuses fragmentsInSlide -- the exact same fragment-lookup helper
+		// revealNextFragment/concealLastFragment/setFragmentsRevealed already
+		// share -- rather than tracking reveal state a second, parallel way.
+		expect(startFnBody).toContain("fragmentsInSlide(slides[current])");
+		expect(startFnBody).toContain("clearInterval(autoAdvanceTimer)");
+		expect(startFnBody).toContain("advance();");
+		expect(startFnBody).not.toContain("goTo(current + 1");
+	});
+
+	it("resets the auto-advance timer inside the single shared navigation function (goTo), on any real navigation from any input source", () => {
+		const goToIndex = PRESENTATION_SCRIPT.indexOf(
+			"const goTo = (index, isBackward)",
+		);
+		const advanceIndex = PRESENTATION_SCRIPT.indexOf("const advance = ()");
+		expect(goToIndex).toBeGreaterThan(-1);
+		expect(advanceIndex).toBeGreaterThan(goToIndex);
+		const goToBody = PRESENTATION_SCRIPT.slice(goToIndex, advanceIndex);
+		expect(goToBody).toContain("if (autoAdvanceTimer)");
+		expect(goToBody).toContain("clearInterval(autoAdvanceTimer)");
+		expect(goToBody).toContain("startAutoAdvanceTimer();");
+	});
+});

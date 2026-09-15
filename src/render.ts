@@ -1229,6 +1229,27 @@ marked.use({
  * ArrowLeft/ArrowRight's navigation semantics or reposition any
  * presentation-mode chrome, and Mermaid diagrams stay LTR-oriented
  * regardless (see directions.ts's own docstring).
+ *
+ * `autoAdvanceSeconds`, when given, emits a `data-auto-advance-ms` attribute
+ * on `<body>` -- the number of seconds converted to milliseconds, since a
+ * client-side `setInterval` (presentationScript.ts's own auto-advance timer)
+ * wants milliseconds, not seconds. Appended as the LAST parameter,
+ * deliberately never inserted earlier in this positional-optional parameter
+ * list, so every existing call site (index.ts's render/pdf/png action
+ * handlers, and every test that calls generateHtml with fewer arguments)
+ * keeps working unchanged. Omitted entirely when `undefined` (the default),
+ * so a deck/invocation that never opts in renders byte-identical to before
+ * this parameter existed -- matching direction/themeColors/transitionName's
+ * own "opt-in, absent by default" precedent. Presentation-mode-only, like
+ * `?present`/`?notes` themselves -- only ever read by
+ * presentationScript.ts's own `?present`-gated script, so a value passed
+ * here has no effect at all on the continuous-scroll view or the PDF/PNG
+ * export path (neither of which is driven by this script). Unlike
+ * themeColors/transitionName, this is never suppressed by a custom --css:
+ * it is a `<body>` HTML attribute, not part of the `<style>` block --css
+ * replaces, so there is nothing for --css to conflict with -- the same
+ * reasoning `direction`'s own `dir="rtl"` attribute above already
+ * establishes for itself.
  */
 export function generateHtml(
 	markdown: string,
@@ -1239,6 +1260,7 @@ export function generateHtml(
 	cssVars?: string,
 	withNotes = false,
 	direction?: DirectionName,
+	autoAdvanceSeconds?: number,
 ): string {
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
@@ -1348,6 +1370,14 @@ export function generateHtml(
 	// for why this (unlike themeOverride/layoutOverride/transitionStyle) is
 	// never gated by customCss.
 	const dirAttribute = direction === "rtl" ? ' dir="rtl"' : "";
+	// Omitted entirely when autoAdvanceSeconds is undefined -- see
+	// generateHtml's own docstring for why this <body> attribute (unlike
+	// themeOverride/layoutOverride/transitionStyle) is never gated by
+	// customCss either.
+	const autoAdvanceAttribute =
+		autoAdvanceSeconds !== undefined
+			? ` data-auto-advance-ms="${autoAdvanceSeconds * 1000}"`
+			: "";
 
 	return `<!DOCTYPE html>
 <html lang="en"${dirAttribute}>
@@ -1493,7 +1523,7 @@ ${
     ${transitionStyle}
   </style>
 </head>
-<body>
+<body${autoAdvanceAttribute}>
 ${slidesHtml}
   <div id="nh-deck-live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <script>

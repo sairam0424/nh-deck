@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	closeWatcherOnServerClose,
 	debounce,
+	parseAutoAdvanceSeconds,
 	parsePort,
 	resolveOutputPath,
 	watchFileForChanges,
@@ -69,6 +70,33 @@ describe("parsePort", () => {
 
 	it("rejects non-integer numbers", () => {
 		expect(() => parsePort("3000.5")).toThrow(InvalidArgumentError);
+	});
+});
+
+describe("parseAutoAdvanceSeconds", () => {
+	it("accepts valid positive values, including fractional seconds", () => {
+		expect(parseAutoAdvanceSeconds("5")).toBe(5);
+		expect(parseAutoAdvanceSeconds("7.5")).toBe(7.5);
+		expect(parseAutoAdvanceSeconds("0.01")).toBe(0.01);
+	});
+
+	it("rejects zero", () => {
+		expect(() => parseAutoAdvanceSeconds("0")).toThrow(InvalidArgumentError);
+	});
+
+	it("rejects negative numbers", () => {
+		expect(() => parseAutoAdvanceSeconds("-1")).toThrow(InvalidArgumentError);
+	});
+
+	it("rejects non-numeric input", () => {
+		expect(() => parseAutoAdvanceSeconds("abc")).toThrow(InvalidArgumentError);
+	});
+
+	it("rejects non-finite input", () => {
+		expect(() => parseAutoAdvanceSeconds("Infinity")).toThrow(
+			InvalidArgumentError,
+		);
+		expect(() => parseAutoAdvanceSeconds("NaN")).toThrow(InvalidArgumentError);
 	});
 });
 
