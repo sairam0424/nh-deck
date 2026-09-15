@@ -33,7 +33,7 @@ export interface StartServerOptions {
 	 * (typically via its own debounced re-render, then this server's own
 	 * `updateHtml`) -- this callback itself has no effect on what's served.
 	 */
-	onThemePreview?: (themeName: string) => void;
+	onThemePreview?: (themeName: string) => void | Promise<void>;
 }
 
 const RELOAD_PATH = "/__nh-deck-reload";
@@ -223,7 +223,13 @@ export function startServer(
 				const requestUrl = new URL(req.url, "http://127.0.0.1");
 				if (requestUrl.pathname === THEME_PREVIEW_PATH) {
 					const name = requestUrl.searchParams.get("name");
-					if (name) {
+					// A whitespace-only name is non-empty (so a bare `if (name)`
+					// guard would let it through) but resolveThemeName treats it
+					// the same as "nothing requested" -- silently resolving to the
+					// default theme with no warning -- which would otherwise
+					// activate a preview override for a request that is really
+					// just as empty as no `?name=` at all.
+					if (name?.trim()) {
 						// Validate before forwarding -- resolveThemeName's own
 						// case-insensitive/trimmed matching is the same registry check
 						// --theme and a deck's own frontmatter theme: value already go
@@ -237,7 +243,23 @@ export function startServer(
 							res.end();
 							return;
 						}
-						options.onThemePreview(resolvedName);
+						// The caller's onThemePreview (index.ts) is synchronous in
+						// practice, but StartServerOptions types it permissively
+						// enough that a synchronous throw or a rejected returned
+						// promise wouldn't otherwise be observed here -- either
+						// would escape this request handler as an uncaught
+						// exception or an unhandled rejection. Both are contained
+						// so a caller's own bug in that callback can never crash or
+						// hang this response.
+						try {
+							Promise.resolve(options.onThemePreview(resolvedName)).catch(
+								(error: unknown) => {
+									console.warn("nh-deck: theme preview failed.", error);
+								},
+							);
+						} catch (error) {
+							console.warn("nh-deck: theme preview failed.", error);
+						}
 					}
 					// No body needed: the actual visual update arrives via the
 					// existing SSE reload push (updateHtml, called synchronously by

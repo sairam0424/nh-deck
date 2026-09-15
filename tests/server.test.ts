@@ -512,7 +512,7 @@ describe("startServer — theme preview endpoint", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 
-	it("does not invoke onThemePreview for a missing or empty name query param, but still responds 204", async () => {
+	it("does not invoke onThemePreview for a missing, empty, or whitespace-only name query param, but still responds 204", async () => {
 		const received: string[] = [];
 		const { server, url } = await startServer("<p>x</p>", 0, {
 			watch: true,
@@ -523,13 +523,61 @@ describe("startServer — theme preview endpoint", () => {
 
 		const noQueryResponse = await fetch(`${url}/__nh-deck-theme`);
 		const emptyNameResponse = await fetch(`${url}/__nh-deck-theme?name=`);
+		// A whitespace-only name is non-empty, so a bare `if (name)` guard
+		// would let it through -- resolveThemeName then silently resolves it
+		// to the default theme with no warning (matching "nothing requested"
+		// semantics, not "an unrecognized name" semantics), which would
+		// otherwise activate a preview override for a request that is really
+		// just as empty as the two cases above.
+		const whitespaceNameResponse = await fetch(
+			`${url}/__nh-deck-theme?name=%20`,
+		);
 
 		expect(noQueryResponse.status).toBe(204);
 		expect(emptyNameResponse.status).toBe(204);
+		expect(whitespaceNameResponse.status).toBe(204);
 		expect(received).toEqual([]);
 
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("responds 204 without hanging or crashing the server when onThemePreview throws synchronously or returns a rejected promise", async () => {
+		const { server: throwingServer, url: throwingUrl } = await startServer(
+			"<p>x</p>",
+			0,
+			{
+				watch: true,
+				onThemePreview: () => {
+					throw new Error("boom");
+				},
+			},
+		);
+		const throwingResponse = await fetch(
+			`${throwingUrl}/__nh-deck-theme?name=dracula`,
+		);
+		expect(throwingResponse.status).toBe(204);
+		throwingServer.closeAllConnections();
+		await new Promise<void>((resolve) => throwingServer.close(() => resolve()));
+
+		const { server: rejectingServer, url: rejectingUrl } = await startServer(
+			"<p>x</p>",
+			0,
+			{
+				watch: true,
+				onThemePreview: async () => {
+					throw new Error("boom");
+				},
+			},
+		);
+		const rejectingResponse = await fetch(
+			`${rejectingUrl}/__nh-deck-theme?name=dracula`,
+		);
+		expect(rejectingResponse.status).toBe(204);
+		rejectingServer.closeAllConnections();
+		await new Promise<void>((resolve) =>
+			rejectingServer.close(() => resolve()),
+		);
 	});
 
 	it("responds 400 and does not invoke onThemePreview for an unrecognized theme name", async () => {
