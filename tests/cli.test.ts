@@ -176,6 +176,29 @@ async function waitForCondition(
 	return check();
 }
 
+/**
+ * Same purpose as waitForCondition, but for an async check -- e.g. polling
+ * a debounced re-render's served body via fetchBody(url) until it reflects
+ * the expected update, instead of a single fixed-length sleep before one
+ * fetch. Returns the last-checked value regardless of outcome, so callers
+ * can assert against it directly rather than re-fetching once more after
+ * the wait resolves.
+ */
+async function waitForAsyncCondition<T>(
+	fetchValue: () => Promise<T>,
+	isReady: (value: T) => boolean,
+	timeoutMs: number,
+	intervalMs = 50,
+): Promise<T> {
+	const deadline = Date.now() + timeoutMs;
+	let value = await fetchValue();
+	while (!isReady(value) && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		value = await fetchValue();
+	}
+	return value;
+}
+
 /** Fetches the response body from `url` as a UTF-8 string. */
 function fetchBody(url: string): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -1959,6 +1982,60 @@ describe("CLI: nh-deck render --watch", () => {
 	);
 
 	it(
+		"warns on stderr when a debounced re-render picks up an unrecognized dir: value, matching the initial-render warning behavior",
+		async () => {
+			const dir = mkdtempSync(path.join(tmpdir(), "nh-deck-watch-dir-warn-"));
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "---\ndir: ltr\n---\n# Slide one\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			expect(stderr).not.toContain("unknown direction");
+
+			writeFileSync(
+				deckPath,
+				"---\ndir: nonexistent-direction\n---\n# Slide one\n",
+			);
+			await waitForCondition(() => stderr.includes("unknown direction"), 5_000);
+
+			expect(stderr).toContain("nh-deck: warning:");
+			expect(stderr).toContain("unknown direction");
+			const body = await fetchBody(url);
+			expect(body).not.toContain('dir="rtl"');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"survives a transient read failure during a debounced re-render and keeps serving",
 		async () => {
 			const dir = mkdtempSync(
@@ -2301,9 +2378,11 @@ describe("CLI: nh-deck render --watch", () => {
 			const previewResponse = await fetch(`${url}/__nh-deck-theme?name=nord`);
 			expect(previewResponse.status).toBe(204);
 
-			await new Promise((resolve) => setTimeout(resolve, 500));
-
-			const previewedBody = await fetchBody(url);
+			const previewedBody = await waitForAsyncCondition(
+				() => fetchBody(url),
+				(body) => body.includes("--nh-bg: #2e3440"),
+				5_000,
+			);
 			// The page-level CSS variable now reflects the previewed theme, not
 			// the frontmatter one.
 			expect(previewedBody).toContain("--nh-bg: #2e3440");
@@ -2321,9 +2400,12 @@ describe("CLI: nh-deck render --watch", () => {
 			// file-triggered re-render, since it is only ever changed by another
 			// preview click, never automatically cleared.
 			writeFileSync(deckPath, deckWithMermaid("Changed"));
-			await new Promise((resolve) => setTimeout(resolve, 500));
 
-			const afterEditBody = await fetchBody(url);
+			const afterEditBody = await waitForAsyncCondition(
+				() => fetchBody(url),
+				(body) => body.includes("Changed"),
+				5_000,
+			);
 			expect(afterEditBody).toContain("Changed");
 			expect(afterEditBody).toContain("--nh-bg: #2e3440");
 			expect(afterEditBody).not.toContain("--nh-bg: #282a36");

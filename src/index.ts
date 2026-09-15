@@ -542,11 +542,16 @@ program
 										options.transition,
 										customCss,
 									);
-								const { name: updatedDirectionName } =
-									computeEffectiveDirection(
-										updatedFrontmatter.dir,
-										options.dir,
-									);
+								const {
+									name: updatedDirectionName,
+									message: updatedDirectionMessage,
+								} = computeEffectiveDirection(
+									updatedFrontmatter.dir,
+									options.dir,
+								);
+								if (updatedDirectionMessage) {
+									process.stderr.write(updatedDirectionMessage);
+								}
 								updateHtml(
 									generateHtml(
 										updatedMarkdown,

@@ -531,4 +531,60 @@ describe("startServer — theme preview endpoint", () => {
 		server.closeAllConnections();
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
+
+	it("responds 400 and does not invoke onThemePreview for an unrecognized theme name", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(
+			`${url}/__nh-deck-theme?name=not-a-real-theme`,
+		);
+		const body = await response.text();
+
+		expect(response.status).toBe(400);
+		expect(body).toBe("");
+		expect(received).toEqual([]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("resolves a theme name case-insensitively before invoking onThemePreview, matching resolveThemeName's own precedent", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=DRACULA`);
+
+		expect(response.status).toBe(204);
+		expect(received).toEqual(["dracula"]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("serves the theme-preview button script with a rejection handler on its fetch call, so a closed server or failed request never surfaces as an unhandled promise rejection in the page", async () => {
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: () => {},
+		});
+
+		const body = await (await fetch(url)).text();
+		const fetchCallIndex = body.indexOf("__nh-deck-theme");
+		expect(fetchCallIndex).toBeGreaterThan(-1);
+		const afterFetchCall = body.slice(fetchCallIndex, fetchCallIndex + 200);
+		expect(afterFetchCall).toContain(".catch(");
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
 });

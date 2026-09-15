@@ -342,12 +342,25 @@ describe("exportToPdf", () => {
 				// to catch: a title string with no real destination, or a
 				// destination pointing at some unrelated object, would both
 				// fail this specific match.
-				const entryMatch = pdfText.match(
-					new RegExp(`/Title \\(${heading}\\)[^]*?/Dest \\[(\\d+) 0 R`),
+				// Splitting on "endobj" first (rather than a single regex
+				// spanning /Title to /Dest with a non-greedy [^]*?) keeps the
+				// match confined to one PDF object -- a spanning regex could
+				// otherwise pair this heading's /Title with a /Dest that
+				// actually belongs to a later, unrelated object and pass
+				// incorrectly.
+				const entryObject = pdfText
+					.split("endobj")
+					.find((object) => object.includes(`/Title (${heading})`));
+				expect(
+					entryObject,
+					`expected an outline entry for "${heading}"`,
+				).not.toBeUndefined();
+				const entryMatch = (entryObject as string).match(
+					/\/Dest\s*\[(\d+)\s+0\s+R/,
 				);
 				expect(
 					entryMatch,
-					`expected an outline entry for "${heading}"`,
+					`expected a /Dest reference in the outline entry for "${heading}"`,
 				).not.toBeNull();
 				const destPageObjectNumber = Number(
 					(entryMatch as RegExpMatchArray)[1],

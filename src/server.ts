@@ -1,6 +1,6 @@
 import * as http from "node:http";
 import * as zlib from "node:zlib";
-import { THEMES } from "./themes.js";
+import { resolveThemeName, THEMES } from "./themes.js";
 
 export interface StartedServer {
 	server: http.Server;
@@ -67,7 +67,7 @@ const THEME_PREVIEW_SCRIPT_BODY = `(function () {
     btn.title = "Preview the " + name + " theme";
     btn.style.cssText = "padding:2px 6px;border:1px solid rgba(128,128,128,.5);border-radius:4px;background:rgba(255,255,255,.85);color:#000;cursor:pointer;opacity:.55;";
     btn.addEventListener("click", function () {
-      fetch(${JSON.stringify(THEME_PREVIEW_PATH)} + "?name=" + encodeURIComponent(name));
+      fetch(${JSON.stringify(THEME_PREVIEW_PATH)} + "?name=" + encodeURIComponent(name)).catch(function () {});
     });
     bar.appendChild(btn);
   });
@@ -224,7 +224,20 @@ export function startServer(
 				if (requestUrl.pathname === THEME_PREVIEW_PATH) {
 					const name = requestUrl.searchParams.get("name");
 					if (name) {
-						options.onThemePreview(name);
+						// Validate before forwarding -- resolveThemeName's own
+						// case-insensitive/trimmed matching is the same registry check
+						// --theme and a deck's own frontmatter theme: value already go
+						// through, so a preview click can't sneak an unrecognized name
+						// past this endpoint into previewThemeOverride, where it would
+						// otherwise silently fall back to the default theme on the next
+						// rerender instead of being rejected here.
+						const { name: resolvedName, warning } = resolveThemeName(name);
+						if (warning) {
+							res.writeHead(400);
+							res.end();
+							return;
+						}
+						options.onThemePreview(resolvedName);
 					}
 					// No body needed: the actual visual update arrives via the
 					// existing SSE reload push (updateHtml, called synchronously by
