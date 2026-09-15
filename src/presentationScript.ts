@@ -235,6 +235,22 @@ export const PRESENTATION_SCRIPT = `<script>
     return;
   }
 
+  // Grabbed once, here, at setup time -- render.ts's own generateHtml()
+  // always emits this div in <body> unconditionally, regardless of
+  // presentation mode (see render.ts's SR_ONLY_STYLE/#nh-deck-live-region
+  // docstrings), so it already exists before this script ever runs.
+  // Defensively re-asserts aria-live/aria-atomic here too, rather than
+  // relying solely on render.ts's own static markup -- the same
+  // defense-in-depth every other cross-file invariant in this project
+  // already gets (see render.ts's own cssVarsOverride/customCss mutual-
+  // exclusion check for the identical "repeat the guarantee at the other
+  // end too" reasoning).
+  const liveRegion = document.getElementById("nh-deck-live-region");
+  if (liveRegion) {
+    liveRegion.setAttribute("aria-live", "polite");
+    liveRegion.setAttribute("aria-atomic", "true");
+  }
+
   // Presenter-view sync constants -- see this file's own module docstring
   // for the full BroadcastChannel/localStorage design. Shared verbatim by
   // every window (main or presenter-view): both need the exact same
@@ -311,6 +327,11 @@ export const PRESENTATION_SCRIPT = `<script>
     "</dl>" +
     "</div>";
   document.body.appendChild(help);
+
+  // Grabbed once, right after creation, so openHelp()/closeHelp() below
+  // (see this file's own module docstring's updated overlay-focus section)
+  // can move focus into it without a fresh querySelector on every open.
+  const helpPanel = help.querySelector(".presentation-help-panel");
 
   // Presenter-console DOM refs -- only ever assigned (and only ever read by
   // updatePresenterConsole() below) when isPresenterView is true; see the
@@ -533,6 +554,31 @@ export const PRESENTATION_SCRIPT = `<script>
   let indexBeforeOverview = current;
   let helpOpen = false;
 
+  // True from the first REAL navigation onward -- goTo() (below) flips this
+  // immediately before its own call to render(), never inside render()
+  // itself. render()'s own screen-reader announcement and slide-focus
+  // block (below) is gated on this so the very SCRIPT's first paint (the
+  // bare render() call at the bottom of this file) never steals focus away
+  // from document.body or announces anything before a viewer has actually
+  // navigated at all.
+  let hasNavigated = false;
+
+  // Tracks whichever .slide element currently carries the tabindex="-1"
+  // render() itself assigns (below), so the NEXT slide to receive it can
+  // have it removed from this one first -- otherwise every slide a viewer
+  // has ever visited would keep accumulating a permanent tabindex="-1",
+  // rather than only the one currently active.
+  let previouslyFocusedSlide = null;
+
+  // Captures document.activeElement immediately before the help overlay /
+  // grid overview opens (see openHelp()/openOverview() below), so closing
+  // either one can restore focus to wherever it was. Captured inside the
+  // open function itself, before any of ITS OWN DOM mutations run -- by the
+  // time a close function runs, document.activeElement has already moved
+  // onto that overlay's own panel, so it is the wrong place to read from.
+  let focusBeforeHelp = null;
+  let focusBeforeOverview = null;
+
   // Jump-to-slide state ("g" then digits then Enter/Escape -- see this
   // file's own module docstring for the full design). "null" means no jump
   // is in progress; once "g" starts one (startJump() below), this holds the
@@ -695,6 +741,35 @@ export const PRESENTATION_SCRIPT = `<script>
     if (isPresenterView) {
       updatePresenterConsole();
     }
+    // Screen-reader slide-change announcement + slide-focus management --
+    // both gated the same way: MAIN presenting window only (a
+    // presenter-view window announcing/refocusing the identical thing a
+    // moment later would be redundant noise -- see this file's own module
+    // docstring's presenter-view section), and skipped entirely while
+    // hasNavigated is still false, i.e. before the very first real
+    // navigation (see goTo() below, the only place that ever flips it).
+    if (!isPresenterView && hasNavigated) {
+      const activeSlide = slides[current];
+      const heading = activeSlide.querySelector("h1, h2, h3");
+      const headingText = heading ? heading.textContent.trim() : "";
+      if (liveRegion) {
+        liveRegion.textContent =
+          headingText.length > 0
+            ? headingText
+            : "Slide " + (current + 1) + " of " + slides.length;
+      }
+      // tabindex="-1" makes an otherwise non-interactive <section> a valid
+      // focus target without adding it to the normal Tab order. Removed
+      // from whichever slide previously carried it FIRST, so a deck never
+      // accumulates a permanent tabindex="-1" on every slide a viewer has
+      // ever visited -- only the currently active one keeps it.
+      if (previouslyFocusedSlide && previouslyFocusedSlide !== activeSlide) {
+        previouslyFocusedSlide.removeAttribute("tabindex");
+      }
+      activeSlide.setAttribute("tabindex", "-1");
+      activeSlide.focus({ preventScroll: true });
+      previouslyFocusedSlide = activeSlide;
+    }
   };
 
   const goTo = (index, isBackward) => {
@@ -713,6 +788,11 @@ export const PRESENTATION_SCRIPT = `<script>
       setFragmentsRevealed(slides[index], Boolean(isBackward));
     }
     current = index;
+    // Flipped here, right before render()'s own call, never inside
+    // render() itself -- see hasNavigated's own declaration comment above
+    // for why render() needs to tell its very first (pre-navigation) call
+    // apart from every real one that follows.
+    hasNavigated = true;
     render();
     // Presenter-view sync (see this file's own module docstring): persists
     // the new index to localStorage (read once, at startup, by a
@@ -758,6 +838,54 @@ export const PRESENTATION_SCRIPT = `<script>
     goTo(current - 1, true);
   };
 
+  // Shared "move focus into a just-opened dialog-like overlay" helper for
+  // both the help overlay and the grid overview (see openHelp()/
+  // openOverview() below). If panel already contains a real, natively
+  // focusable element (a link/button/input/etc., or anything else already
+  // carrying its own tabindex), that element receives focus instead --
+  // it is already a more specific, valid target than the panel itself.
+  // Otherwise panel gets tabindex="-1" (unless it already has one, e.g. the
+  // grid overview's own panel is often the slide render()'s own focus
+  // management already gave one to) so it becomes a valid focus target in
+  // the first place, then receives focus directly.
+  const focusIntoPanel = (panel) => {
+    if (!panel) {
+      return;
+    }
+    const focusableChild = panel.querySelector(
+      "a[href], button, input, select, textarea, [tabindex]",
+    );
+    if (focusableChild) {
+      focusableChild.focus();
+      return;
+    }
+    if (!panel.hasAttribute("tabindex")) {
+      panel.setAttribute("tabindex", "-1");
+    }
+    panel.focus();
+  };
+
+  // Restores focus to target (the element captured as document.activeElement
+  // right before an overlay opened -- see openHelp()/openOverview() above)
+  // once that overlay closes. Blurring the CURRENT active element first is
+  // required, not optional: document.body -- the common case when nothing
+  // else had focus before the overlay opened -- has no tabindex of its own,
+  // so calling target.focus() directly on it is a silent no-op (verified
+  // directly against a real browser) that would leave focus stuck on the
+  // just-hidden overlay panel instead of returning it anywhere. Blurring
+  // first always falls back to document.body (the browser's own default),
+  // then focusing target on top of that only matters when target is some
+  // OTHER, still-focusable element.
+  const restoreFocus = (target) => {
+    const activeElement = document.activeElement;
+    if (activeElement && typeof activeElement.blur === "function") {
+      activeElement.blur();
+    }
+    if (target && target !== document.body && typeof target.focus === "function") {
+      target.focus();
+    }
+  };
+
   // Opens grid-overview mode: records which slide was active BEFORE opening
   // (indexBeforeOverview) separately from current, so closing it again via
   // Escape/"o" (closeOverviewToPreviousSlide, below) always returns to that
@@ -767,14 +895,24 @@ export const PRESENTATION_SCRIPT = `<script>
   // overviewOpen return), so in practice indexBeforeOverview and current
   // stay equal until a thumbnail click intentionally changes current -- see
   // the click listener's own separate, non-restoring close path.
+  //
+  // The grid itself has no dedicated wrapper element of its own -- render.ts's
+  // CSS applies the grid layout directly to <body> (see OVERVIEW_STYLE) -- so
+  // <body> is this overlay's own "outer container" for role="dialog"/
+  // aria-modal purposes, and the currently active slide's own thumbnail is
+  // its "panel" for focus purposes.
   const openOverview = () => {
     if (overviewOpen) {
       return;
     }
     indexBeforeOverview = current;
     overviewOpen = true;
+    focusBeforeOverview = document.activeElement;
     document.body.classList.add("overview");
+    document.body.setAttribute("role", "dialog");
+    document.body.setAttribute("aria-modal", "true");
     syncFragmentAriaForCurrentMode();
+    focusIntoPanel(slides[current]);
   };
 
   // Removes the overview class/flag without touching current -- shared by
@@ -783,7 +921,13 @@ export const PRESENTATION_SCRIPT = `<script>
   const closeOverviewUi = () => {
     overviewOpen = false;
     document.body.classList.remove("overview");
+    document.body.removeAttribute("role");
+    document.body.removeAttribute("aria-modal");
     syncFragmentAriaForCurrentMode();
+    if (focusBeforeOverview) {
+      restoreFocus(focusBeforeOverview);
+      focusBeforeOverview = null;
+    }
   };
 
   // The Escape/"o"-while-open close path: closes the grid and returns to the
@@ -800,12 +944,21 @@ export const PRESENTATION_SCRIPT = `<script>
   // grid overview (via "?" or a helpHint click) without disturbing it. See
   // the keydown listener's own precedence comment below for how this
   // composes with overviewOpen.
+  //
+  // help itself (see this file's own module docstring's chrome-creation
+  // section) is this overlay's "outer container"; helpPanel (the inner
+  // .presentation-help-panel, grabbed once right after help's own
+  // creation above) is its "panel" for focusIntoPanel() purposes.
   const openHelp = () => {
     if (helpOpen) {
       return;
     }
     helpOpen = true;
+    focusBeforeHelp = document.activeElement;
     document.body.classList.add("help-open");
+    help.setAttribute("role", "dialog");
+    help.setAttribute("aria-modal", "true");
+    focusIntoPanel(helpPanel);
   };
 
   // Closes JUST the help overlay -- like openHelp() above, this never
@@ -814,6 +967,12 @@ export const PRESENTATION_SCRIPT = `<script>
   const closeHelp = () => {
     helpOpen = false;
     document.body.classList.remove("help-open");
+    help.removeAttribute("role");
+    help.removeAttribute("aria-modal");
+    if (focusBeforeHelp) {
+      restoreFocus(focusBeforeHelp);
+      focusBeforeHelp = null;
+    }
   };
 
   // Exits presentation mode entirely, back to the normal continuous-scroll

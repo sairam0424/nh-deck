@@ -341,6 +341,12 @@ describe("generateHtml", () => {
 
 		expect(withUndefinedTransition).toBe(withoutArg);
 	});
+
+	it("always emits the screen-reader live region, unconditionally, with no options passed at all", () => {
+		const html = generateHtml("# Only slide");
+
+		expect(html).toContain('id="nh-deck-live-region"');
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {

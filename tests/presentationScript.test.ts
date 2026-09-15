@@ -143,6 +143,108 @@ describe("PRESENTATION_SCRIPT", () => {
 	});
 });
 
+describe("PRESENTATION_SCRIPT — accessibility: live region + focus management", () => {
+	it("grabs the always-present live region once, at setup time, via getElementById", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'getElementById("nh-deck-live-region")',
+		);
+	});
+
+	it("re-asserts aria-live/aria-atomic on the live region defensively, matching this file's own defense-in-depth convention", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'setAttribute("aria-live", "polite")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			'setAttribute("aria-atomic", "true")',
+		);
+	});
+
+	it("announces the newly-active slide's own heading text on navigation, falling back to a slide-count string when there is no heading", () => {
+		expect(PRESENTATION_SCRIPT).toContain('querySelector("h1, h2, h3")');
+		expect(PRESENTATION_SCRIPT).toContain(
+			'"Slide " + (current + 1) + " of " + slides.length',
+		);
+	});
+
+	it("gates the announcement to the main presenting window only, skipping a presenter-view window entirely", () => {
+		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
+		const renderBody = PRESENTATION_SCRIPT.slice(
+			renderIndex,
+			renderIndex + 2200,
+		);
+		expect(renderBody).toContain("!isPresenterView && hasNavigated");
+	});
+
+	it('flips a "first paint" flag inside goTo(), right before its own call to render(), rather than inside render() itself', () => {
+		const goToIndex = PRESENTATION_SCRIPT.indexOf("const goTo = (index");
+		const goToBody = PRESENTATION_SCRIPT.slice(goToIndex, goToIndex + 1300);
+		expect(goToBody).toContain("hasNavigated = true;\n    render();");
+	});
+
+	it('gives the newly-active slide tabindex="-1" and focuses it, after removing tabindex from whichever slide previously carried it', () => {
+		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
+		const renderBody = PRESENTATION_SCRIPT.slice(
+			renderIndex,
+			renderIndex + 2200,
+		);
+		expect(renderBody).toContain(
+			'previouslyFocusedSlide.removeAttribute("tabindex")',
+		);
+		expect(renderBody).toContain('activeSlide.setAttribute("tabindex", "-1")');
+		expect(renderBody).toContain("activeSlide.focus({ preventScroll: true })");
+	});
+
+	it('adds role="dialog" and aria-modal="true" to the help overlay\'s own outer container on open, and removes them on close', () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'help.setAttribute("role", "dialog")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			'help.setAttribute("aria-modal", "true")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain('help.removeAttribute("role")');
+		expect(PRESENTATION_SCRIPT).toContain('help.removeAttribute("aria-modal")');
+	});
+
+	it('adds role="dialog" and aria-modal="true" to the grid overview\'s own outer container (body) on open, and removes them on close', () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'document.body.setAttribute("role", "dialog")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			'document.body.setAttribute("aria-modal", "true")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			'document.body.removeAttribute("role")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			'document.body.removeAttribute("aria-modal")',
+		);
+	});
+
+	it('moves focus into each overlay\'s own panel on open, giving it tabindex="-1" only when it has no natively focusable child of its own', () => {
+		expect(PRESENTATION_SCRIPT).toContain("const focusIntoPanel = (panel) =>");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"a[href], button, input, select, textarea, [tabindex]",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			'panel.setAttribute("tabindex", "-1")',
+		);
+		expect(PRESENTATION_SCRIPT).toContain("panel.focus();");
+	});
+
+	it("captures document.activeElement right before each overlay opens, and restores it right after closing via a shared blur-then-focus helper (body.focus() alone is a silent no-op when nothing else had focus)", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			"focusBeforeHelp = document.activeElement;",
+		);
+		expect(PRESENTATION_SCRIPT).toContain("restoreFocus(focusBeforeHelp);");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"focusBeforeOverview = document.activeElement;",
+		);
+		expect(PRESENTATION_SCRIPT).toContain("restoreFocus(focusBeforeOverview);");
+		expect(PRESENTATION_SCRIPT).toContain("const restoreFocus = (target) =>");
+		expect(PRESENTATION_SCRIPT).toContain("activeElement.blur();");
+	});
+});
+
 describe("PRESENTATION_SCRIPT — presenter view", () => {
 	it('detects the "presenter" query flag and applies a presenter-view class on body', () => {
 		expect(PRESENTATION_SCRIPT).toContain('has(\n    "presenter",\n  )');

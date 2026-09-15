@@ -261,6 +261,33 @@ const LAYOUT_STYLE = `
       display: flex;
     }`;
 
+/**
+ * The standard visually-hidden-but-still-announced-by-a-screen-reader
+ * pattern, applied to `#nh-deck-live-region` (see generateHtml's `<body>`
+ * below) and reusable for any future element that needs the same
+ * treatment. Deliberately NOT `display: none` or `visibility: hidden` --
+ * both of those remove an element from the accessibility tree entirely,
+ * which would defeat the one purpose this element exists for (a screen
+ * reader announcing text a sighted viewer never needs to see). Clipping the
+ * element to a 1x1 box with `overflow: hidden` instead keeps it fully
+ * present in the accessibility tree while occupying no visible space.
+ *
+ * Always included, unconditionally -- unlike LAYOUT_STYLE/transitionStyle/
+ * progressStyle, this is not suppressible by a custom --css: the live
+ * region itself is always emitted in `<body>` regardless of presentation
+ * mode (see generateHtml below), so its own styling must never depend on
+ * whether a custom --css replaced the rest of this `<style>` block.
+ */
+const SR_ONLY_STYLE = `
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+    }`;
+
 const PRESENTATION_STYLE = `
     body.presenting .slide {
       display: none;
@@ -1367,6 +1394,7 @@ ${
     ${NOTES_STYLE}
     ${NOTES_PAGE_STYLE}
     ${PRINT_PAGINATION_STYLE}
+    ${SR_ONLY_STYLE}
     ${PRESENTATION_STYLE}
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
@@ -1381,6 +1409,7 @@ ${
 </head>
 <body>
 ${slidesHtml}
+  <div id="nh-deck-live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <script>
     if (new URLSearchParams(location.search).has("notes")) {
       document.querySelectorAll(".notes").forEach((el) => {

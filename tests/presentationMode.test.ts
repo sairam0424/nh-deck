@@ -1926,3 +1926,102 @@ describe('presentation mode — jump to slide ("g" + digits + Enter)', () => {
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
 });
+
+describe("presentation mode — accessibility: live region + focus management", () => {
+	function liveRegionText(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(
+			() => document.getElementById("nh-deck-live-region")?.textContent ?? "",
+		);
+	}
+
+	it(
+		"announces the newly-active slide on a real ArrowRight keypress, with different text for two different slides",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+			const firstAnnouncement = await liveRegionText(page);
+			expect(firstAnnouncement.length).toBeGreaterThan(0);
+
+			await page.keyboard.press("ArrowRight");
+			const secondAnnouncement = await liveRegionText(page);
+			expect(secondAnnouncement.length).toBeGreaterThan(0);
+			expect(secondAnnouncement).not.toBe(firstAnnouncement);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"moves focus onto the newly-active slide element after a real navigation",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("ArrowRight");
+
+			const activeElementIsActiveSlide = await page.evaluate(
+				() => document.activeElement?.classList.contains("is-active") ?? false,
+			);
+			expect(activeElementIsActiveSlide).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"does not move focus away from document.body on the very first paint, before any navigation happens",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			const isBodyFocused = await page.evaluate(
+				() => document.activeElement === document.body,
+			);
+			expect(isBodyFocused).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"opening the help overlay marks its container as a dialog and moves focus into its panel, and closing it via Escape restores focus to wherever it was before",
+		async () => {
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			const isBodyFocusedBeforeOpen = await page.evaluate(
+				() => document.activeElement === document.body,
+			);
+			expect(isBodyFocusedBeforeOpen).toBe(true);
+
+			await page.keyboard.press("?");
+
+			const helpRole = await page.evaluate(() =>
+				document.querySelector(".presentation-help")?.getAttribute("role"),
+			);
+			expect(helpRole).toBe("dialog");
+
+			const helpAriaModal = await page.evaluate(() =>
+				document
+					.querySelector(".presentation-help")
+					?.getAttribute("aria-modal"),
+			);
+			expect(helpAriaModal).toBe("true");
+
+			const focusLandedInsidePanel = await page.evaluate(() => {
+				const panel = document.querySelector(".presentation-help-panel");
+				return (
+					panel !== null &&
+					(document.activeElement === panel ||
+						panel.contains(document.activeElement))
+				);
+			});
+			expect(focusLandedInsidePanel).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			const focusRestoredToBody = await page.evaluate(
+				() => document.activeElement === document.body,
+			);
+			expect(focusRestoredToBody).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
