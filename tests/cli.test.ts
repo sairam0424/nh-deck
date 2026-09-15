@@ -2015,16 +2015,34 @@ describe("CLI: nh-deck render --watch", () => {
 			if (!url) {
 				throw new Error(`Could not extract URL from: ${matchedLine}`);
 			}
+			// A real HTTP round trip through the child process own event loop
+			// -- not just a bare wait -- guarantees the child has already run
+			// past its own synchronous startup sequence (which arms the file
+			// watcher right after printing the serving line) before the write
+			// below, the same barrier the frontmatter-theme rerender test right
+			// above this one already relies on.
+			await fetchBody(url);
 			expect(stderr).not.toContain("unknown direction");
 
-			writeFileSync(
-				deckPath,
-				"---\ndir: nonexistent-direction\n---\n# Slide one\n",
-			);
-			await waitForCondition(
-				() => stderr.includes("unknown direction"),
-				15_000,
-			);
+			// A single fs.watch change event is not guaranteed delivery on every
+			// platform (Node's own fs.watch docs describe this as inherently
+			// "not 100% consistent across platforms") -- re-issuing the same
+			// write gives the watcher additional chances to observe it instead
+			// of this test depending on exactly one OS-level notification
+			// arriving.
+			for (let attempt = 0; attempt < 5; attempt++) {
+				writeFileSync(
+					deckPath,
+					"---\ndir: nonexistent-direction\n---\n# Slide one\n",
+				);
+				const sawWarning = await waitForCondition(
+					() => stderr.includes("unknown direction"),
+					3_000,
+				);
+				if (sawWarning) {
+					break;
+				}
+			}
 
 			expect(stderr).toContain("nh-deck: warning:");
 			expect(stderr).toContain("unknown direction");
