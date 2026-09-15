@@ -314,6 +314,9 @@ export const PRESENTATION_SCRIPT = `<script>
   help.className = "presentation-help";
   help.innerHTML =
     '<div class="presentation-help-panel">' +
+    '<button type="button" class="presentation-help-close" aria-label="Close keyboard shortcuts help">' +
+    "×" +
+    "</button>" +
     "<h2>Keyboard shortcuts</h2>" +
     "<dl>" +
     "<dt>Navigate</dt>" +
@@ -948,7 +951,20 @@ export const PRESENTATION_SCRIPT = `<script>
   // help itself (see this file's own module docstring's chrome-creation
   // section) is this overlay's "outer container"; helpPanel (the inner
   // .presentation-help-panel, grabbed once right after help's own
-  // creation above) is its "panel" for focusIntoPanel() purposes.
+  // creation above) is its "panel".
+  //
+  // Deliberately does NOT call the shared focusIntoPanel() helper below --
+  // that helper prefers a real focusable descendant over the panel itself,
+  // which here would mean the close button (added for a pointer-only close
+  // affordance, see the click listener below) automatically receives focus
+  // the instant help opens. That is a real regression, not just an
+  // accessibility nicety: a focused <button> natively activates on Space,
+  // so the very next Space press (a normal presentation-mode navigation
+  // key) would silently close help again by triggering a synthetic click
+  // on it -- found via a real-browser test, not by inspection. Focusing the
+  // panel itself instead keeps the close button reachable by Tab (its own
+  // native tab order) and by a direct click, without it grabbing focus
+  // nobody asked it to.
   const openHelp = () => {
     if (helpOpen) {
       return;
@@ -958,7 +974,10 @@ export const PRESENTATION_SCRIPT = `<script>
     document.body.classList.add("help-open");
     help.setAttribute("role", "dialog");
     help.setAttribute("aria-modal", "true");
-    focusIntoPanel(helpPanel);
+    if (!helpPanel.hasAttribute("tabindex")) {
+      helpPanel.setAttribute("tabindex", "-1");
+    }
+    helpPanel.focus();
   };
 
   // Closes JUST the help overlay -- like openHelp() above, this never
@@ -1282,8 +1301,15 @@ export const PRESENTATION_SCRIPT = `<script>
     // keydown listener's own helpOpen early-return suppresses
     // arrow/Home/End/Space and "o": clicking anywhere on the page --
     // including on the dimmed slide underneath the modal-ish help overlay --
-    // must not silently advance to the next slide behind it.
+    // must not silently advance to the next slide behind it. The one
+    // exception is the close button itself (see openHelp() above): without
+    // this, a mouse/touch-only user had no pointer affordance that reached
+    // closeHelp() at all -- only Escape or a second "?" worked. Found by
+    // CodeRabbit review.
     if (helpOpen) {
+      if (event.target.closest(".presentation-help-close")) {
+        closeHelp();
+      }
       return;
     }
     if (overviewOpen) {

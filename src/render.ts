@@ -445,6 +445,7 @@ const HELP_STYLE = `
       background: rgba(0, 0, 0, 0.6);
     }
     .presentation-help-panel {
+      position: relative;
       background: var(--nh-bg);
       color: var(--nh-fg);
       border: 1px solid var(--nh-border);
@@ -452,6 +453,25 @@ const HELP_STYLE = `
       padding: 1.5rem 2rem;
       max-width: 28rem;
       box-shadow: 0 8px 30px rgba(0, 0, 0, 0.35);
+    }
+    .presentation-help-close {
+      position: absolute;
+      top: 0.5rem;
+      right: 0.5rem;
+      width: 1.75rem;
+      height: 1.75rem;
+      background: transparent;
+      color: var(--nh-muted);
+      border: none;
+      border-radius: 4px;
+      font-size: 1.25rem;
+      line-height: 1;
+      cursor: pointer;
+    }
+    .presentation-help-close:hover,
+    .presentation-help-close:focus-visible {
+      background: var(--nh-code-bg);
+      color: var(--nh-fg);
     }
     .presentation-help-panel h2 {
       margin-top: 0;

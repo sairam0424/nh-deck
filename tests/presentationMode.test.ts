@@ -829,6 +829,33 @@ describe("presentation mode — keyboard-shortcuts help overlay", () => {
 	);
 
 	it(
+		"closes the help overlay on a real click of a pointer-accessible close button, without exiting presentation mode",
+		async () => {
+			// Regression: openHelp()/closeHelp() previously had no pointer
+			// affordance at all -- Escape and a second "?" both worked, but a
+			// mouse/touch-only user (no keyboard) had no click target that
+			// reached closeHelp(), since every other click while helpOpen is
+			// true is deliberately swallowed. Found by CodeRabbit review.
+			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+
+			await page.keyboard.press("?");
+			expect(await isHelpOpen(page)).toBe(true);
+
+			const closeButtonExists = await page.evaluate(
+				() =>
+					document.querySelector(".presentation-help-panel button") !== null,
+			);
+			expect(closeButtonExists).toBe(true);
+
+			await page.click(".presentation-help-panel button");
+
+			expect(await isHelpOpen(page)).toBe(false);
+			expect(await isPresenting(page)).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"suppresses slide navigation (arrows, Space, End) while the help overlay is open, and does not close it either",
 		async () => {
 			const page = await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
