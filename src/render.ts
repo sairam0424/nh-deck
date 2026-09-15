@@ -286,6 +286,11 @@ const SR_ONLY_STYLE = `
       overflow: hidden;
       clip: rect(0, 0, 0, 0);
       white-space: nowrap;
+    }
+    @media print {
+      .sr-only {
+        display: none;
+      }
     }`;
 
 const PRESENTATION_STYLE = `

@@ -347,6 +347,21 @@ describe("generateHtml", () => {
 
 		expect(html).toContain('id="nh-deck-live-region"');
 	});
+
+	it("hides the screen-reader live region under print media, so it never becomes an extra trailing PDF/PNG export page", () => {
+		// Regression test: the live region is a real (if visually clipped)
+		// sibling AFTER every .slide element. PRINT_PAGINATION_STYLE's
+		// `.slide { break-after: page }` rule forces a page break after the
+		// LAST slide too, and without this print-only display:none, Chromium's
+		// print pipeline (which pdfExport.ts's page.pdf() always renders
+		// under) allocates that break into a real, non-empty trailing page for
+		// this div -- one extra PDF page per export, with no slide content on
+		// it. See docs/adr/0010-axe-core-ci-and-slide-announcements.md and
+		// tests/pdfExport.test.ts's page-count assertions for the full story.
+		const html = generateHtml("# Only slide");
+
+		expect(html).toMatch(/@media print[^}]*\.sr-only[^}]*display:\s*none/);
+	});
 });
 
 describe("generateHtml — slide segmentation", () => {
