@@ -3707,6 +3707,291 @@ describe("CLI: transition selection", () => {
 	);
 });
 
+describe("CLI: direction selection", () => {
+	it(
+		'adds dir="rtl" via the --dir flag on render',
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain('<html lang="en" dir="rtl">');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a deck's own frontmatter dir: value when no --dir flag is given",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-dir-frontmatter-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ndir: rtl\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain('<html lang="en" dir="rtl">');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets a --dir flag override a conflicting frontmatter dir: value, with no false-positive warning on stderr",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-dir-precedence-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ndir: ltr\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// The --dir flag (rtl) won over the deck's conflicting frontmatter
+			// dir: ltr -- matching --theme/--transition's own established,
+			// silent "flag wins over frontmatter" precedent: no override note
+			// is printed for this case (only --css-overrides-a-flag and an
+			// unrecognized-value warning are), so stderr stays free of any
+			// "warning:"/"unknown direction" text.
+			expect(body).toContain('<html lang="en" dir="rtl">');
+			expect(stderr).not.toContain("nh-deck: warning:");
+			expect(stderr).not.toContain("unknown direction");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"falls back to ltr with a warning for an unrecognized --dir value",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--dir",
+					"nonexistent-direction",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(stderr).toContain("nh-deck: warning:");
+			expect(stderr).toContain("unknown direction");
+
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			const body = await fetchBody(url);
+			expect(body).not.toContain('dir="rtl"');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		'applies dir="rtl" via the --dir flag on the pdf subcommand',
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-dir-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown direction/i);
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		'applies dir="rtl" via the --dir flag on the png subcommand',
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-dir-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown direction/i);
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			for (let n = 1; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+});
+
 // The ANSI escape character, built from its code point rather than a literal
 // control character embedded in source (avoids the "unexpected control
 // character" lint rule that literal regex/string escapes trigger).

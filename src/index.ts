@@ -13,6 +13,8 @@ import {
 	runWatchedRerender,
 	watchFileForChanges,
 } from "./cliHelpers.js";
+import type { DirectionName } from "./directions.js";
+import { DIRECTIONS, resolveDirectionName } from "./directions.js";
 import { parseFrontmatter } from "./frontmatter.js";
 import {
 	DEFAULT_INIT_FILENAME,
@@ -220,6 +222,34 @@ function computeEffectiveTransition(
 }
 
 /**
+ * Computes the effective text direction for a render/pdf/png invocation,
+ * handling frontmatter/--dir precedence -- mirrors computeEffectiveTheme's
+ * exact "flag wins over frontmatter" precedence and "warn via stderr on an
+ * unrecognized value" behavior (see resolveDirectionName's own docstring).
+ *
+ * Unlike computeEffectiveTheme/computeEffectiveTransition, this has no --css
+ * mutual-exclusivity branch: direction is emitted as a `dir="rtl"` HTML
+ * attribute on the document element itself (see render.ts's generateHtml),
+ * never as part of the `<style>` block a custom --css replaces, so a custom
+ * stylesheet has no reason to suppress it. Always returns a concrete name
+ * ("ltr" or "rtl"), mirroring resolveDirectionName/resolveThemeName's own
+ * "nothing requested resolves to the default, not to undefined" convention
+ * -- unlike computeEffectiveTransition, which can return `name: undefined`
+ * for "no transition at all".
+ */
+function computeEffectiveDirection(
+	frontmatterDirection: string | undefined,
+	flagDirection: string | undefined,
+): { name: DirectionName; message?: string } {
+	const requested = flagDirection ?? frontmatterDirection;
+	const { name, warning } = resolveDirectionName(requested);
+	return {
+		name,
+		message: warning ? `${warning}\n` : undefined,
+	};
+}
+
+/**
  * Computes the effective --css-vars overlay content for a render/pdf/png
  * invocation, handling --css mutual exclusivity -- mirrors
  * computeEffectiveTheme/computeEffectiveTransition's exact shape (a pure
@@ -366,6 +396,10 @@ program
 		"--transition <name>",
 		`transition effect between slides in presentation mode (${TRANSITIONS.join(", ")}); overrides a deck's own frontmatter "transition:" value`,
 	)
+	.option(
+		"--dir <name>",
+		`text direction for the deck's own authored content (${DIRECTIONS.join(", ")}); overrides a deck's own frontmatter "dir:" value`,
+	)
 	.action(
 		async (
 			file: string,
@@ -377,6 +411,7 @@ program
 				cssVars?: string;
 				theme?: string;
 				transition?: string;
+				dir?: string;
 			},
 		) => {
 			try {
@@ -410,6 +445,11 @@ program
 				if (transitionMessage) {
 					process.stderr.write(transitionMessage);
 				}
+				const { name: directionName, message: directionMessage } =
+					computeEffectiveDirection(frontmatter.dir, options.dir);
+				if (directionMessage) {
+					process.stderr.write(directionMessage);
+				}
 				const html = generateHtml(
 					markdown,
 					file,
@@ -417,6 +457,8 @@ program
 					themeColors,
 					transitionName,
 					effectiveCssVars,
+					undefined,
+					directionName,
 				);
 
 				// Set by a theme-preview click (wired up below via
@@ -500,6 +542,11 @@ program
 										options.transition,
 										customCss,
 									);
+								const { name: updatedDirectionName } =
+									computeEffectiveDirection(
+										updatedFrontmatter.dir,
+										options.dir,
+									);
 								updateHtml(
 									generateHtml(
 										updatedMarkdown,
@@ -508,6 +555,8 @@ program
 										updatedThemeColors,
 										updatedTransitionName,
 										effectiveCssVars,
+										undefined,
+										updatedDirectionName,
 									),
 								);
 							},
@@ -554,6 +603,10 @@ program
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
 	.option(
+		"--dir <name>",
+		`text direction for the deck's own authored content (${DIRECTIONS.join(", ")}); overrides a deck's own frontmatter "dir:" value`,
+	)
+	.option(
 		"--with-notes",
 		"include presenter notes as an additional PDF page, immediately after each slide that has one",
 	)
@@ -565,6 +618,7 @@ program
 				css?: string;
 				cssVars?: string;
 				theme?: string;
+				dir?: string;
 				withNotes?: boolean;
 			},
 		) => {
@@ -590,6 +644,11 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
+				const { name: directionName, message: directionMessage } =
+					computeEffectiveDirection(frontmatter.dir, options?.dir);
+				if (directionMessage) {
+					process.stderr.write(directionMessage);
+				}
 				const withNotes = options?.withNotes ?? false;
 				const html = generateHtml(
 					markdown,
@@ -599,6 +658,7 @@ program
 					undefined,
 					effectiveCssVars,
 					withNotes,
+					directionName,
 				);
 				const outputPath = resolveOutputPath(file, output);
 
@@ -634,6 +694,10 @@ program
 		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
 	)
 	.option(
+		"--dir <name>",
+		`text direction for the deck's own authored content (${DIRECTIONS.join(", ")}); overrides a deck's own frontmatter "dir:" value`,
+	)
+	.option(
 		"--with-notes",
 		"include presenter notes as an additional PNG file per slide that has one (e.g. deck-1-notes.png next to deck-1.png)",
 	)
@@ -645,6 +709,7 @@ program
 				css?: string;
 				cssVars?: string;
 				theme?: string;
+				dir?: string;
 				withNotes?: boolean;
 			},
 		) => {
@@ -670,6 +735,11 @@ program
 				if (themeMessage) {
 					process.stderr.write(themeMessage);
 				}
+				const { name: directionName, message: directionMessage } =
+					computeEffectiveDirection(frontmatter.dir, options?.dir);
+				if (directionMessage) {
+					process.stderr.write(directionMessage);
+				}
 				const withNotes = options?.withNotes ?? false;
 				const html = generateHtml(
 					markdown,
@@ -679,6 +749,7 @@ program
 					undefined,
 					effectiveCssVars,
 					withNotes,
+					directionName,
 				);
 				const outputPath = resolveOutputPath(file, output, "png");
 

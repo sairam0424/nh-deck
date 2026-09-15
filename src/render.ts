@@ -1,6 +1,7 @@
 import type { Token, Tokens } from "marked";
 import { marked } from "marked";
 import markedKatex from "marked-katex-extension";
+import type { DirectionName } from "./directions.js";
 import { extractFragments, isFragmentMarkerComment } from "./fragments.js";
 import { escapeHtml } from "./htmlEscape.js";
 import { getEmbeddedKatexCss } from "./katexAssets.js";
@@ -1101,6 +1102,21 @@ marked.use({
  * this project's own explicit-opt-in precedent for anything notes-related
  * (`?notes` is opt-in on `render` too) -- pdfExport.ts/pngExport.ts's
  * `--with-notes` CLI flag is the only caller that ever passes true.
+ *
+ * `direction`, when it resolves to "rtl", adds a `dir="rtl"` attribute to
+ * `<html>` (alongside `lang`, the only other document-level attribute this
+ * function already emits) for a deck's own authored content -- opt-in via a
+ * deck's "dir:" frontmatter key or a --dir flag, mirroring --theme/
+ * --transition's own opt-in precedent (see directions.ts and index.ts's
+ * computeEffectiveDirection). Omitted entirely for "ltr" (the default) or
+ * `undefined`, so a deck with neither key nor flag renders byte-identical
+ * to before this parameter existed -- unlike themeColors/transitionName,
+ * this is never suppressed by a custom --css: it is HTML structure, not a
+ * `<style>` block --css replaces, so there is nothing for --css to conflict
+ * with. Deliberately scoped to text direction only: this does not change
+ * ArrowLeft/ArrowRight's navigation semantics or reposition any
+ * presentation-mode chrome, and Mermaid diagrams stay LTR-oriented
+ * regardless (see directions.ts's own docstring).
  */
 export function generateHtml(
 	markdown: string,
@@ -1110,6 +1126,7 @@ export function generateHtml(
 	transitionName?: TransitionName,
 	cssVars?: string,
 	withNotes = false,
+	direction?: DirectionName,
 ): string {
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
@@ -1215,9 +1232,13 @@ export function generateHtml(
 		!customCss && (Boolean(transitionName) || hasFragments)
 			? REDUCED_MOTION_STYLE
 			: "";
+	// Omitted entirely for "ltr"/undefined -- see generateHtml's own docstring
+	// for why this (unlike themeOverride/layoutOverride/transitionStyle) is
+	// never gated by customCss.
+	const dirAttribute = direction === "rtl" ? ' dir="rtl"' : "";
 
 	return `<!DOCTYPE html>
-<html lang="en">
+<html lang="en"${dirAttribute}>
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
@@ -1282,7 +1303,13 @@ ${
       padding: 0;
     }
     blockquote {
-      border-left: 4px solid var(--nh-border);
+      /* Logical property, not border-left -- resolves to the correct
+         physical side (right, under a right-to-left ancestor) automatically,
+         with no direction-conditional selector needed at all. See
+         tests/render.test.ts's "text direction (opt-in RTL)" describe block
+         for the real-browser proof this actually flips sides, not just the
+         property name. */
+      border-inline-start: 4px solid var(--nh-border);
       margin: 1rem 0;
       padding: 0.25rem 1rem;
       color: var(--nh-muted);
@@ -1295,7 +1322,10 @@ ${
     th, td {
       border: 1px solid var(--nh-border);
       padding: 0.5rem 0.75rem;
-      text-align: left;
+      /* Logical value, not a hardcoded physical side -- see blockquote's
+         own comment above for why this needs no direction-conditional
+         selector either. */
+      text-align: start;
     }
     img {
       max-width: 100%;
@@ -1305,6 +1335,16 @@ ${
     }
     .katex {
       color: var(--nh-fg);
+      /* Best-effort math isolation, not a full fix: KaTeX's own output is
+         built assuming LTR layout, and mirroring it under a right-to-left
+         document is a real, ~10-year-old unresolved upstream limitation
+         (KaTeX/MathJax both still have open issues on RTL math layout at
+         time of writing). Forcing the formula's own internal layout to
+         stay LTR regardless of the surrounding document's direction avoids
+         the worse outcome (a mirrored, visually-broken formula) but does
+         not make KaTeX itself RTL-aware -- this is a documented,
+         known-imperfect workaround. */
+      direction: ltr;
     }
     .slide {
       /* Makes .slide a CSS size query container along its inline axis, so

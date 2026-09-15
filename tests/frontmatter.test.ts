@@ -63,4 +63,17 @@ describe("parseFrontmatter", () => {
 		expect(result.frontmatter).toEqual({ theme: "dark" });
 		expect(result.body).toBe("body\n");
 	});
+
+	it("extracts a dir: key alongside theme/transition, needing zero new parsing logic", () => {
+		const markdown =
+			"---\ndir: rtl\ntheme: dark\ntransition: fade\n---\n# Slide one\n";
+		const result = parseFrontmatter(markdown);
+
+		expect(result.frontmatter).toEqual({
+			dir: "rtl",
+			theme: "dark",
+			transition: "fade",
+		});
+		expect(result.body).toBe("# Slide one\n");
+	});
 });
