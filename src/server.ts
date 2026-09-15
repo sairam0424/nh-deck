@@ -1,5 +1,6 @@
 import * as http from "node:http";
 import * as zlib from "node:zlib";
+import { resolveThemeName, THEMES } from "./themes.js";
 
 export interface StartedServer {
 	server: http.Server;
@@ -21,18 +22,78 @@ export interface StartServerOptions {
 	 * directly in the response, so it never leaves loopback.
 	 */
 	watch?: boolean;
+	/**
+	 * Called with a theme name whenever a client hits the theme-preview
+	 * endpoint (THEME_PREVIEW_PATH) with a non-empty `?name=` query
+	 * parameter. Only wired up (and only then does the on-page preview
+	 * control even render) when `watch` is also true -- this is a
+	 * live-preview mechanism for a running --watch session, not a
+	 * general-purpose API. The caller (index.ts's render action) is
+	 * responsible for actually recomputing and re-serving HTML in response
+	 * (typically via its own debounced re-render, then this server's own
+	 * `updateHtml`) -- this callback itself has no effect on what's served.
+	 */
+	onThemePreview?: (themeName: string) => void | Promise<void>;
 }
 
 const RELOAD_PATH = "/__nh-deck-reload";
+const THEME_PREVIEW_PATH = "/__nh-deck-theme";
 
-const RELOAD_SCRIPT = `<script>
-new EventSource(${JSON.stringify(RELOAD_PATH)}).onmessage = () => location.reload();
-</script>`;
+// Duplicating just the 4 name strings would drift silently if themes.ts's
+// own registry ever changed -- reusing THEMES' own keys instead means the
+// on-page preview control can never fall out of sync with the actual
+// fixed theme registry.
+const THEME_NAMES = Object.keys(THEMES);
 
-function withReloadScript(html: string): string {
+const RELOAD_SCRIPT_BODY = `new EventSource(${JSON.stringify(RELOAD_PATH)}).onmessage = () => location.reload();`;
+
+/**
+ * Renders 4 small, unobtrusive theme-preview buttons (one per name in
+ * THEME_NAMES) fixed to a corner of the page. Each click only ever does one
+ * thing -- fetch(THEME_PREVIEW_PATH + "?name=" + name) -- and nothing else;
+ * the resulting visual update arrives entirely through the existing SSE
+ * reload channel (updateHtml's own broadcast, triggered synchronously by
+ * the caller's onThemePreview callback), not through this fetch's own
+ * response. No response handling is needed or attempted here.
+ */
+const THEME_PREVIEW_SCRIPT_BODY = `(function () {
+  var themes = ${JSON.stringify(THEME_NAMES)};
+  var bar = document.createElement("div");
+  bar.style.cssText = "position:fixed;bottom:8px;right:8px;z-index:2147483647;display:flex;gap:4px;font:11px system-ui,sans-serif;";
+  themes.forEach(function (name) {
+    var btn = document.createElement("button");
+    btn.type = "button";
+    btn.textContent = name;
+    btn.title = "Preview the " + name + " theme";
+    btn.style.cssText = "padding:2px 6px;border:1px solid rgba(128,128,128,.5);border-radius:4px;background:rgba(255,255,255,.85);color:#000;cursor:pointer;opacity:.55;";
+    btn.addEventListener("click", function () {
+      fetch(${JSON.stringify(THEME_PREVIEW_PATH)} + "?name=" + encodeURIComponent(name)).catch(function () {});
+    });
+    bar.appendChild(btn);
+  });
+  document.body.appendChild(bar);
+})();`;
+
+/**
+ * Builds the single watch-mode inline <script> tag, optionally including
+ * the theme-preview control alongside the pre-existing reload logic --
+ * never as a second separate <script> tag. `includeThemePreview` is only
+ * ever true when the caller's `onThemePreview` option is actually set (see
+ * the request handler below), so the buttons never appear pointing at an
+ * endpoint that isn't wired up to do anything.
+ */
+function buildWatchScript(includeThemePreview: boolean): string {
+	const body = includeThemePreview
+		? `${RELOAD_SCRIPT_BODY}\n${THEME_PREVIEW_SCRIPT_BODY}`
+		: RELOAD_SCRIPT_BODY;
+	return `<script>\n${body}\n</script>`;
+}
+
+function withReloadScript(html: string, includeThemePreview: boolean): string {
+	const script = buildWatchScript(includeThemePreview);
 	return html.includes("</body>")
-		? html.replace("</body>", `${RELOAD_SCRIPT}\n</body>`)
-		: `${html}${RELOAD_SCRIPT}`;
+		? html.replace("</body>", `${script}\n</body>`)
+		: `${html}${script}`;
 }
 
 interface EncodingPreference {
@@ -152,10 +213,69 @@ export function startServer(
 				return;
 			}
 
+			// Mirrors the RELOAD_PATH gate above exactly, plus requiring
+			// onThemePreview to actually be set -- a preview click has nothing
+			// useful to do without a callback to report the requested theme
+			// name to, so this route simply doesn't exist in that case (falls
+			// through to being served as an ordinary page request, same as any
+			// other unrecognized path this server has ever seen).
+			if (options.watch && options.onThemePreview && req.url) {
+				const requestUrl = new URL(req.url, "http://127.0.0.1");
+				if (requestUrl.pathname === THEME_PREVIEW_PATH) {
+					const name = requestUrl.searchParams.get("name");
+					// A whitespace-only name is non-empty (so a bare `if (name)`
+					// guard would let it through) but resolveThemeName treats it
+					// the same as "nothing requested" -- silently resolving to the
+					// default theme with no warning -- which would otherwise
+					// activate a preview override for a request that is really
+					// just as empty as no `?name=` at all.
+					if (name?.trim()) {
+						// Validate before forwarding -- resolveThemeName's own
+						// case-insensitive/trimmed matching is the same registry check
+						// --theme and a deck's own frontmatter theme: value already go
+						// through, so a preview click can't sneak an unrecognized name
+						// past this endpoint into previewThemeOverride, where it would
+						// otherwise silently fall back to the default theme on the next
+						// rerender instead of being rejected here.
+						const { name: resolvedName, warning } = resolveThemeName(name);
+						if (warning) {
+							res.writeHead(400);
+							res.end();
+							return;
+						}
+						// The caller's onThemePreview (index.ts) is synchronous in
+						// practice, but StartServerOptions types it permissively
+						// enough that a synchronous throw or a rejected returned
+						// promise wouldn't otherwise be observed here -- either
+						// would escape this request handler as an uncaught
+						// exception or an unhandled rejection. Both are contained
+						// so a caller's own bug in that callback can never crash or
+						// hang this response.
+						try {
+							Promise.resolve(options.onThemePreview(resolvedName)).catch(
+								(error: unknown) => {
+									console.warn("nh-deck: theme preview failed.", error);
+								},
+							);
+						} catch (error) {
+							console.warn("nh-deck: theme preview failed.", error);
+						}
+					}
+					// No body needed: the actual visual update arrives via the
+					// existing SSE reload push (updateHtml, called synchronously by
+					// whatever the caller's onThemePreview did), not this response.
+					res.writeHead(204);
+					res.end();
+					return;
+				}
+			}
+
 			sendHtml(
 				req,
 				res,
-				options.watch ? withReloadScript(currentHtml) : currentHtml,
+				options.watch
+					? withReloadScript(currentHtml, Boolean(options.onThemePreview))
+					: currentHtml,
 			);
 		});
 

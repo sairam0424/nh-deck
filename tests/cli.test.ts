@@ -176,6 +176,29 @@ async function waitForCondition(
 	return check();
 }
 
+/**
+ * Same purpose as waitForCondition, but for an async check -- e.g. polling
+ * a debounced re-render's served body via fetchBody(url) until it reflects
+ * the expected update, instead of a single fixed-length sleep before one
+ * fetch. Returns the last-checked value regardless of outcome, so callers
+ * can assert against it directly rather than re-fetching once more after
+ * the wait resolves.
+ */
+async function waitForAsyncCondition<T>(
+	fetchValue: () => Promise<T>,
+	isReady: (value: T) => boolean,
+	timeoutMs: number,
+	intervalMs = 50,
+): Promise<T> {
+	const deadline = Date.now() + timeoutMs;
+	let value = await fetchValue();
+	while (!isReady(value) && Date.now() < deadline) {
+		await new Promise((resolve) => setTimeout(resolve, intervalMs));
+		value = await fetchValue();
+	}
+	return value;
+}
+
 /** Fetches the response body from `url` as a UTF-8 string. */
 function fetchBody(url: string): Promise<string> {
 	return new Promise((resolve, reject) => {
@@ -1959,6 +1982,91 @@ describe("CLI: nh-deck render --watch", () => {
 	);
 
 	it(
+		"warns on stderr when a debounced re-render picks up an unrecognized dir: value, matching the initial-render warning behavior",
+		async () => {
+			const dir = mkdtempSync(path.join(tmpdir(), "nh-deck-watch-dir-warn-"));
+			const deckPath = path.join(dir, "deck.md");
+			writeFileSync(deckPath, "---\ndir: ltr\n---\n# Slide one\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			// A real HTTP round trip through the child process own event loop
+			// -- not just a bare wait -- guarantees the child has already run
+			// past its own synchronous startup sequence (which arms the file
+			// watcher right after printing the serving line) before the write
+			// below, the same barrier the frontmatter-theme rerender test right
+			// above this one already relies on.
+			await fetchBody(url);
+			expect(stderr).not.toContain("unknown direction");
+
+			// A single fs.watch change event is not guaranteed delivery on every
+			// platform (Node's own fs.watch docs describe this as inherently
+			// "not 100% consistent across platforms") -- re-issuing the same
+			// write gives the watcher additional chances to observe it instead
+			// of this test depending on exactly one OS-level notification
+			// arriving.
+			for (let attempt = 0; attempt < 5; attempt++) {
+				writeFileSync(
+					deckPath,
+					"---\ndir: nonexistent-direction\n---\n# Slide one updated\n",
+				);
+				const sawWarning = await waitForCondition(
+					() => stderr.includes("unknown direction"),
+					3_000,
+				);
+				if (sawWarning) {
+					break;
+				}
+			}
+
+			expect(stderr).toContain("nh-deck: warning:");
+			expect(stderr).toContain("unknown direction");
+			// The warning above is written to stderr before the rerendered HTML
+			// is actually served (see src/index.ts) -- polling for the updated
+			// slide text, rather than fetching once immediately after the
+			// stderr check, is what actually proves this assertion is checking
+			// the rerendered document and not a stale pre-rerender one that
+			// would also, trivially, lack dir="rtl".
+			const body = await waitForAsyncCondition(
+				() => fetchBody(url),
+				(candidate) => candidate.includes("Slide one updated"),
+				15_000,
+			);
+			expect(body).not.toContain('dir="rtl"');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		WATCH_TEST_TIMEOUT_MS,
+	);
+
+	it(
 		"survives a transient read failure during a debounced re-render and keeps serving",
 		async () => {
 			const dir = mkdtempSync(
@@ -2240,6 +2348,114 @@ describe("CLI: nh-deck render --watch", () => {
 			},
 		);
 	});
+
+	it(
+		"lets a theme-preview click win over the frontmatter theme, re-coloring both the page CSS variables and the mermaid diagrams own baked SVG colors, and the override persists across a later file-triggered re-render",
+		async () => {
+			const dir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-theme-preview-test-"),
+			);
+			const deckPath = path.join(dir, "deck.md");
+			const deckWithMermaid = (heading: string) =>
+				`---\ntheme: dracula\n---\n# ${heading}\n\n\`\`\`mermaid\nflowchart TD\n  A[Start] --> B[End]\n\`\`\`\n`;
+			writeFileSync(deckPath, deckWithMermaid("Original"));
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					deckPath,
+					"--watch",
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			// The mermaid diagram bakes its theme colors into its own <svg
+			// style="..."> attribute at render time (see mermaidRenderer.ts) --
+			// distinct from the page-level --nh-* custom properties, which live
+			// in a separate :root block. Isolating this attribute is what lets
+			// this test tell "only the CSS variables changed" apart from "the
+			// diagram was actually re-rendered with the new theme too".
+			const extractSvgStyle = (body: string): string => {
+				const match = body.match(/<svg[^>]*\sstyle="([^"]*)"/);
+				if (!match) {
+					throw new Error('No <svg style="..."> found in the served body');
+				}
+				return match[1];
+			};
+
+			const initialBody = await fetchBody(url);
+			// The deck's own frontmatter theme ("dracula") applies with no
+			// --theme flag given -- both the page-level CSS variable and the
+			// mermaid diagram's own baked SVG colors.
+			expect(initialBody).toContain("--nh-bg: #282a36");
+			expect(extractSvgStyle(initialBody)).toContain("--accent:#bd93f9");
+
+			// A deliberate theme-preview click for a DIFFERENT theme ("nord") --
+			// exactly the request the on-page control's own fetch() call makes.
+			const previewResponse = await fetch(`${url}/__nh-deck-theme?name=nord`);
+			expect(previewResponse.status).toBe(204);
+
+			const previewedBody = await waitForAsyncCondition(
+				() => fetchBody(url),
+				(body) => body.includes("--nh-bg: #2e3440"),
+				15_000,
+			);
+			// The page-level CSS variable now reflects the previewed theme, not
+			// the frontmatter one.
+			expect(previewedBody).toContain("--nh-bg: #2e3440");
+			expect(previewedBody).not.toContain("--nh-bg: #282a36");
+			// The whole reason Design A-full (reusing the SSE reload channel)
+			// was chosen over a CSS-only approach: the mermaid diagram's own SVG
+			// bakes theme colors in at render time, so it must be re-rendered
+			// with the new theme too -- not just a page-level CSS variable swap.
+			const previewedSvgStyle = extractSvgStyle(previewedBody);
+			expect(previewedSvgStyle).toContain("--accent:#88c0d0");
+			expect(previewedSvgStyle).not.toContain("--accent:#bd93f9");
+
+			// An unrelated edit to the watched file (a heading change) must not
+			// reset the preview: the override persists across a subsequent
+			// file-triggered re-render, since it is only ever changed by another
+			// preview click, never automatically cleared.
+			writeFileSync(deckPath, deckWithMermaid("Changed"));
+
+			const afterEditBody = await waitForAsyncCondition(
+				() => fetchBody(url),
+				(body) => body.includes("Changed"),
+				15_000,
+			);
+			expect(afterEditBody).toContain("Changed");
+			expect(afterEditBody).toContain("--nh-bg: #2e3440");
+			expect(afterEditBody).not.toContain("--nh-bg: #282a36");
+			const afterEditSvgStyle = extractSvgStyle(afterEditBody);
+			expect(afterEditSvgStyle).toContain("--accent:#88c0d0");
+			expect(afterEditSvgStyle).not.toContain("--accent:#bd93f9");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(dir, { recursive: true, force: true });
+		},
+		// This test polls for two separate debounced re-renders in sequence
+		// (the preview click, then the follow-up file edit), each with its own
+		// up-to-15s budget -- WATCH_TEST_TIMEOUT_MS alone only accounts for one
+		// such wait, so it is extended here to cover both without the test's
+		// own vitest-level timeout firing before either poll's internal one
+		// could report a real, actionable assertion failure.
+		WATCH_TEST_TIMEOUT_MS + 30_000,
+	);
 });
 
 describe("CLI: theme selection", () => {
@@ -3607,6 +3823,291 @@ describe("CLI: transition selection", () => {
 			expect(existsSync(outputPath)).toBe(false);
 		},
 		EXIT_TIMEOUT_MS + 5_000,
+	);
+});
+
+describe("CLI: direction selection", () => {
+	it(
+		'adds dir="rtl" via the --dir flag on render',
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain('<html lang="en" dir="rtl">');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"applies a deck's own frontmatter dir: value when no --dir flag is given",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-dir-frontmatter-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ndir: rtl\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			expect(body).toContain('<html lang="en" dir="rtl">');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"lets a --dir flag override a conflicting frontmatter dir: value, with no false-positive warning on stderr",
+		async () => {
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-dir-precedence-"),
+			);
+			const tempFile = path.join(tempDir, "deck.md");
+			writeFileSync(tempFile, "---\ndir: ltr\n---\n# Slide\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					tempFile,
+					"--no-open",
+					"--port",
+					"0",
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+
+			const body = await fetchBody(url);
+			// The --dir flag (rtl) won over the deck's conflicting frontmatter
+			// dir: ltr -- matching --theme/--transition's own established,
+			// silent "flag wins over frontmatter" precedent: no override note
+			// is printed for this case (only --css-overrides-a-flag and an
+			// unrecognized-value warning are), so stderr stays free of any
+			// "warning:"/"unknown direction" text.
+			expect(body).toContain('<html lang="en" dir="rtl">');
+			expect(stderr).not.toContain("nh-deck: warning:");
+			expect(stderr).not.toContain("unknown direction");
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"falls back to ltr with a warning for an unrecognized --dir value",
+		async () => {
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"render",
+					"fixtures/sample.md",
+					"--no-open",
+					"--port",
+					"0",
+					"--dir",
+					"nonexistent-direction",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const matchedLine = await waitForServingLine(child, STARTUP_TIMEOUT_MS);
+			expect(stderr).toContain("nh-deck: warning:");
+			expect(stderr).toContain("unknown direction");
+
+			const url = matchedLine.match(/(http:\/\/127\.0\.0\.1:\d+)/)?.[1];
+			if (!url) {
+				throw new Error(`Could not extract URL from: ${matchedLine}`);
+			}
+			const body = await fetchBody(url);
+			expect(body).not.toContain('dir="rtl"');
+
+			child.kill();
+			await waitForExit(child, EXIT_TIMEOUT_MS);
+		},
+		TEST_TIMEOUT_MS,
+	);
+
+	it(
+		'applies dir="rtl" via the --dir flag on the pdf subcommand',
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-pdf-dir-test-${randomUUID()}.pdf`,
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"pdf",
+					"fixtures/sample.md",
+					outputPath,
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown direction/i);
+			expect(stdout).toContain(`Wrote PDF to ${outputPath}`);
+			expect(existsSync(outputPath)).toBe(true);
+
+			const fileContents = readFileSync(outputPath);
+			expect(fileContents.subarray(0, 4).toString("utf8")).toBe("%PDF");
+
+			rmSync(outputPath, { force: true });
+		},
+		PDF_EXPORT_TIMEOUT_MS,
+	);
+
+	it(
+		'applies dir="rtl" via the --dir flag on the png subcommand',
+		async () => {
+			const outputPath = path.join(
+				tmpdir(),
+				`nh-deck-png-dir-test-${randomUUID()}.png`,
+			);
+			const firstSlidePath = outputPath.replace(/\.png$/, "-1.png");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"png",
+					"fixtures/sample.md",
+					outputPath,
+					"--dir",
+					"rtl",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			let stderr = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			expect(stderr).not.toMatch(/unknown direction/i);
+			expect(stdout).toContain(
+				`Wrote 5 PNG file(s), starting at ${firstSlidePath}`,
+			);
+			expect(existsSync(firstSlidePath)).toBe(true);
+
+			const fileContents = readFileSync(firstSlidePath);
+			expect(fileContents.subarray(0, 8)).toEqual(
+				Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+			);
+
+			for (let n = 1; n <= 5; n++) {
+				rmSync(outputPath.replace(/\.png$/, `-${n}.png`), { force: true });
+			}
+		},
+		PDF_EXPORT_TIMEOUT_MS,
 	);
 });
 

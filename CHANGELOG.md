@@ -5,6 +5,32 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-09-15
+
+Three items from a deep-research pass on the deferred backlog, all confirmed
+buildable with zero new dependencies.
+
+### Added
+
+- **PDF outline/bookmark navigation**: exported PDFs now populate the
+  bookmarks sidebar every major PDF viewer already has (Preview, Acrobat,
+  Chrome's own viewer), derived automatically from the deck's own
+  `<h1>`-`<h6>` heading structure -- no authoring control needed or added,
+  since every heading becoming its own entry is the correct, faithful
+  default for this project.
+- **Live theme preview during `render --watch`**: a small on-page control
+  lets you click through all 4 named themes against your own deck content
+  without hand-editing frontmatter, reusing the existing SSE live-reload
+  channel end to end -- including correct Mermaid diagram recoloring,
+  which a CSS-only approach could not have done. Absent entirely outside
+  `--watch`, and a no-op until a preview click actually happens.
+- **Opt-in RTL text direction**: a `dir: rtl` frontmatter key or `--dir`
+  flag (mirroring `--theme`/`--transition`'s own precedence) renders a
+  deck's own content right-to-left for Arabic/Hebrew/Farsi/Urdu decks and
+  similar. A deck with neither renders byte-identical to before this
+  release. Scoped to text direction only -- presentation-mode navigation
+  keys and chrome positioning are unchanged.
+
 ## [1.5.0] - 2026-09-14
 
 A small fast-follow, closing out the last item deliberately deferred from
@@ -308,6 +334,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.6.0]: https://github.com/sairam0424/nh-deck/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/sairam0424/nh-deck/compare/v1.4.1...v1.5.0
 [1.4.1]: https://github.com/sairam0424/nh-deck/compare/v1.4.0...v1.4.1
 [1.4.0]: https://github.com/sairam0424/nh-deck/compare/v1.3.0...v1.4.0

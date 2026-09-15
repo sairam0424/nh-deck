@@ -584,6 +584,166 @@ describe("generateHtml — named themes", () => {
 	});
 });
 
+describe("generateHtml — text direction (opt-in RTL)", () => {
+	it("produces byte-identical output with no direction argument (regression guard)", () => {
+		const withoutArg = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		);
+		const withUndefinedDirection = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedDirection).toBe(withoutArg);
+		expect(withoutArg).not.toContain('dir="rtl"');
+	});
+
+	it("omits the dir attribute when direction resolves to ltr (the default), matching the no-argument output exactly", () => {
+		const withLtr = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"ltr",
+		);
+
+		expect(withLtr).toBe(generateHtml(fixtureMarkdown, "sample"));
+		expect(withLtr).not.toContain('dir="rtl"');
+	});
+
+	it('adds dir="rtl" on <html> (alongside lang, the only other document-level attribute) when direction resolves to rtl', () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"rtl",
+		);
+
+		expect(html).toContain('<html lang="en" dir="rtl">');
+	});
+
+	it("does not add a dir attribute anywhere else in the document (scoped to the single document-level element)", () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			"rtl",
+		);
+
+		expect((html.match(/\sdir="rtl"/g) ?? []).length).toBe(1);
+	});
+
+	// The 3 targeted logical-property fixes named in the design (blockquote's
+	// accent border, table cell text-alignment, and a best-effort KaTeX
+	// isolation rule) -- checked directly against the emitted CSS source
+	// here; see the real-browser describe block below for proof these
+	// actually resolve to the visually-correct side under dir="rtl".
+	it("uses the logical border-inline-start property for blockquote's accent border, not the physical border-left", () => {
+		const html = generateHtml("# Slide");
+
+		expect(html).toMatch(/blockquote\s*\{[^}]*border-inline-start:/);
+		expect(html).not.toMatch(/blockquote\s*\{[^}]*\bborder-left:/);
+	});
+
+	it("uses the logical text-align: start for table cells, not the physical text-align: left", () => {
+		const html = generateHtml("# Slide");
+
+		expect(html).toMatch(/th,\s*td\s*\{[^}]*text-align:\s*start/);
+		expect(html).not.toMatch(/th,\s*td\s*\{[^}]*text-align:\s*left/);
+	});
+
+	it("adds a best-effort direction: ltr isolation rule to .katex (documented, unresolved upstream KaTeX/RTL limitation)", () => {
+		const html = generateHtml("# Slide");
+
+		expect(html).toMatch(/\.katex\s*\{[^}]*direction:\s*ltr/);
+	});
+});
+
+describe("generateHtml — RTL logical-property resolution (real browser)", () => {
+	// A string assertion on the CSS source (the describe block above) proves
+	// the property NAME changed to a logical one; it cannot prove that
+	// property actually resolves to the visually-correct side once a real
+	// browser applies dir="rtl" to an ancestor. Verified live, the same way
+	// this file's own "quote layout single-paragraph bug" describe block
+	// above already resolves a cascade question no string assertion can
+	// answer.
+	it(
+		"resolves blockquote's border-inline-start and a table cell's text-align: start to the RTL-correct side under dir=\"rtl\"",
+		async () => {
+			const rtlHtml = generateHtml(
+				"> A quote\n\n| Cell |\n| --- |\n| hello world |\n",
+				"sample",
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				"rtl",
+			);
+
+			const page = await openHtmlPage(rtlHtml);
+			const result = await page.evaluate(() => {
+				const blockquote = document.querySelector("blockquote");
+				const cell = document.querySelector("td");
+				const blockquoteStyle = blockquote
+					? getComputedStyle(blockquote)
+					: null;
+				const cellRect = cell?.getBoundingClientRect();
+				const textRange = document.createRange();
+				if (cell?.firstChild) {
+					textRange.selectNodeContents(cell.firstChild);
+				}
+				const textRect = textRange.getBoundingClientRect();
+				return {
+					borderLeftWidth: blockquoteStyle?.borderLeftWidth,
+					borderRightWidth: blockquoteStyle?.borderRightWidth,
+					gapFromLeftEdge:
+						cellRect && textRect ? textRect.left - cellRect.left : null,
+					gapFromRightEdge:
+						cellRect && textRect ? cellRect.right - textRect.right : null,
+				};
+			});
+
+			// border-inline-start under dir="rtl" resolves to the RIGHT physical
+			// side, not the left -- the entire point of a logical property over a
+			// dir-conditional selector: no JS/CSS anywhere had to say "rtl" for
+			// this to flip.
+			expect(result.borderLeftWidth).toBe("0px");
+			expect(result.borderRightWidth).toBe("4px");
+			// text-align: start under dir="rtl" hugs the cell's END (right) edge,
+			// not its start (left) edge -- the gap from the right edge is small,
+			// the gap from the left edge is the rest of the (width: 100%) cell.
+			expect(result.gapFromRightEdge).toBeLessThan(
+				result.gapFromLeftEdge as number,
+			);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
 describe("generateHtml — --css-vars overlay", () => {
 	// Unlike --css (which replaces the entire <style> block wholesale, see
 	// the "custom CSS opt-out" describe block above), --css-vars is designed

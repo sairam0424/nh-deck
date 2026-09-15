@@ -459,3 +459,180 @@ describe("startServer — watch mode", () => {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
 	});
 });
+
+describe("startServer — theme preview endpoint", () => {
+	it("responds 204 and invokes onThemePreview with the exact name from the query string, when watch is on and onThemePreview is provided", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=dracula`);
+		const body = await response.text();
+
+		expect(response.status).toBe(204);
+		expect(body).toBe("");
+		expect(received).toEqual(["dracula"]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("is not exposed (falls through to serving the page) when watch is off, even with onThemePreview provided", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=dracula`);
+		const body = await response.text();
+
+		expect(response.status).toBe(200);
+		expect(body).toBe("<p>x</p>");
+		expect(received).toEqual([]);
+
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("is not exposed (falls through to serving the page) when watch is on but no onThemePreview is given", async () => {
+		const { server, url } = await startServer("<p>x</p>", 0, { watch: true });
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=dracula`);
+		const body = await response.text();
+
+		expect(response.status).toBe(200);
+		expect(body).toContain("<p>x</p>");
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("does not invoke onThemePreview for a missing, empty, or whitespace-only name query param, but still responds 204", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const noQueryResponse = await fetch(`${url}/__nh-deck-theme`);
+		const emptyNameResponse = await fetch(`${url}/__nh-deck-theme?name=`);
+		// A whitespace-only name is non-empty, so a bare `if (name)` guard
+		// would let it through -- resolveThemeName then silently resolves it
+		// to the default theme with no warning (matching "nothing requested"
+		// semantics, not "an unrecognized name" semantics), which would
+		// otherwise activate a preview override for a request that is really
+		// just as empty as the two cases above.
+		const whitespaceNameResponse = await fetch(
+			`${url}/__nh-deck-theme?name=%20`,
+		);
+
+		expect(noQueryResponse.status).toBe(204);
+		expect(emptyNameResponse.status).toBe(204);
+		expect(whitespaceNameResponse.status).toBe(204);
+		expect(received).toEqual([]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("responds 204 without hanging or crashing the server when onThemePreview throws synchronously or returns a rejected promise", async () => {
+		const { server: throwingServer, url: throwingUrl } = await startServer(
+			"<p>x</p>",
+			0,
+			{
+				watch: true,
+				onThemePreview: () => {
+					throw new Error("boom");
+				},
+			},
+		);
+		const throwingResponse = await fetch(
+			`${throwingUrl}/__nh-deck-theme?name=dracula`,
+		);
+		expect(throwingResponse.status).toBe(204);
+		throwingServer.closeAllConnections();
+		await new Promise<void>((resolve) => throwingServer.close(() => resolve()));
+
+		const { server: rejectingServer, url: rejectingUrl } = await startServer(
+			"<p>x</p>",
+			0,
+			{
+				watch: true,
+				onThemePreview: async () => {
+					throw new Error("boom");
+				},
+			},
+		);
+		const rejectingResponse = await fetch(
+			`${rejectingUrl}/__nh-deck-theme?name=dracula`,
+		);
+		expect(rejectingResponse.status).toBe(204);
+		rejectingServer.closeAllConnections();
+		await new Promise<void>((resolve) =>
+			rejectingServer.close(() => resolve()),
+		);
+	});
+
+	it("responds 400 and does not invoke onThemePreview for an unrecognized theme name", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(
+			`${url}/__nh-deck-theme?name=not-a-real-theme`,
+		);
+		const body = await response.text();
+
+		expect(response.status).toBe(400);
+		expect(body).toBe("");
+		expect(received).toEqual([]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("resolves a theme name case-insensitively before invoking onThemePreview, matching resolveThemeName's own precedent", async () => {
+		const received: string[] = [];
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: (name) => {
+				received.push(name);
+			},
+		});
+
+		const response = await fetch(`${url}/__nh-deck-theme?name=DRACULA`);
+
+		expect(response.status).toBe(204);
+		expect(received).toEqual(["dracula"]);
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+
+	it("serves the theme-preview button script with a rejection handler on its fetch call, so a closed server or failed request never surfaces as an unhandled promise rejection in the page", async () => {
+		const { server, url } = await startServer("<p>x</p>", 0, {
+			watch: true,
+			onThemePreview: () => {},
+		});
+
+		const body = await (await fetch(url)).text();
+		const fetchCallIndex = body.indexOf("__nh-deck-theme");
+		expect(fetchCallIndex).toBeGreaterThan(-1);
+		const afterFetchCall = body.slice(fetchCallIndex, fetchCallIndex + 200);
+		expect(afterFetchCall).toContain(".catch(");
+
+		server.closeAllConnections();
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+	});
+});
