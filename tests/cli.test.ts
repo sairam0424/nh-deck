@@ -2033,7 +2033,7 @@ describe("CLI: nh-deck render --watch", () => {
 			for (let attempt = 0; attempt < 5; attempt++) {
 				writeFileSync(
 					deckPath,
-					"---\ndir: nonexistent-direction\n---\n# Slide one\n",
+					"---\ndir: nonexistent-direction\n---\n# Slide one updated\n",
 				);
 				const sawWarning = await waitForCondition(
 					() => stderr.includes("unknown direction"),
@@ -2046,7 +2046,17 @@ describe("CLI: nh-deck render --watch", () => {
 
 			expect(stderr).toContain("nh-deck: warning:");
 			expect(stderr).toContain("unknown direction");
-			const body = await fetchBody(url);
+			// The warning above is written to stderr before the rerendered HTML
+			// is actually served (see src/index.ts) -- polling for the updated
+			// slide text, rather than fetching once immediately after the
+			// stderr check, is what actually proves this assertion is checking
+			// the rerendered document and not a stale pre-rerender one that
+			// would also, trivially, lack dir="rtl".
+			const body = await waitForAsyncCondition(
+				() => fetchBody(url),
+				(candidate) => candidate.includes("Slide one updated"),
+				15_000,
+			);
 			expect(body).not.toContain('dir="rtl"');
 
 			child.kill();
