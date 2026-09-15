@@ -1766,6 +1766,100 @@ describe("presentation mode — presenter view (separate window)", () => {
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"shows no pacing text or classes at all when no target duration has been typed in",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			const pacingState = await presenterPage.evaluate(() => {
+				const el = document.querySelector(".presenter-pacing");
+				return {
+					exists: el !== null,
+					text: el?.textContent ?? "",
+					classes: Array.from(el?.classList ?? []),
+				};
+			});
+			expect(pacingState.exists).toBe(true);
+			expect(pacingState.text).toBe("");
+			expect(pacingState.classes).not.toContain("is-ahead");
+			expect(pacingState.classes).not.toContain("is-behind");
+			expect(pacingState.classes).not.toContain("is-on-pace");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows an ahead-of-pace indicator when navigating through several slides well faster than a generous typed target implies",
+		async () => {
+			// A deliberately generous target (10 minutes) so expectedIndex stays
+			// close to zero for the whole real-time span this test runs in --
+			// navigating forward at all, this quickly, must always read as
+			// running ahead of THAT pace, regardless of exact test timing.
+			const SIX_SLIDE_DECK = buildDeck(6);
+			const mainPage = await openPresentationPage(generateHtml(SIX_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			await presenterPage.click(".presenter-timer-duration");
+			await presenterPage.type(".presenter-timer-duration", "10");
+			await presenterPage.keyboard.press("Tab");
+
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(mainPage)).toBe("Slide 5");
+
+			await presenterPage.waitForFunction(() =>
+				document
+					.querySelector(".presenter-pacing")
+					?.classList.contains("is-ahead"),
+			);
+
+			const pacingText = await presenterPage.evaluate(
+				() => document.querySelector(".presenter-pacing")?.textContent ?? "",
+			);
+			expect(pacingText).toMatch(/^\+\d+ ahead$/);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows a behind-pace indicator when a short typed target elapses with no navigation at all",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			// A tiny target (0.1 minutes = 6s), matching the established margin
+			// the timer's own near/over-target tests already use -- long enough
+			// to leave real margin against the click/type/Tab setup above, short
+			// enough to cross into "behind" without a slow, unbudgeted real wait.
+			await presenterPage.click(".presenter-timer-duration");
+			await presenterPage.type(".presenter-timer-duration", "0.1");
+			await presenterPage.keyboard.press("Tab");
+
+			await presenterPage.waitForFunction(
+				() =>
+					document
+						.querySelector(".presenter-pacing")
+						?.classList.contains("is-behind"),
+				{ timeout: 8000 },
+			);
+
+			const pacingText = await presenterPage.evaluate(
+				() => document.querySelector(".presenter-pacing")?.textContent ?? "",
+			);
+			expect(pacingText).toMatch(/^\d+ behind$/);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
 });
 
 describe('presentation mode — jump to slide ("g" + digits + Enter)', () => {

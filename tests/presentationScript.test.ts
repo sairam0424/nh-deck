@@ -170,7 +170,13 @@ describe("PRESENTATION_SCRIPT — accessibility: live region + focus management"
 		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
 		const renderBody = PRESENTATION_SCRIPT.slice(
 			renderIndex,
-			renderIndex + 2200,
+			// Widened from the render() function's own pre-pacing-indicator size
+			// so this window still comfortably covers the whole function body
+			// now that the isPresenterView branch also calls
+			// updatePacingDisplay() -- see the pacing-specific test right after
+			// the presenter-view describe block below for that call's own
+			// assertion.
+			renderIndex + 2600,
 		);
 		expect(renderBody).toContain("!isPresenterView && hasNavigated");
 	});
@@ -185,7 +191,8 @@ describe("PRESENTATION_SCRIPT — accessibility: live region + focus management"
 		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
 		const renderBody = PRESENTATION_SCRIPT.slice(
 			renderIndex,
-			renderIndex + 2200,
+			// Widened for the same reason as the window above.
+			renderIndex + 2600,
 		);
 		expect(renderBody).toContain(
 			'previouslyFocusedSlide.removeAttribute("tabindex")',
@@ -387,9 +394,6 @@ describe("PRESENTATION_SCRIPT — presenter view", () => {
 	it("runs a pausable count-up timer via setInterval and Date.now(), with an opt-in target-duration color coding, not a fixed elapsed-time threshold", () => {
 		expect(PRESENTATION_SCRIPT).toContain("presenter-timer");
 		expect(PRESENTATION_SCRIPT).toContain(
-			"setInterval(updateTimerDisplay, 1000)",
-		);
-		expect(PRESENTATION_SCRIPT).toContain(
 			"(pausedAtMs ?? Date.now()) - timerStartMs - accumulatedPausedMs",
 		);
 		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-paused"');
@@ -407,6 +411,64 @@ describe("PRESENTATION_SCRIPT — presenter view", () => {
 
 	it("never references an external CDN from the presenter-view feature either (local-first constraint)", () => {
 		expect(PRESENTATION_SCRIPT).not.toMatch(/https?:\/\/cdn\./i);
+	});
+
+	it("ticks the timer and the pacing indicator off a single shared setInterval, not two independent ones", () => {
+		const setIntervalIndex = PRESENTATION_SCRIPT.indexOf("setInterval(() => {");
+		expect(setIntervalIndex).toBeGreaterThan(-1);
+		const intervalBody = PRESENTATION_SCRIPT.slice(
+			setIntervalIndex,
+			PRESENTATION_SCRIPT.indexOf("}, 1000);", setIntervalIndex),
+		);
+		expect(intervalBody).toContain("updateTimerDisplay();");
+		expect(intervalBody).toContain("updatePacingDisplay();");
+	});
+
+	it("computes the per-slide pacing indicator from expected vs actual slide index, and renders ahead/behind/on-pace text and classes", () => {
+		expect(PRESENTATION_SCRIPT).toContain("presenter-pacing");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"(elapsedMs() / (targetMinutes * 60_000)) * slides.length",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"Math.round(current - expectedIndex)",
+		);
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-ahead"');
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-behind"');
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-on-pace"');
+		expect(PRESENTATION_SCRIPT).toContain('"+" + delta + " ahead"');
+		expect(PRESENTATION_SCRIPT).toContain('Math.abs(delta) + " behind"');
+		expect(PRESENTATION_SCRIPT).toContain('"on pace"');
+	});
+
+	it("shows no pacing text or classes at all when no target duration is set, mirroring the timer's own opt-in color coding", () => {
+		const pacingFnIndex = PRESENTATION_SCRIPT.indexOf(
+			"updatePacingDisplay = () =>",
+		);
+		expect(pacingFnIndex).toBeGreaterThan(-1);
+		const pacingFnBody = PRESENTATION_SCRIPT.slice(
+			pacingFnIndex,
+			pacingFnIndex + 500,
+		);
+		expect(pacingFnBody).toContain("if (!hasTarget) {");
+		expect(pacingFnBody).toContain('pacingEl.textContent = "";');
+		expect(pacingFnBody).toContain(
+			'pacingEl.classList.remove("is-ahead", "is-behind", "is-on-pace");',
+		);
+	});
+
+	it("refreshes the pacing indicator inside render()'s own isPresenterView branch, right alongside updatePresenterConsole(), not only once a second", () => {
+		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
+		const renderBody = PRESENTATION_SCRIPT.slice(
+			renderIndex,
+			renderIndex + 1500,
+		);
+		const presenterConsoleCallIndex = renderBody.indexOf(
+			"updatePresenterConsole();",
+		);
+		const pacingCallIndex = renderBody.indexOf("updatePacingDisplay();");
+		expect(presenterConsoleCallIndex).toBeGreaterThan(-1);
+		expect(pacingCallIndex).toBeGreaterThan(-1);
+		expect(pacingCallIndex).toBeGreaterThan(presenterConsoleCallIndex);
 	});
 });
 
