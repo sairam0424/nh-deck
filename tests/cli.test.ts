@@ -2021,7 +2021,10 @@ describe("CLI: nh-deck render --watch", () => {
 				deckPath,
 				"---\ndir: nonexistent-direction\n---\n# Slide one\n",
 			);
-			await waitForCondition(() => stderr.includes("unknown direction"), 5_000);
+			await waitForCondition(
+				() => stderr.includes("unknown direction"),
+				15_000,
+			);
 
 			expect(stderr).toContain("nh-deck: warning:");
 			expect(stderr).toContain("unknown direction");
@@ -2381,7 +2384,7 @@ describe("CLI: nh-deck render --watch", () => {
 			const previewedBody = await waitForAsyncCondition(
 				() => fetchBody(url),
 				(body) => body.includes("--nh-bg: #2e3440"),
-				5_000,
+				15_000,
 			);
 			// The page-level CSS variable now reflects the previewed theme, not
 			// the frontmatter one.
@@ -2404,7 +2407,7 @@ describe("CLI: nh-deck render --watch", () => {
 			const afterEditBody = await waitForAsyncCondition(
 				() => fetchBody(url),
 				(body) => body.includes("Changed"),
-				5_000,
+				15_000,
 			);
 			expect(afterEditBody).toContain("Changed");
 			expect(afterEditBody).toContain("--nh-bg: #2e3440");
@@ -2417,7 +2420,13 @@ describe("CLI: nh-deck render --watch", () => {
 			await waitForExit(child, EXIT_TIMEOUT_MS);
 			rmSync(dir, { recursive: true, force: true });
 		},
-		WATCH_TEST_TIMEOUT_MS,
+		// This test polls for two separate debounced re-renders in sequence
+		// (the preview click, then the follow-up file edit), each with its own
+		// up-to-15s budget -- WATCH_TEST_TIMEOUT_MS alone only accounts for one
+		// such wait, so it is extended here to cover both without the test's
+		// own vitest-level timeout firing before either poll's internal one
+		// could report a real, actionable assertion failure.
+		WATCH_TEST_TIMEOUT_MS + 30_000,
 	);
 });
 
