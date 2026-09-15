@@ -55,9 +55,13 @@ README. Shipped in v1.2.0. It composes with the grid overview (help can be
 opened on top of an already-open overview without disturbing it) and closes
 on a second `?` or `Escape`.
 
-**Caveat**: the overlay itself has no `role="dialog"`/`aria-modal`
-attribute and no focus-trap or focus-move behavior — see "Not Yet Verified
-or Supported" below.
+**Caveat**: the overlay's own container now carries `role="dialog"` and
+`aria-modal="true"`, and opening it moves focus into its panel while
+closing it restores focus to wherever it was beforehand — see "Dialog ARIA
+semantics and focus management for the help overlay and grid overview"
+below for the source. That is still not a focus trap: nothing intercepts
+`Tab`, so keyboard focus can be tabbed out past the overlay's own boundary
+while it remains open.
 
 ### `prefers-reduced-motion` support
 
@@ -136,6 +140,94 @@ principle, nh-deck does not — and will not — inspect or override a deck
 author's own content colors; contrast of the *content itself* remains the
 deck author's responsibility.
 
+### Screen-reader announcements and focus management on slide navigation
+
+Presentation mode now tells a screen reader that a slide change happened,
+and moves keyboard focus to reflect it. `generateHtml()` in `src/render.ts`
+unconditionally emits a visually-hidden `#nh-deck-live-region` div
+(`aria-live="polite"`, `aria-atomic="true"`) in `<body>` via the new
+`SR_ONLY_STYLE` clip-based CSS pattern — deliberately not `display: none`
+or `visibility: hidden`, either of which would remove the element from the
+accessibility tree too. `src/presentationScript.ts`'s `render()` function
+grabs that region once at setup, and — gated on `!isPresenterView &&
+hasNavigated`, i.e. the main presenting window only, and never on the very
+first paint before any real navigation — sets its text to the newly active
+slide's first `h1`/`h2`/`h3` heading text, or a `"Slide N of M"` fallback
+when the slide has no heading. The same block also gives the newly active
+slide `tabindex="-1"` and calls `.focus({ preventScroll: true })` on it,
+first removing `tabindex` from whichever slide previously carried it.
+
+Covered by `tests/presentationMode.test.ts`'s "accessibility: live region +
+focus management" describe block (a real-browser regression suite
+asserting the announcement text actually changes between two different
+slides, that focus lands on the newly active slide, and that the very first
+paint leaves focus on `document.body`), `tests/presentationScript.test.ts`'s
+matching string-assertion coverage, and one unconditional-emission
+assertion in `tests/render.test.ts`.
+
+**Caveat**: the announcement is a best-effort label, not a content readout
+— it is the slide's own first heading, or a slide-count fallback, never the
+slide's full body content. This is a deliberate design choice, not a
+shortcut: dumping an entire slide's content into a live region on every
+navigation would bury a screen-reader user in noise rather than help them,
+so this only ever announces enough to orient, not the whole slide.
+
+### Dialog ARIA semantics and focus management for the help overlay and grid overview
+
+The keyboard-shortcuts help overlay and the grid overview now behave like a
+real modal dialog to assistive technology, not just visually. In
+`src/presentationScript.ts`, `openHelp()`/`closeHelp()` set and remove
+`role="dialog"`/`aria-modal="true"` on the help overlay's own container,
+and `openOverview()`/`closeOverviewUi()` do the same on `document.body`
+(the grid overview has no dedicated wrapper of its own — its CSS applies
+directly to `<body>`). A shared `focusIntoPanel()` helper moves focus onto
+a real focusable child of the just-opened panel if one exists, or gives the
+panel itself `tabindex="-1"` and focuses that. A shared `restoreFocus()`
+helper blurs the current active element before focusing the
+`focusBeforeHelp`/`focusBeforeOverview` target captured right before the
+overlay opened, once it closes — blurring first is required because calling
+`.focus()` directly on `document.body` (the common case when nothing else
+had focus beforehand) is a silent no-op otherwise, which a real headless
+Chromium check confirmed would leave focus stuck on the just-hidden panel.
+
+Covered by `tests/presentationMode.test.ts`'s real-browser test asserting
+the help overlay's `role`/`aria-modal` attributes, that focus lands inside
+its panel on open, and that focus returns to `document.body` after
+`Escape` closes it, plus `tests/presentationScript.test.ts`'s matching
+string-assertion coverage for both overlays.
+
+**Caveat**: this is dialog semantics plus a one-time focus move on open and
+a focus restore on close — it is not a focus trap. Nothing intercepts
+`Tab` while either overlay is open, so keyboard focus can still be tabbed
+out past the overlay's own boundary while it remains visually open.
+
+### Automated accessibility scanning (axe-core in CI)
+
+`scripts/check-a11y.mjs` runs axe-core against real rendered HTML for a
+fixed set of cases, built from this project's own registries so the check
+can never silently drift out of sync with them: every theme in `THEMES`
+(`src/themes.ts`), every layout in `LAYOUTS` (`src/slideLayouts.ts`), one
+RTL-direction case, and one presentation-mode (`?present`) case — all
+served locally and driven through a real local browser via
+`puppeteer-core`, with axe-core itself injected from its own built
+`node_modules/axe-core/axe.min.js` file via `page.addScriptTag()`, never
+fetched from a CDN. Only axe-core's `serious` and `critical` impact
+violations (`FAILING_IMPACTS`) fail the check; `moderate`/`minor` findings
+are not surfaced or gated, since axe-core's own docs note those lower tiers
+carry a meaningful false-positive rate. Wired up as `npm run check:a11y`
+and a dedicated `a11y-check` job in `.github/workflows/ci.yml` that runs on
+every PR.
+
+**Caveat**: this is a regression gate over a fixed, small fixture matrix —
+4 themes, 4 layouts, one RTL case, one presentation-mode case, each against
+one representative fixture deck — not exhaustive coverage of every
+interaction state. It scans presentation mode's first paint at `/?present`,
+not the live-region announcement after a real keypress, the help overlay
+or grid overview while open, or any other mid-interaction state. A clean
+run means these specific fixed renders have no automated-detectable
+serious/critical issue; it is not a WCAG conformance audit and it is not a
+substitute for an actual screen-reader pass.
+
 ## Not Yet Verified or Supported
 
 Said plainly, without hedging:
@@ -149,23 +241,6 @@ Said plainly, without hedging:
   project as a whole.** The contrast work above is real, tested, and
   specific — it is not the same thing as a conformance audit, and none has
   been run.
-- **No dedicated accessibility test tooling (axe-core or equivalent) is
-  wired into this project's test suite or CI.** The contrast regression
-  test in `tests/render.test.ts` is hand-written WCAG math against specific
-  color pairs, not a general-purpose automated a11y scan of rendered
-  output.
-- **The help overlay and grid overview have no dialog/modal ARIA semantics
-  or focus management.** Neither `.presentation-help` nor `.overview` sets
-  `role="dialog"`/`aria-modal="true"`, and opening either one does not move
-  keyboard focus into it or trap focus inside it while it's open (verified
-  by reading `src/presentationScript.ts`: no `tabindex` or `.focus()` call
-  exists anywhere in that file). Keyboard operation still works (`Escape`
-  closes either one), but the modal-like visual presentation is not backed
-  by the matching ARIA/focus contract.
-- **Slide changes in presentation mode are not announced to assistive
-  technology.** There is no `aria-live` region (or any live-region
-  mechanism) announcing the new slide's content when `goTo()` fires, and
-  focus is never programmatically moved to the newly active slide.
 - **The continuous-scroll default view has not been audited for landmark
   structure or heading hierarchy beyond what Markdown produces naturally.**
   `generateHtml()` sets `<html lang="en">` but does not add a `<main>`
@@ -181,9 +256,15 @@ Said plainly, without hedging:
   for both transitions and fragment reveal — as long as the deck uses
   nh-deck's own default stylesheet (not `--css`).
 - A screen-reader user gets accurate `aria-hidden` state for fragments in
-  every view, but should not assume slide changes are announced, that
-  focus moves anywhere on navigation, or that the help/overview overlays
-  behave like a conventional accessible dialog.
+  every view, a live-region announcement plus a focus move onto the newly
+  active slide after every real navigation, and `role="dialog"`/
+  `aria-modal` semantics with focus moved in on open and restored on close
+  for the help overlay and grid overview. None of this is trapped focus,
+  and none of it has been confirmed against an actual screen reader — the
+  automated axe-core scan in CI checks a fixed set of rendered fixtures for
+  detectable rule violations, which is a real but narrower guarantee than a
+  VoiceOver/NVDA/JAWS pass, and that pass still has not been performed (see
+  "Not Yet Verified or Supported" above).
 - A low-vision user gets a verified-AA-or-better contrast baseline for
   nh-deck's own UI chrome across all 4 shipped themes, but content-level
   contrast (whatever the deck author actually writes) is not checked by
