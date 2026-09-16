@@ -364,6 +364,54 @@ describe("generateHtml", () => {
 	});
 });
 
+describe("generateHtml — slide backgrounds (opt-in <!-- bg: / bg-image: --> markers)", () => {
+	it("applies an inline background-color style from a slide's bg marker comment, stripping the marker from rendered output", () => {
+		const html = generateHtml("<!-- bg: #222 -->\n\n# Heading\n");
+
+		expect(html).toContain('<section class="slide" style="background: #222">');
+		expect(html).not.toContain("<!-- bg:");
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("applies an inline background-image style from a slide's bg-image marker comment, stripping the marker from rendered output", () => {
+		const html = generateHtml(
+			"<!-- bg-image: path/to/image.jpg -->\n\n# Heading\n",
+		);
+
+		expect(html).toContain(
+			'<section class="slide" style="background-image: url(&#39;path/to/image.jpg&#39;)">',
+		);
+		expect(html).not.toContain("<!-- bg-image:");
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("renders a slide with no background marker exactly as before -- no style attribute added", () => {
+		const html = generateHtml("# Big Heading\n\nSubtitle text.");
+
+		// Precise regression guard: a slide with a background marker would
+		// render `class="slide" style="..."`, which would not match this
+		// exact substring -- see the equivalent no-layout-marker guard above.
+		expect(html).toContain('<section class="slide">');
+	});
+
+	it("still treats a background marker comment as an already-reviewed comment, not raw HTML", () => {
+		expect(containsUnsafeHtml("<!-- bg: #222 -->\n\n# Heading\n")).toBe(false);
+		expect(
+			containsUnsafeHtml("<!-- bg-image: image.jpg -->\n\n# Heading\n"),
+		).toBe(false);
+	});
+
+	it("combines a layout class and a background style on the same section element", () => {
+		const html = generateHtml(
+			"<!-- layout: title -->\n\n<!-- bg: #222 -->\n\n# Heading\n",
+		);
+
+		expect(html).toContain(
+			'<section class="slide layout-title" style="background: #222">',
+		);
+	});
+});
+
 describe("generateHtml — slide segmentation", () => {
 	it("wraps single-slide content in exactly one <section> when there is no delimiter", () => {
 		const html = generateHtml("# Only slide\n\nSome text.");
@@ -525,11 +573,11 @@ describe("generateHtml — Mermaid diagrams", () => {
 		expect(duplicates).toEqual([]);
 	});
 
-	it("renders a non-mermaid fenced code block exactly as before this phase", () => {
+	it("renders a non-mermaid fenced code block through highlight.js, preserving its language- class", () => {
 		const html = generateHtml("```bash\necho hi\n```");
 
 		expect(html).toContain(
-			'<pre><code class="language-bash">echo hi\n</code></pre>',
+			'<pre><code class="language-bash"><span class="hljs-built_in">echo</span> hi\n</code></pre>',
 		);
 	});
 
@@ -538,6 +586,149 @@ describe("generateHtml — Mermaid diagrams", () => {
 
 		expect(html).toContain("<pre><code>plain text\n</code></pre>");
 	});
+
+	it("leaves a mermaid fenced code block completely unaffected by syntax highlighting", () => {
+		const html = generateHtml("```mermaid\nflowchart TD\n  A --> B\n```");
+
+		expect(html).toContain("<svg");
+		expect(html).not.toContain("```mermaid");
+		// Checked against rendered MARKUP only (a class actually applied to
+		// an element), not the whole document -- HLJS_STYLE's own <style>
+		// selectors always mention "hljs-" unconditionally, the same way
+		// CODE_LINE_HIGHLIGHT_STYLE's selectors always mention "nh-code-line"
+		// regardless of whether either feature is used in this deck (see the
+		// "produces zero nh-code-line-highlighted classes" regression guard
+		// above for the identical reasoning).
+		expect(html).not.toContain('class="hljs-');
+	});
+
+	it("renders a syntax-highlighted code block and a mermaid diagram correctly in the same deck", () => {
+		const html = generateHtml(
+			"```javascript\nconst x = 1;\n```\n\n```mermaid\nflowchart TD\n  A --> B\n```",
+		);
+
+		expect(html).toMatch(/class="hljs-/);
+		expect(html).toContain("<svg");
+	});
+});
+
+describe("generateHtml — syntax highlighting", () => {
+	it("produces highlight.js hljs- prefixed classes for a supported language", () => {
+		const html = generateHtml("```javascript\nconst x = 1;\n```");
+
+		expect(html).toContain('<pre><code class="language-javascript">');
+		expect(html).toMatch(/class="hljs-/);
+		expect(html).toContain("x");
+	});
+
+	it("degrades an unsupported/unknown language to plain, unhighlighted text without throwing", () => {
+		expect(() => generateHtml("```cobol\nDISPLAY HI.\n```")).not.toThrow();
+
+		const html = generateHtml("```cobol\nDISPLAY HI.\n```");
+
+		expect(html).toContain('<pre><code class="language-cobol">');
+		expect(html).toContain("DISPLAY HI.");
+		// Same markup-only scope as the mermaid regression guard above -- see
+		// that test's own comment for why a blanket document-wide check would
+		// now be wrong given HLJS_STYLE's unconditional CSS selectors.
+		expect(html).not.toContain('class="hljs-');
+	});
+
+	it(
+		"renders hljs- token classes with a real, visually distinct color from plain code text (regression: highlight.js classes shipped with zero accompanying color CSS, making highlighting invisible)",
+		async () => {
+			const html = generateHtml(
+				'```javascript\nfunction foo() {\n  // a comment\n  return "hi";\n}\n```',
+			);
+			const page = await openHtmlPage(html);
+
+			const colors = await page.evaluate(() => {
+				const keyword = document.querySelector(".hljs-keyword");
+				const comment = document.querySelector(".hljs-comment");
+				const plainCode = document.querySelector("code");
+				if (!keyword || !comment || !plainCode) return null;
+				return {
+					keyword: getComputedStyle(keyword).color,
+					comment: getComputedStyle(comment).color,
+					plainCode: getComputedStyle(plainCode).color,
+				};
+			});
+
+			expect(colors).not.toBeNull();
+			if (!colors) return;
+			expect(colors.keyword).not.toBe(colors.plainCode);
+			expect(colors.comment).not.toBe(colors.plainCode);
+			expect(colors.comment).not.toBe(colors.keyword);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it("suppresses hljs- token coloring under a custom --css stylesheet, the same way LAYOUT_STYLE/CODE_LINE_HIGHLIGHT_STYLE already are", () => {
+		const html = generateHtml(
+			"```javascript\nconst x = 1;\n```",
+			undefined,
+			".slide { color: hotpink; }",
+		);
+
+		expect(html).toContain(".slide { color: hotpink; }");
+		expect(html).not.toContain(".hljs-keyword");
+	});
+});
+
+describe("generateHtml — Slidev-style line highlighting ({n|n-n} fence annotation)", () => {
+	it("marks exactly the annotated line numbers as nh-code-line-highlighted and no others", () => {
+		const html = generateHtml(
+			"```js {1|3-4}\nconst a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\n```",
+		);
+
+		const lines = html.match(/<span class="nh-code-line[^"]*">/g) ?? [];
+		expect(lines).toHaveLength(4);
+		expect(lines[0]).toContain("nh-code-line-highlighted");
+		expect(lines[1]).not.toContain("nh-code-line-highlighted");
+		expect(lines[2]).toContain("nh-code-line-highlighted");
+		expect(lines[3]).toContain("nh-code-line-highlighted");
+	});
+
+	it("produces zero nh-code-line-highlighted classes when no annotation is given (byte-shape regression guard)", () => {
+		const html = generateHtml("```js\nconst a = 1;\nconst b = 2;\n```");
+
+		// CODE_LINE_HIGHLIGHT_STYLE's own <style> selectors always mention
+		// "nh-code-line" (they must exist for a deck that DOES use the
+		// annotation elsewhere) -- what must never appear here is that class
+		// actually applied to a <span> in THIS unannotated block's own
+		// rendered markup, and the block's markup must stay byte-identical
+		// to how it rendered before this feature existed.
+		expect(html).not.toContain('<span class="nh-code-line');
+		expect(html).toContain(
+			'<pre><code class="language-js"><span class="hljs-keyword">const</span> a = <span class="hljs-number">1</span>;\n<span class="hljs-keyword">const</span> b = <span class="hljs-number">2</span>;\n</code></pre>',
+		);
+	});
+
+	it(
+		"renders a highlighted line with a real, different background color than a non-highlighted line",
+		async () => {
+			const html = generateHtml("```js {1}\nconst a = 1;\nconst b = 2;\n```");
+			const page = await openHtmlPage(html);
+
+			const colors = await page.evaluate(() => {
+				const highlighted = document.querySelector(".nh-code-line-highlighted");
+				const allLines = Array.from(document.querySelectorAll(".nh-code-line"));
+				const plain = allLines.find(
+					(el) => !el.classList.contains("nh-code-line-highlighted"),
+				);
+				if (!highlighted || !plain) return null;
+				return {
+					highlightedBg: getComputedStyle(highlighted).backgroundColor,
+					plainBg: getComputedStyle(plain).backgroundColor,
+				};
+			});
+
+			expect(colors).not.toBeNull();
+			if (!colors) return;
+			expect(colors.highlightedBg).not.toBe(colors.plainBg);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
 });
 
 describe("generateHtml — custom CSS opt-out", () => {

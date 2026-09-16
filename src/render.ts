@@ -1,6 +1,7 @@
 import type { Token, Tokens } from "marked";
 import { marked } from "marked";
 import markedKatex from "marked-katex-extension";
+import { applyLineHighlights, highlightCode } from "./codeHighlight.js";
 import type { DirectionName } from "./directions.js";
 import { extractFragments, isFragmentMarkerComment } from "./fragments.js";
 import { escapeHtml } from "./htmlEscape.js";
@@ -8,6 +9,10 @@ import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
 import { PRESENTATION_SCRIPT } from "./presentationScript.js";
 import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
+import {
+	extractSlideBackground,
+	isBackgroundMarkerComment,
+} from "./slideBackgrounds.js";
 import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
 import type { TransitionName } from "./transitions.js";
@@ -139,6 +144,114 @@ const PRINT_PAGINATION_STYLE = `
         print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
+    }`;
+
+/**
+ * Color rules for the `hljs-*` token classes `highlightCode` (see
+ * codeHighlight.ts) already emits on every syntax-highlighted fenced code
+ * block. Without this, those classes carry zero color CSS of their own,
+ * so every token inherits the plain `code { color: var(--nh-fg); }` rule
+ * above unchanged -- meaning a "syntax-highlighted" block would render
+ * byte-for-byte the same color throughout, indistinguishable from an
+ * unhighlighted one to an actual viewer (caught here as a real
+ * final-integration bug, not shipped as intended: verified directly via
+ * `getComputedStyle()` in a real browser in tests/render.test.ts's
+ * "generateHtml — syntax highlighting" describe block before this constant
+ * existed).
+ *
+ * Three tiers, each built from this file's existing `--nh-accent`/
+ * `--nh-fg`/`--nh-muted` custom properties (never a new hardcoded hex
+ * color), so highlighting shifts with the active theme exactly like
+ * `CODE_LINE_HIGHLIGHT_STYLE` below already does instead of clashing
+ * against it:
+ *
+ * 1. Comments/quoted-doc text (`hljs-comment`/`hljs-quote`) -- `--nh-muted`
+ *    plus italic, the same visual treatment this file already gives
+ *    secondary/de-emphasized text elsewhere (e.g. `.slide.layout-title
+ *    p:first-of-type`).
+ * 2. Structural keywords (`hljs-keyword`/`hljs-built_in`/`hljs-tag`/
+ *    `hljs-name`/`hljs-selector-tag`/`hljs-section`/`hljs-bullet`) --
+ *    `--nh-accent` at full strength plus a heavier weight, since these are
+ *    a language's own control-flow/declaration vocabulary and should read
+ *    as the most prominent tier.
+ * 3. Literal values and names (`hljs-string`/`hljs-number`/`hljs-literal`/
+ *    `hljs-type`/`hljs-title`/`hljs-attr`/`hljs-attribute`/`hljs-meta`/
+ *    `hljs-symbol`/`hljs-regexp`) -- a `color-mix()` blend of `--nh-accent`
+ *    and `--nh-fg`, distinct from both tier 2 and the base text color
+ *    without introducing a fourth custom property. `hljs-title` alone (no
+ *    child-class selector needed) already covers highlight.js's compound
+ *    `class="hljs-title function_"`/`class="hljs-title class_"` shapes,
+ *    since a plain class selector matches any element carrying that class
+ *    among others.
+ *
+ * This constant is interpolated inside generateHtml's own default
+ * (`customCss ??`) theme block, immediately after the existing `pre`/
+ * `code`/`pre code` rules -- and is therefore gated by `!customCss` the
+ * exact same way `CODE_LINE_HIGHLIGHT_STYLE` already is: a full --css
+ * replacement is expected to restyle (or omit) token coloring itself, the
+ * same way it already replaces code's own background/color. The `hljs-*`
+ * classes themselves stay in the rendered markup either way (see
+ * codeHighlight.ts) -- only this cosmetic color layer is suppressed.
+ */
+const HLJS_STYLE = `
+    .hljs-comment,
+    .hljs-quote {
+      color: var(--nh-muted);
+      font-style: italic;
+    }
+    .hljs-keyword,
+    .hljs-built_in,
+    .hljs-tag,
+    .hljs-name,
+    .hljs-selector-tag,
+    .hljs-section,
+    .hljs-bullet {
+      color: var(--nh-accent);
+      font-weight: 600;
+    }
+    .hljs-string,
+    .hljs-number,
+    .hljs-literal,
+    .hljs-type,
+    .hljs-title,
+    .hljs-attr,
+    .hljs-attribute,
+    .hljs-meta,
+    .hljs-symbol,
+    .hljs-regexp {
+      color: color-mix(in srgb, var(--nh-accent) 60%, var(--nh-fg));
+    }`;
+
+/**
+ * Slidev-style opt-in line highlighting for fenced code blocks (see
+ * codeHighlight.ts's `applyLineHighlights`/`parseHighlightSpec`) -- every
+ * source line of a highlighted code block gets wrapped in its own
+ * `<span class="nh-code-line">`. `display: block` makes each of those spans
+ * occupy its own visual row, so a highlighted line's own background spans
+ * the full row rather than just hugging its text (matching the real "\n"
+ * characters generateHtml already places between these spans in the
+ * underlying markup -- this is belt-and-suspenders for the visual result,
+ * not what creates the line breaks themselves).
+ *
+ * `.nh-code-line-highlighted`'s background reuses `--nh-accent` (the same
+ * custom property the pre/code rules below sit alongside) via a runtime
+ * `color-mix()`, at a low opacity, rather than a hardcoded color -- so a
+ * highlighted line's tint shifts along with every other themed element in
+ * this file whenever --theme/--css-vars picks a different palette, instead
+ * of clashing against it. This constant is interpolated directly inside
+ * generateHtml's own default (`customCss ??`) theme block, immediately
+ * after the existing `pre`/`code`/`pre code` rules it's meant to sit beside
+ * -- and is therefore gated by `!customCss` the exact same way those rules
+ * already are: a full --css replacement is expected to replace this
+ * cosmetic tint too, exactly like it already replaces code's own
+ * background/color.
+ */
+const CODE_LINE_HIGHLIGHT_STYLE = `
+    .nh-code-line {
+      display: block;
+    }
+    .nh-code-line-highlighted {
+      background: color-mix(in srgb, var(--nh-accent) 25%, transparent);
     }`;
 
 const LAYOUT_STYLE = `
@@ -1117,13 +1230,46 @@ marked.use({
 
 			// Everything below exactly replicates marked@13.0.3's own default
 			// code() renderer (verified directly against its source) for every
-			// language other than "mermaid" -- this override must not change how
-			// any other fenced code block renders, aside from composing in
-			// class="fragment" on <pre> when this block is fragment-marked.
+			// language other than "mermaid", with two deliberate additions: a
+			// language-tagged block's own text is now run through highlightCode
+			// (see codeHighlight.ts) for real highlight.js syntax highlighting,
+			// instead of being escaped verbatim, and then through
+			// applyLineHighlights (same file) for opt-in Slidev-style
+			// `{1|3-4}` line highlighting -- this override must not change
+			// anything else about how any other fenced code block renders,
+			// aside from that highlighting and composing in class="fragment"
+			// on <pre> when this block is fragment-marked.
+			//
+			// highlightCode's own return value is already HTML-escaped by
+			// highlight.js itself, so it is used exactly like already-`escaped`
+			// text below -- never re-escaped. The `escaped` flag still takes
+			// precedence over highlighting when true (dead in practice today,
+			// since nothing in this codebase sets it, but kept as the same
+			// defense-in-depth this override already had before this change):
+			// highlightCode expects raw source, not pre-rendered HTML, so a block
+			// some future extension already marked safe must never be run through
+			// it a second time.
+			//
+			// applyLineHighlights is only ever called on the already-highlighted
+			// branch, never on the `escaped` or plain-`escapeHtml` branches --
+			// there is no highlight.js output for it to split into lines there,
+			// and a fence with no language word can never carry a `{...}`
+			// annotation in the first place (see that function's own
+			// docstring). It receives the exact same `lang ?? ""` full fence
+			// info string already passed to highlightCode's own `info`
+			// parameter just above it.
 			const code = `${text.replace(/\n$/, "")}\n`;
+			const codeHtml = escaped
+				? code
+				: langString
+					? applyLineHighlights(
+							highlightCode(code, langString, lang ?? ""),
+							lang ?? "",
+						)
+					: escapeHtml(code);
 			const html = !langString
-				? `<pre><code>${escaped ? code : escapeHtml(code)}</code></pre>\n`
-				: `<pre><code class="language-${escapeHtml(langString)}">${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+				? `<pre><code>${codeHtml}</code></pre>\n`
+				: `<pre><code class="language-${escapeHtml(langString)}">${codeHtml}</code></pre>\n`;
 			return fragment ? withFragmentClass(html) : html;
 		},
 		paragraph({
@@ -1188,7 +1334,26 @@ marked.use({
  * the `code` token (see the `marked.use({ renderer: { code ... } })` call
  * above) -- `mermaid` fenced code blocks render as CDN-free SVG diagrams via
  * `renderMermaidDiagram`, while every other language renders exactly as
- * marked's own default code renderer would.
+ * marked's own default code renderer would, aside from real highlight.js
+ * syntax highlighting (see below).
+ *
+ * Syntax highlighting for fenced code blocks is done via `highlightCode`
+ * (see codeHighlight.ts), called directly from that same `code()` renderer
+ * override -- not via the `marked-highlight` package's own `marked.use()`
+ * extension, despite that package existing for exactly this purpose.
+ * `marked-highlight@2.2.4`'s own source was read directly (not just its
+ * README) before this decision: it registers its own `renderer.code`
+ * override in addition to its `walkTokens` hook, and `marked@18.0.13`'s own
+ * `use()` implementation makes the LAST-registered `renderer.code` in a
+ * chain of `marked.use()` calls win outright (neither implementation ever
+ * returns `false` to fall through to the other) -- so which renderer.code
+ * "wins" would depend entirely on `marked.use()` call order between this
+ * file and wherever `marked-highlight` was registered, a fragile, easy-to-
+ * silently-break collision risk for a mermaid-diagram code path that must
+ * never receive highlighted markup instead of raw source. Calling
+ * `highlightCode` directly here sidesteps that risk entirely: it runs
+ * inside the one `code()` implementation that is already guaranteed to be
+ * the only one ever invoked for the `code` token type in this file.
  *
  * `cssVars`, when given (and `customCss` is not), is a small raw CSS
  * snippet -- typically a single `:root { --nh-accent: #...; }`-shaped block
@@ -1271,8 +1436,24 @@ export function generateHtml(
 			const { layout, tokens: afterLayout } = extractSlideLayout(slideTokens);
 			const { name: layoutName } = resolveLayoutName(layout);
 			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
+			const { background, tokens: afterBackground } =
+				extractSlideBackground(afterLayout);
+			// Written through as a plain inline `style` attribute (not a
+			// stylesheet rule) directly on this slide's own <section> element, so
+			// there is nothing here to gate behind `!customCss` the way
+			// LAYOUT_STYLE's shared CSS is -- a --css replacement only ever
+			// replaces the document's <style> block, never a per-element
+			// attribute. `background.value` is deck-author-controlled Markdown
+			// source written into an HTML attribute, so it is always run through
+			// escapeHtml() first, same as every other author-controlled value
+			// this function interpolates (e.g. presenter notes above).
+			const backgroundStyle = background
+				? background.type === "image"
+					? ` style="background-image: url(&#39;${escapeHtml(background.value)}&#39;)"`
+					: ` style="background: ${escapeHtml(background.value)}"`
+				: "";
 			const { tokens: filteredTokens, hasFragment } =
-				extractFragments(afterLayout);
+				extractFragments(afterBackground);
 			if (hasFragment) {
 				hasFragments = true;
 			}
@@ -1311,7 +1492,7 @@ export function generateHtml(
 				layoutName === "two-column"
 					? `<div class="two-column-flow">\n${contentHtml}</div>\n`
 					: contentHtml;
-			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>${notesPageHtml}`;
+			return `<section class="slide${layoutClass}"${backgroundStyle}>\n${wrappedContentHtml}${notesHtml}</section>${notesPageHtml}`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -1444,6 +1625,8 @@ ${
       background: none;
       padding: 0;
     }
+    ${HLJS_STYLE}
+    ${CODE_LINE_HIGHLIGHT_STYLE}
     blockquote {
       /* Logical property, not border-left -- resolves to the correct
          physical side (right, under a right-to-left ancestor) automatically,
@@ -1564,12 +1747,14 @@ export function containsUnsafeHtml(markdown: string): boolean {
  * correct even if marked adds a new nested-token shape later, since it never
  * has to be told where nested tokens live.
  *
- * A `<!-- fragment -->` marker already matches isPresenterNoteComment's own
- * generic "shaped like `<!-- ... -->`" pattern (so it was never actually
- * flagged here even before extractFragments existed) -- isFragmentMarkerComment
- * is checked explicitly anyway, so this allowlist stays correct on its own
- * terms even if isPresenterNoteComment's pattern is ever tightened to be
- * note-specific rather than comment-shaped-in-general.
+ * A `<!-- fragment -->` marker (and likewise a `<!-- bg: ... -->` /
+ * `<!-- bg-image: ... -->` marker) already matches isPresenterNoteComment's
+ * own generic "shaped like `<!-- ... -->`" pattern (so neither was ever
+ * actually flagged here even before extractFragments/extractSlideBackground
+ * existed) -- isFragmentMarkerComment/isBackgroundMarkerComment are checked
+ * explicitly anyway, so this allowlist stays correct on its own terms even
+ * if isPresenterNoteComment's pattern is ever tightened to be note-specific
+ * rather than comment-shaped-in-general.
  */
 function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
 	if (Array.isArray(node)) {
@@ -1583,7 +1768,8 @@ function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
 		token.type === "html" &&
 		typeof token.text === "string" &&
 		!isPresenterNoteComment(token.text) &&
-		!isFragmentMarkerComment(token.text)
+		!isFragmentMarkerComment(token.text) &&
+		!isBackgroundMarkerComment(token.text)
 	) {
 		return true;
 	}
