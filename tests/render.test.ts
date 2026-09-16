@@ -592,7 +592,14 @@ describe("generateHtml — Mermaid diagrams", () => {
 
 		expect(html).toContain("<svg");
 		expect(html).not.toContain("```mermaid");
-		expect(html).not.toMatch(/hljs-/);
+		// Checked against rendered MARKUP only (a class actually applied to
+		// an element), not the whole document -- HLJS_STYLE's own <style>
+		// selectors always mention "hljs-" unconditionally, the same way
+		// CODE_LINE_HIGHLIGHT_STYLE's selectors always mention "nh-code-line"
+		// regardless of whether either feature is used in this deck (see the
+		// "produces zero nh-code-line-highlighted classes" regression guard
+		// above for the identical reasoning).
+		expect(html).not.toContain('class="hljs-');
 	});
 
 	it("renders a syntax-highlighted code block and a mermaid diagram correctly in the same deck", () => {
@@ -621,7 +628,50 @@ describe("generateHtml — syntax highlighting", () => {
 
 		expect(html).toContain('<pre><code class="language-cobol">');
 		expect(html).toContain("DISPLAY HI.");
-		expect(html).not.toMatch(/hljs-/);
+		// Same markup-only scope as the mermaid regression guard above -- see
+		// that test's own comment for why a blanket document-wide check would
+		// now be wrong given HLJS_STYLE's unconditional CSS selectors.
+		expect(html).not.toContain('class="hljs-');
+	});
+
+	it(
+		"renders hljs- token classes with a real, visually distinct color from plain code text (regression: highlight.js classes shipped with zero accompanying color CSS, making highlighting invisible)",
+		async () => {
+			const html = generateHtml(
+				'```javascript\nfunction foo() {\n  // a comment\n  return "hi";\n}\n```',
+			);
+			const page = await openHtmlPage(html);
+
+			const colors = await page.evaluate(() => {
+				const keyword = document.querySelector(".hljs-keyword");
+				const comment = document.querySelector(".hljs-comment");
+				const plainCode = document.querySelector("code");
+				if (!keyword || !comment || !plainCode) return null;
+				return {
+					keyword: getComputedStyle(keyword).color,
+					comment: getComputedStyle(comment).color,
+					plainCode: getComputedStyle(plainCode).color,
+				};
+			});
+
+			expect(colors).not.toBeNull();
+			if (!colors) return;
+			expect(colors.keyword).not.toBe(colors.plainCode);
+			expect(colors.comment).not.toBe(colors.plainCode);
+			expect(colors.comment).not.toBe(colors.keyword);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+
+	it("suppresses hljs- token coloring under a custom --css stylesheet, the same way LAYOUT_STYLE/CODE_LINE_HIGHLIGHT_STYLE already are", () => {
+		const html = generateHtml(
+			"```javascript\nconst x = 1;\n```",
+			undefined,
+			".slide { color: hotpink; }",
+		);
+
+		expect(html).toContain(".slide { color: hotpink; }");
+		expect(html).not.toContain(".hljs-keyword");
 	});
 });
 

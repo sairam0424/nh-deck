@@ -147,6 +147,82 @@ const PRINT_PAGINATION_STYLE = `
     }`;
 
 /**
+ * Color rules for the `hljs-*` token classes `highlightCode` (see
+ * codeHighlight.ts) already emits on every syntax-highlighted fenced code
+ * block. Without this, those classes carry zero color CSS of their own,
+ * so every token inherits the plain `code { color: var(--nh-fg); }` rule
+ * above unchanged -- meaning a "syntax-highlighted" block would render
+ * byte-for-byte the same color throughout, indistinguishable from an
+ * unhighlighted one to an actual viewer (caught here as a real
+ * final-integration bug, not shipped as intended: verified directly via
+ * `getComputedStyle()` in a real browser in tests/render.test.ts's
+ * "generateHtml — syntax highlighting" describe block before this constant
+ * existed).
+ *
+ * Three tiers, each built from this file's existing `--nh-accent`/
+ * `--nh-fg`/`--nh-muted` custom properties (never a new hardcoded hex
+ * color), so highlighting shifts with the active theme exactly like
+ * `CODE_LINE_HIGHLIGHT_STYLE` below already does instead of clashing
+ * against it:
+ *
+ * 1. Comments/quoted-doc text (`hljs-comment`/`hljs-quote`) -- `--nh-muted`
+ *    plus italic, the same visual treatment this file already gives
+ *    secondary/de-emphasized text elsewhere (e.g. `.slide.layout-title
+ *    p:first-of-type`).
+ * 2. Structural keywords (`hljs-keyword`/`hljs-built_in`/`hljs-tag`/
+ *    `hljs-name`/`hljs-selector-tag`/`hljs-section`/`hljs-bullet`) --
+ *    `--nh-accent` at full strength plus a heavier weight, since these are
+ *    a language's own control-flow/declaration vocabulary and should read
+ *    as the most prominent tier.
+ * 3. Literal values and names (`hljs-string`/`hljs-number`/`hljs-literal`/
+ *    `hljs-type`/`hljs-title`/`hljs-attr`/`hljs-attribute`/`hljs-meta`/
+ *    `hljs-symbol`/`hljs-regexp`) -- a `color-mix()` blend of `--nh-accent`
+ *    and `--nh-fg`, distinct from both tier 2 and the base text color
+ *    without introducing a fourth custom property. `hljs-title` alone (no
+ *    child-class selector needed) already covers highlight.js's compound
+ *    `class="hljs-title function_"`/`class="hljs-title class_"` shapes,
+ *    since a plain class selector matches any element carrying that class
+ *    among others.
+ *
+ * This constant is interpolated inside generateHtml's own default
+ * (`customCss ??`) theme block, immediately after the existing `pre`/
+ * `code`/`pre code` rules -- and is therefore gated by `!customCss` the
+ * exact same way `CODE_LINE_HIGHLIGHT_STYLE` already is: a full --css
+ * replacement is expected to restyle (or omit) token coloring itself, the
+ * same way it already replaces code's own background/color. The `hljs-*`
+ * classes themselves stay in the rendered markup either way (see
+ * codeHighlight.ts) -- only this cosmetic color layer is suppressed.
+ */
+const HLJS_STYLE = `
+    .hljs-comment,
+    .hljs-quote {
+      color: var(--nh-muted);
+      font-style: italic;
+    }
+    .hljs-keyword,
+    .hljs-built_in,
+    .hljs-tag,
+    .hljs-name,
+    .hljs-selector-tag,
+    .hljs-section,
+    .hljs-bullet {
+      color: var(--nh-accent);
+      font-weight: 600;
+    }
+    .hljs-string,
+    .hljs-number,
+    .hljs-literal,
+    .hljs-type,
+    .hljs-title,
+    .hljs-attr,
+    .hljs-attribute,
+    .hljs-meta,
+    .hljs-symbol,
+    .hljs-regexp {
+      color: color-mix(in srgb, var(--nh-accent) 60%, var(--nh-fg));
+    }`;
+
+/**
  * Slidev-style opt-in line highlighting for fenced code blocks (see
  * codeHighlight.ts's `applyLineHighlights`/`parseHighlightSpec`) -- every
  * source line of a highlighted code block gets wrapped in its own
@@ -1549,6 +1625,7 @@ ${
       background: none;
       padding: 0;
     }
+    ${HLJS_STYLE}
     ${CODE_LINE_HIGHLIGHT_STYLE}
     blockquote {
       /* Logical property, not border-left -- resolves to the correct

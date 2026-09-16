@@ -5,6 +5,80 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-09-16
+
+Three authoring/rendering features for decks with real code and visual
+variety: real syntax highlighting for fenced code blocks, Slidev-style line
+highlighting layered on top of it, and an opt-in per-slide background
+marker. See `docs/adr/0012-syntax-highlighting-and-line-highlight.md` for
+the integration-path and technique decisions behind the first two.
+
+### Added
+
+- **Syntax-highlighted code blocks**: fenced code blocks now render with
+  real syntax highlighting via highlight.js, covering a curated
+  12-language subset -- JavaScript, TypeScript, Python, Bash, JSON, YAML,
+  CSS, XML (which also covers HTML, since highlight.js has no separate
+  HTML grammar), Markdown, SQL, Rust, and Go -- registered individually
+  through `highlight.js/lib/core` rather than pulling in the full
+  ~190-language bundle, so the dependency's footprint stays proportional
+  to what a slide deck actually needs rather than what highlight.js ships
+  by default. A fence tagged with any other language (or a typo) degrades
+  harmlessly to plain, unhighlighted text instead of throwing. The
+  mermaid diagram code path is completely unaffected by this change and
+  guaranteed to stay that way: a `mermaid`-tagged fenced block is still
+  recognized and dispatched to the existing SVG diagram renderer before
+  highlighting is ever attempted, so a deck mixing highlighted code and
+  Mermaid diagrams renders both correctly with zero interaction between
+  the two.
+- **Code-block line highlighting**: a Slidev-style `{1|3-4}` annotation
+  appended to a fenced code block's language tag (e.g. ` ```js {1|3-4} `)
+  highlights the named line numbers with a themed background tint, reusing
+  the same `--nh-accent` custom property every other themed element in
+  this file already does. This release ships exactly one static
+  highlighted range per code block, fixed at render time -- true
+  incremental, multi-step reveal (the highlighted range advancing on its
+  own alongside presentation-mode navigation, the way Slidev's own version
+  of this feature works) is an explicit, deliberately deferred fast-follow
+  for a later release, not something this pass attempted a partial version
+  of.
+- **Per-slide background color/image**: an opt-in `<!-- bg: value -->` or
+  `<!-- bg-image: value -->` HTML comment, placed anywhere in a slide's
+  own Markdown source, sets that slide's background -- a color for `bg:`,
+  or an escaped `url(...)` background-image for `bg-image:`. Unlike the
+  existing `<!-- layout: name -->` marker, whose CSS is dropped the moment
+  a custom `--css` stylesheet replaces the baseline one, a background
+  marker's value is written through as a plain inline `style` attribute
+  directly on that slide's own `<section>` element, not a shared
+  stylesheet rule -- so it is NOT suppressed by `--css`: a `--css`
+  replacement only ever replaces the document's `<style>` block, never a
+  per-element attribute, and a background choice an author actually typed
+  in should not silently vanish just because they also supplied their own
+  stylesheet. See the ADR's decision (c) for the full reasoning.
+
+### Fixed
+
+- **Syntax-highlighted code blocks had no visible color**: highlight.js's
+  `hljs-*` token classes were being emitted correctly on every
+  highlighted block, but this project's own stylesheet had zero CSS rules
+  defining what color any of them should actually be -- every token
+  silently inherited the same flat `code { color: var(--nh-fg); }` rule
+  the rest of a code block already had, so a "highlighted" block rendered
+  in one uniform color, visually indistinguishable from an unhighlighted
+  one. The existing test suite never caught this because it only asserted
+  the `hljs-*` class NAMES were present in the markup, never that they
+  actually resolved to a different color -- found in this release's own
+  final-integration pass via a real-browser `getComputedStyle()` check,
+  the same technique the line-highlighting feature above already used to
+  prove its own tint was real. Fixed with a small three-tier color rule
+  set (muted/italic comments, accented keywords, an accent-and-foreground
+  blend for literal values and names), built entirely from this project's
+  existing `--nh-accent`/`--nh-fg`/`--nh-muted` custom properties rather
+  than new hardcoded colors, so highlighting now shifts correctly across
+  all 4 named themes instead of only ever looking like the light theme.
+  Suppressed under a custom `--css` stylesheet the same way the code-block
+  line-highlight tint already is.
+
 ## [1.8.0] - 2026-09-16
 
 Three presentation-mode interactivity features batched into a single
@@ -428,6 +502,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.9.0]: https://github.com/sairam0424/nh-deck/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/sairam0424/nh-deck/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/sairam0424/nh-deck/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/sairam0424/nh-deck/compare/v1.5.0...v1.6.0
