@@ -364,6 +364,54 @@ describe("generateHtml", () => {
 	});
 });
 
+describe("generateHtml — slide backgrounds (opt-in <!-- bg: / bg-image: --> markers)", () => {
+	it("applies an inline background-color style from a slide's bg marker comment, stripping the marker from rendered output", () => {
+		const html = generateHtml("<!-- bg: #222 -->\n\n# Heading\n");
+
+		expect(html).toContain('<section class="slide" style="background: #222">');
+		expect(html).not.toContain("<!-- bg:");
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("applies an inline background-image style from a slide's bg-image marker comment, stripping the marker from rendered output", () => {
+		const html = generateHtml(
+			"<!-- bg-image: path/to/image.jpg -->\n\n# Heading\n",
+		);
+
+		expect(html).toContain(
+			'<section class="slide" style="background-image: url(&#39;path/to/image.jpg&#39;)">',
+		);
+		expect(html).not.toContain("<!-- bg-image:");
+		expect(html).not.toContain('class="notes"');
+	});
+
+	it("renders a slide with no background marker exactly as before -- no style attribute added", () => {
+		const html = generateHtml("# Big Heading\n\nSubtitle text.");
+
+		// Precise regression guard: a slide with a background marker would
+		// render `class="slide" style="..."`, which would not match this
+		// exact substring -- see the equivalent no-layout-marker guard above.
+		expect(html).toContain('<section class="slide">');
+	});
+
+	it("still treats a background marker comment as an already-reviewed comment, not raw HTML", () => {
+		expect(containsUnsafeHtml("<!-- bg: #222 -->\n\n# Heading\n")).toBe(false);
+		expect(
+			containsUnsafeHtml("<!-- bg-image: image.jpg -->\n\n# Heading\n"),
+		).toBe(false);
+	});
+
+	it("combines a layout class and a background style on the same section element", () => {
+		const html = generateHtml(
+			"<!-- layout: title -->\n\n<!-- bg: #222 -->\n\n# Heading\n",
+		);
+
+		expect(html).toContain(
+			'<section class="slide layout-title" style="background: #222">',
+		);
+	});
+});
+
 describe("generateHtml — slide segmentation", () => {
 	it("wraps single-slide content in exactly one <section> when there is no delimiter", () => {
 		const html = generateHtml("# Only slide\n\nSome text.");

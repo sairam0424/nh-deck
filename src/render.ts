@@ -9,6 +9,10 @@ import { getEmbeddedKatexCss } from "./katexAssets.js";
 import { renderMermaidDiagram } from "./mermaidRenderer.js";
 import { PRESENTATION_SCRIPT } from "./presentationScript.js";
 import { extractNotes, isPresenterNoteComment } from "./presenterNotes.js";
+import {
+	extractSlideBackground,
+	isBackgroundMarkerComment,
+} from "./slideBackgrounds.js";
 import { extractSlideLayout, resolveLayoutName } from "./slideLayouts.js";
 import type { ThemeColors } from "./themes.js";
 import type { TransitionName } from "./transitions.js";
@@ -1356,8 +1360,24 @@ export function generateHtml(
 			const { layout, tokens: afterLayout } = extractSlideLayout(slideTokens);
 			const { name: layoutName } = resolveLayoutName(layout);
 			const layoutClass = layoutName ? ` layout-${layoutName}` : "";
+			const { background, tokens: afterBackground } =
+				extractSlideBackground(afterLayout);
+			// Written through as a plain inline `style` attribute (not a
+			// stylesheet rule) directly on this slide's own <section> element, so
+			// there is nothing here to gate behind `!customCss` the way
+			// LAYOUT_STYLE's shared CSS is -- a --css replacement only ever
+			// replaces the document's <style> block, never a per-element
+			// attribute. `background.value` is deck-author-controlled Markdown
+			// source written into an HTML attribute, so it is always run through
+			// escapeHtml() first, same as every other author-controlled value
+			// this function interpolates (e.g. presenter notes above).
+			const backgroundStyle = background
+				? background.type === "image"
+					? ` style="background-image: url(&#39;${escapeHtml(background.value)}&#39;)"`
+					: ` style="background: ${escapeHtml(background.value)}"`
+				: "";
 			const { tokens: filteredTokens, hasFragment } =
-				extractFragments(afterLayout);
+				extractFragments(afterBackground);
 			if (hasFragment) {
 				hasFragments = true;
 			}
@@ -1396,7 +1416,7 @@ export function generateHtml(
 				layoutName === "two-column"
 					? `<div class="two-column-flow">\n${contentHtml}</div>\n`
 					: contentHtml;
-			return `<section class="slide${layoutClass}">\n${wrappedContentHtml}${notesHtml}</section>${notesPageHtml}`;
+			return `<section class="slide${layoutClass}"${backgroundStyle}>\n${wrappedContentHtml}${notesHtml}</section>${notesPageHtml}`;
 		})
 		.join("\n");
 	const pageTitle = escapeHtml(
@@ -1650,12 +1670,14 @@ export function containsUnsafeHtml(markdown: string): boolean {
  * correct even if marked adds a new nested-token shape later, since it never
  * has to be told where nested tokens live.
  *
- * A `<!-- fragment -->` marker already matches isPresenterNoteComment's own
- * generic "shaped like `<!-- ... -->`" pattern (so it was never actually
- * flagged here even before extractFragments existed) -- isFragmentMarkerComment
- * is checked explicitly anyway, so this allowlist stays correct on its own
- * terms even if isPresenterNoteComment's pattern is ever tightened to be
- * note-specific rather than comment-shaped-in-general.
+ * A `<!-- fragment -->` marker (and likewise a `<!-- bg: ... -->` /
+ * `<!-- bg-image: ... -->` marker) already matches isPresenterNoteComment's
+ * own generic "shaped like `<!-- ... -->`" pattern (so neither was ever
+ * actually flagged here even before extractFragments/extractSlideBackground
+ * existed) -- isFragmentMarkerComment/isBackgroundMarkerComment are checked
+ * explicitly anyway, so this allowlist stays correct on its own terms even
+ * if isPresenterNoteComment's pattern is ever tightened to be note-specific
+ * rather than comment-shaped-in-general.
  */
 function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
 	if (Array.isArray(node)) {
@@ -1669,7 +1691,8 @@ function tokenTreeContainsUnsafeHtml(node: unknown): boolean {
 		token.type === "html" &&
 		typeof token.text === "string" &&
 		!isPresenterNoteComment(token.text) &&
-		!isFragmentMarkerComment(token.text)
+		!isFragmentMarkerComment(token.text) &&
+		!isBackgroundMarkerComment(token.text)
 	) {
 		return true;
 	}
