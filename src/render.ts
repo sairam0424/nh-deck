@@ -1,6 +1,7 @@
 import type { Token, Tokens } from "marked";
 import { marked } from "marked";
 import markedKatex from "marked-katex-extension";
+import { highlightCode } from "./codeHighlight.js";
 import type { DirectionName } from "./directions.js";
 import { extractFragments, isFragmentMarkerComment } from "./fragments.js";
 import { escapeHtml } from "./htmlEscape.js";
@@ -1117,13 +1118,32 @@ marked.use({
 
 			// Everything below exactly replicates marked@13.0.3's own default
 			// code() renderer (verified directly against its source) for every
-			// language other than "mermaid" -- this override must not change how
-			// any other fenced code block renders, aside from composing in
-			// class="fragment" on <pre> when this block is fragment-marked.
+			// language other than "mermaid", with one deliberate addition: a
+			// language-tagged block's own text is now run through highlightCode
+			// (see codeHighlight.ts) for real highlight.js syntax highlighting,
+			// instead of being escaped verbatim -- this override must not change
+			// anything else about how any other fenced code block renders, aside
+			// from that highlighting and composing in class="fragment" on <pre>
+			// when this block is fragment-marked.
+			//
+			// highlightCode's own return value is already HTML-escaped by
+			// highlight.js itself, so it is used exactly like already-`escaped`
+			// text below -- never re-escaped. The `escaped` flag still takes
+			// precedence over highlighting when true (dead in practice today,
+			// since nothing in this codebase sets it, but kept as the same
+			// defense-in-depth this override already had before this change):
+			// highlightCode expects raw source, not pre-rendered HTML, so a block
+			// some future extension already marked safe must never be run through
+			// it a second time.
 			const code = `${text.replace(/\n$/, "")}\n`;
+			const codeHtml = escaped
+				? code
+				: langString
+					? highlightCode(code, langString, lang ?? "")
+					: escapeHtml(code);
 			const html = !langString
-				? `<pre><code>${escaped ? code : escapeHtml(code)}</code></pre>\n`
-				: `<pre><code class="language-${escapeHtml(langString)}">${escaped ? code : escapeHtml(code)}</code></pre>\n`;
+				? `<pre><code>${codeHtml}</code></pre>\n`
+				: `<pre><code class="language-${escapeHtml(langString)}">${codeHtml}</code></pre>\n`;
 			return fragment ? withFragmentClass(html) : html;
 		},
 		paragraph({
@@ -1188,7 +1208,26 @@ marked.use({
  * the `code` token (see the `marked.use({ renderer: { code ... } })` call
  * above) -- `mermaid` fenced code blocks render as CDN-free SVG diagrams via
  * `renderMermaidDiagram`, while every other language renders exactly as
- * marked's own default code renderer would.
+ * marked's own default code renderer would, aside from real highlight.js
+ * syntax highlighting (see below).
+ *
+ * Syntax highlighting for fenced code blocks is done via `highlightCode`
+ * (see codeHighlight.ts), called directly from that same `code()` renderer
+ * override -- not via the `marked-highlight` package's own `marked.use()`
+ * extension, despite that package existing for exactly this purpose.
+ * `marked-highlight@2.2.4`'s own source was read directly (not just its
+ * README) before this decision: it registers its own `renderer.code`
+ * override in addition to its `walkTokens` hook, and `marked@18.0.13`'s own
+ * `use()` implementation makes the LAST-registered `renderer.code` in a
+ * chain of `marked.use()` calls win outright (neither implementation ever
+ * returns `false` to fall through to the other) -- so which renderer.code
+ * "wins" would depend entirely on `marked.use()` call order between this
+ * file and wherever `marked-highlight` was registered, a fragile, easy-to-
+ * silently-break collision risk for a mermaid-diagram code path that must
+ * never receive highlighted markup instead of raw source. Calling
+ * `highlightCode` directly here sidesteps that risk entirely: it runs
+ * inside the one `code()` implementation that is already guaranteed to be
+ * the only one ever invoked for the `code` token type in this file.
  *
  * `cssVars`, when given (and `customCss` is not), is a small raw CSS
  * snippet -- typically a single `:root { --nh-accent: #...; }`-shaped block

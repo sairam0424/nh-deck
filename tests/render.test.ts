@@ -525,11 +525,11 @@ describe("generateHtml — Mermaid diagrams", () => {
 		expect(duplicates).toEqual([]);
 	});
 
-	it("renders a non-mermaid fenced code block exactly as before this phase", () => {
+	it("renders a non-mermaid fenced code block through highlight.js, preserving its language- class", () => {
 		const html = generateHtml("```bash\necho hi\n```");
 
 		expect(html).toContain(
-			'<pre><code class="language-bash">echo hi\n</code></pre>',
+			'<pre><code class="language-bash"><span class="hljs-built_in">echo</span> hi\n</code></pre>',
 		);
 	});
 
@@ -537,6 +537,43 @@ describe("generateHtml — Mermaid diagrams", () => {
 		const html = generateHtml("```\nplain text\n```");
 
 		expect(html).toContain("<pre><code>plain text\n</code></pre>");
+	});
+
+	it("leaves a mermaid fenced code block completely unaffected by syntax highlighting", () => {
+		const html = generateHtml("```mermaid\nflowchart TD\n  A --> B\n```");
+
+		expect(html).toContain("<svg");
+		expect(html).not.toContain("```mermaid");
+		expect(html).not.toMatch(/hljs-/);
+	});
+
+	it("renders a syntax-highlighted code block and a mermaid diagram correctly in the same deck", () => {
+		const html = generateHtml(
+			"```javascript\nconst x = 1;\n```\n\n```mermaid\nflowchart TD\n  A --> B\n```",
+		);
+
+		expect(html).toMatch(/class="hljs-/);
+		expect(html).toContain("<svg");
+	});
+});
+
+describe("generateHtml — syntax highlighting", () => {
+	it("produces highlight.js hljs- prefixed classes for a supported language", () => {
+		const html = generateHtml("```javascript\nconst x = 1;\n```");
+
+		expect(html).toContain('<pre><code class="language-javascript">');
+		expect(html).toMatch(/class="hljs-/);
+		expect(html).toContain("x");
+	});
+
+	it("degrades an unsupported/unknown language to plain, unhighlighted text without throwing", () => {
+		expect(() => generateHtml("```cobol\nDISPLAY HI.\n```")).not.toThrow();
+
+		const html = generateHtml("```cobol\nDISPLAY HI.\n```");
+
+		expect(html).toContain('<pre><code class="language-cobol">');
+		expect(html).toContain("DISPLAY HI.");
+		expect(html).not.toMatch(/hljs-/);
 	});
 });
 
