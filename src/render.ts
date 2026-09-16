@@ -1,7 +1,7 @@
 import type { Token, Tokens } from "marked";
 import { marked } from "marked";
 import markedKatex from "marked-katex-extension";
-import { highlightCode } from "./codeHighlight.js";
+import { applyLineHighlights, highlightCode } from "./codeHighlight.js";
 import type { DirectionName } from "./directions.js";
 import { extractFragments, isFragmentMarkerComment } from "./fragments.js";
 import { escapeHtml } from "./htmlEscape.js";
@@ -140,6 +140,38 @@ const PRINT_PAGINATION_STYLE = `
         print-color-adjust: exact;
         -webkit-print-color-adjust: exact;
       }
+    }`;
+
+/**
+ * Slidev-style opt-in line highlighting for fenced code blocks (see
+ * codeHighlight.ts's `applyLineHighlights`/`parseHighlightSpec`) -- every
+ * source line of a highlighted code block gets wrapped in its own
+ * `<span class="nh-code-line">`. `display: block` makes each of those spans
+ * occupy its own visual row, so a highlighted line's own background spans
+ * the full row rather than just hugging its text (matching the real "\n"
+ * characters generateHtml already places between these spans in the
+ * underlying markup -- this is belt-and-suspenders for the visual result,
+ * not what creates the line breaks themselves).
+ *
+ * `.nh-code-line-highlighted`'s background reuses `--nh-accent` (the same
+ * custom property the pre/code rules below sit alongside) via a runtime
+ * `color-mix()`, at a low opacity, rather than a hardcoded color -- so a
+ * highlighted line's tint shifts along with every other themed element in
+ * this file whenever --theme/--css-vars picks a different palette, instead
+ * of clashing against it. This constant is interpolated directly inside
+ * generateHtml's own default (`customCss ??`) theme block, immediately
+ * after the existing `pre`/`code`/`pre code` rules it's meant to sit beside
+ * -- and is therefore gated by `!customCss` the exact same way those rules
+ * already are: a full --css replacement is expected to replace this
+ * cosmetic tint too, exactly like it already replaces code's own
+ * background/color.
+ */
+const CODE_LINE_HIGHLIGHT_STYLE = `
+    .nh-code-line {
+      display: block;
+    }
+    .nh-code-line-highlighted {
+      background: color-mix(in srgb, var(--nh-accent) 25%, transparent);
     }`;
 
 const LAYOUT_STYLE = `
@@ -1118,13 +1150,15 @@ marked.use({
 
 			// Everything below exactly replicates marked@13.0.3's own default
 			// code() renderer (verified directly against its source) for every
-			// language other than "mermaid", with one deliberate addition: a
+			// language other than "mermaid", with two deliberate additions: a
 			// language-tagged block's own text is now run through highlightCode
 			// (see codeHighlight.ts) for real highlight.js syntax highlighting,
-			// instead of being escaped verbatim -- this override must not change
-			// anything else about how any other fenced code block renders, aside
-			// from that highlighting and composing in class="fragment" on <pre>
-			// when this block is fragment-marked.
+			// instead of being escaped verbatim, and then through
+			// applyLineHighlights (same file) for opt-in Slidev-style
+			// `{1|3-4}` line highlighting -- this override must not change
+			// anything else about how any other fenced code block renders,
+			// aside from that highlighting and composing in class="fragment"
+			// on <pre> when this block is fragment-marked.
 			//
 			// highlightCode's own return value is already HTML-escaped by
 			// highlight.js itself, so it is used exactly like already-`escaped`
@@ -1135,11 +1169,23 @@ marked.use({
 			// highlightCode expects raw source, not pre-rendered HTML, so a block
 			// some future extension already marked safe must never be run through
 			// it a second time.
+			//
+			// applyLineHighlights is only ever called on the already-highlighted
+			// branch, never on the `escaped` or plain-`escapeHtml` branches --
+			// there is no highlight.js output for it to split into lines there,
+			// and a fence with no language word can never carry a `{...}`
+			// annotation in the first place (see that function's own
+			// docstring). It receives the exact same `lang ?? ""` full fence
+			// info string already passed to highlightCode's own `info`
+			// parameter just above it.
 			const code = `${text.replace(/\n$/, "")}\n`;
 			const codeHtml = escaped
 				? code
 				: langString
-					? highlightCode(code, langString, lang ?? "")
+					? applyLineHighlights(
+							highlightCode(code, langString, lang ?? ""),
+							lang ?? "",
+						)
 					: escapeHtml(code);
 			const html = !langString
 				? `<pre><code>${codeHtml}</code></pre>\n`
@@ -1483,6 +1529,7 @@ ${
       background: none;
       padding: 0;
     }
+    ${CODE_LINE_HIGHLIGHT_STYLE}
     blockquote {
       /* Logical property, not border-left -- resolves to the correct
          physical side (right, under a right-to-left ancestor) automatically,

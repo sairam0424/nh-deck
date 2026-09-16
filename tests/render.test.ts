@@ -577,6 +577,62 @@ describe("generateHtml — syntax highlighting", () => {
 	});
 });
 
+describe("generateHtml — Slidev-style line highlighting ({n|n-n} fence annotation)", () => {
+	it("marks exactly the annotated line numbers as nh-code-line-highlighted and no others", () => {
+		const html = generateHtml(
+			"```js {1|3-4}\nconst a = 1;\nconst b = 2;\nconst c = 3;\nconst d = 4;\n```",
+		);
+
+		const lines = html.match(/<span class="nh-code-line[^"]*">/g) ?? [];
+		expect(lines).toHaveLength(4);
+		expect(lines[0]).toContain("nh-code-line-highlighted");
+		expect(lines[1]).not.toContain("nh-code-line-highlighted");
+		expect(lines[2]).toContain("nh-code-line-highlighted");
+		expect(lines[3]).toContain("nh-code-line-highlighted");
+	});
+
+	it("produces zero nh-code-line-highlighted classes when no annotation is given (byte-shape regression guard)", () => {
+		const html = generateHtml("```js\nconst a = 1;\nconst b = 2;\n```");
+
+		// CODE_LINE_HIGHLIGHT_STYLE's own <style> selectors always mention
+		// "nh-code-line" (they must exist for a deck that DOES use the
+		// annotation elsewhere) -- what must never appear here is that class
+		// actually applied to a <span> in THIS unannotated block's own
+		// rendered markup, and the block's markup must stay byte-identical
+		// to how it rendered before this feature existed.
+		expect(html).not.toContain('<span class="nh-code-line');
+		expect(html).toContain(
+			'<pre><code class="language-js"><span class="hljs-keyword">const</span> a = <span class="hljs-number">1</span>;\n<span class="hljs-keyword">const</span> b = <span class="hljs-number">2</span>;\n</code></pre>',
+		);
+	});
+
+	it(
+		"renders a highlighted line with a real, different background color than a non-highlighted line",
+		async () => {
+			const html = generateHtml("```js {1}\nconst a = 1;\nconst b = 2;\n```");
+			const page = await openHtmlPage(html);
+
+			const colors = await page.evaluate(() => {
+				const highlighted = document.querySelector(".nh-code-line-highlighted");
+				const allLines = Array.from(document.querySelectorAll(".nh-code-line"));
+				const plain = allLines.find(
+					(el) => !el.classList.contains("nh-code-line-highlighted"),
+				);
+				if (!highlighted || !plain) return null;
+				return {
+					highlightedBg: getComputedStyle(highlighted).backgroundColor,
+					plainBg: getComputedStyle(plain).backgroundColor,
+				};
+			});
+
+			expect(colors).not.toBeNull();
+			if (!colors) return;
+			expect(colors.highlightedBg).not.toBe(colors.plainBg);
+		},
+		STYLE_TEST_TIMEOUT_MS,
+	);
+});
+
 describe("generateHtml — custom CSS opt-out", () => {
 	it("uses the default baseline stylesheet when no custom CSS is given", () => {
 		const html = generateHtml("# Slide");
