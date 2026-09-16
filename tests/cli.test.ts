@@ -1984,6 +1984,80 @@ describe("CLI: nh-deck build", () => {
 		},
 		STARTUP_TIMEOUT_MS,
 	);
+
+	it(
+		"builds an empty deck cleanly, matching generateHtml's own zero-delimiter wrap-in-one-section invariant",
+		async () => {
+			// See render.test.ts's "wraps an empty deck in exactly one <section>
+			// (zero-delimiter backward-compatibility invariant)" -- build must
+			// exercise the exact same generateHtml() code path, not a second
+			// one with its own ideas about what an empty deck should produce.
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-build-empty-test-"),
+			);
+			const deckPath = path.join(tempDir, "empty.md");
+			writeFileSync(deckPath, "");
+			const outputDir = path.join(tempDir, "out");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "build", deckPath, outputDir],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			const written = readFileSync(path.join(outputDir, "index.html"), "utf8");
+			expect(written).toBe(generateHtml("", deckPath));
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"builds a deck with an unclosed frontmatter block cleanly, falling through to plain markdown per parseFrontmatter's own documented behavior",
+		async () => {
+			// A "---" with no matching closing "---" is not real frontmatter --
+			// parseFrontmatter deliberately falls through and treats the whole
+			// file as plain markdown body (see frontmatter.ts). This proves
+			// build surfaces that same fallback rather than crashing or
+			// inventing its own malformed-input handling.
+			const malformed = "---\ntheme: dark\n\n# Slide one\n";
+			const tempDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-build-malformed-test-"),
+			);
+			const deckPath = path.join(tempDir, "malformed.md");
+			writeFileSync(deckPath, malformed);
+			const outputDir = path.join(tempDir, "out");
+
+			const child = spawn(
+				process.execPath,
+				["--import", "tsx", "src/index.ts", "build", deckPath, outputDir],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			const written = readFileSync(path.join(outputDir, "index.html"), "utf8");
+			expect(written).toBe(generateHtml(malformed, deckPath));
+			// The unclosed "---" and "theme: dark" survive as literal markdown
+			// content (not silently dropped), proving no frontmatter was
+			// actually parsed out of it.
+			expect(written).toContain("theme: dark");
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
 });
 
 describe("CLI: nh-deck render --watch", () => {
