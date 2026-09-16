@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import * as nodeUtil from "node:util";
 import { Command } from "commander";
@@ -10,6 +10,7 @@ import {
 	debounce,
 	parseAutoAdvanceSeconds,
 	parsePort,
+	resolveBuildOutputDir,
 	resolveOutputPath,
 	runWatchedRerender,
 	watchFileForChanges,
@@ -64,6 +65,18 @@ const UNSAFE_HTML_WARNING =
  */
 const NOTES_DROPPED_NOTE =
 	"nh-deck: note: presenter notes are not included in this export (pass --with-notes to include them)";
+
+/**
+ * Non-fatal stdout note printed on `build` only, immediately after its own
+ * "Wrote static site to .../index.html" success line -- naming the one
+ * property that distinguishes `build`'s output from `pdf`/`png`'s (a
+ * self-contained document, not a flattened PDF/PNG) for a user who has not
+ * read the docs. Styled the same green as that success line, matching this
+ * file's own "a note that always follows a green success line shares its
+ * color" precedent (see NOTES_DROPPED_NOTE's own docstring above).
+ */
+const STATIC_SITE_NOTE =
+	"nh-deck: note: this is a complete, deployable static site; no server-side code is required.";
 
 /**
  * Non-fatal stdout hint printed unconditionally on `render`, immediately
@@ -850,6 +863,134 @@ program
 				if (!withNotes && hasPresenterNotes(markdown)) {
 					process.stderr.write(`${style("green", NOTES_DROPPED_NOTE)}\n`);
 				}
+			} catch (error) {
+				process.stderr.write(
+					`${style("red", formatActionError(error, file))}\n`,
+				);
+				process.exitCode = 1;
+			}
+		},
+	);
+
+/**
+ * `build <file> [output]` -- writes the deck's already-fully-self-contained
+ * rendered HTML to a static output directory (`<outputDir>/index.html`)
+ * instead of serving it via `render`'s local dev server. Structurally a
+ * sibling of `pdf`/`png` (same `<file> [output]` positional shape, same
+ * frontmatter/theme/direction/notes resolution, same top-level try/catch
+ * error handling), not of `render` -- render's whole identity is
+ * serve+watch+open-browser, none of which applies here. The one option this
+ * shares with `render` rather than `pdf`/`png` is `--transition`: unlike a
+ * flattened PDF page or PNG screenshot, this command's output is the same
+ * interactive, presentable document `render` serves (complete with
+ * presentationScript.ts's own client-side navigation), so a deck-wide
+ * transition between slides in presentation mode is still visually
+ * meaningful here -- it is meaningless for pdf/png, which is why neither of
+ * those has the flag.
+ *
+ * Deliberately calls the exact same generateHtml() every other command
+ * already calls -- no second/parallel HTML-generation path -- and performs
+ * no per-slide splitting: true per-slide multi-page static output is an
+ * explicitly deferred fast-follow, not this version's job.
+ */
+program
+	.command("build <file> [output]")
+	.description(
+		"Export a Markdown deck to a self-contained static site directory (writes index.html).",
+	)
+	.option(
+		"--css <path>",
+		"path to a custom CSS file that fully replaces the default stylesheet",
+	)
+	.option(
+		"--css-vars <path>",
+		"path to a small CSS file overlaying specific --nh-* custom properties (e.g. --nh-accent) on top of the active theme; composes with --theme, mutually exclusive with --css",
+	)
+	.option(
+		"--theme <name>",
+		`named color theme to apply (${Object.keys(THEMES).join(", ")}); overrides a deck's own frontmatter "theme:" value`,
+	)
+	.option(
+		"--transition <name>",
+		`transition effect between slides in presentation mode (${TRANSITIONS.join(", ")}); overrides a deck's own frontmatter "transition:" value`,
+	)
+	.option(
+		"--dir <name>",
+		`text direction for the deck's own authored content (${DIRECTIONS.join(", ")}); overrides a deck's own frontmatter "dir:" value`,
+	)
+	.option(
+		"--with-notes",
+		"include presenter notes as an additional notes block after each slide that has one, matching pdf/png's own --with-notes shape",
+	)
+	.action(
+		async (
+			file: string,
+			output?: string,
+			options?: {
+				css?: string;
+				cssVars?: string;
+				theme?: string;
+				transition?: string;
+				dir?: string;
+				withNotes?: boolean;
+			},
+		) => {
+			try {
+				const customCss = options?.css
+					? readFileSync(options.css, "utf8")
+					: undefined;
+				const cssVarsContent = options?.cssVars
+					? readFileSync(options.cssVars, "utf8")
+					: undefined;
+				const { cssVars: effectiveCssVars, message: cssVarsMessage } =
+					computeEffectiveCssVars(cssVarsContent, customCss);
+				if (cssVarsMessage) {
+					process.stderr.write(cssVarsMessage);
+				}
+				const rawMarkdown = readFileSync(file, "utf8");
+				if (containsUnsafeHtml(rawMarkdown)) {
+					process.stderr.write(UNSAFE_HTML_WARNING);
+				}
+				const { frontmatter, body: markdown } = parseFrontmatter(rawMarkdown);
+				const { colors: themeColors, message: themeMessage } =
+					computeEffectiveTheme(frontmatter.theme, options?.theme, customCss);
+				if (themeMessage) {
+					process.stderr.write(themeMessage);
+				}
+				const { name: transitionName, message: transitionMessage } =
+					computeEffectiveTransition(
+						frontmatter.transition,
+						options?.transition,
+						customCss,
+					);
+				if (transitionMessage) {
+					process.stderr.write(transitionMessage);
+				}
+				const { name: directionName, message: directionMessage } =
+					computeEffectiveDirection(frontmatter.dir, options?.dir);
+				if (directionMessage) {
+					process.stderr.write(directionMessage);
+				}
+				const withNotes = options?.withNotes ?? false;
+				const html = generateHtml(
+					markdown,
+					file,
+					customCss,
+					themeColors,
+					transitionName,
+					effectiveCssVars,
+					withNotes,
+					directionName,
+				);
+				const outputDir = resolveBuildOutputDir(file, output);
+				mkdirSync(outputDir, { recursive: true });
+				const outputPath = join(outputDir, "index.html");
+				writeFileSync(outputPath, html);
+
+				process.stdout.write(
+					`${style("green", `Wrote static site to ${outputPath}`)}\n`,
+				);
+				process.stdout.write(`${style("green", STATIC_SITE_NOTE)}\n`);
 			} catch (error) {
 				process.stderr.write(
 					`${style("red", formatActionError(error, file))}\n`,
