@@ -5,6 +5,58 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] - 2026-09-16
+
+A single feature this release: a genuine static-site export path for a
+deck, so it can be deployed as a plain, hostable set of files with no
+server-side code at all. See
+`docs/adr/0013-static-site-export.md` for why this shipped as its own
+subcommand rather than a new mode bolted onto `render`.
+
+### Added
+
+- **`nh-deck build <file> [output]`**: a new subcommand that writes a
+  deck to a static output directory (`<outputDir>/index.html`) instead of
+  serving it through `render`'s local dev server. The HTML it writes is
+  the exact same fully self-contained, CDN-free document `render`/`pdf`/
+  `png` already produce -- `build` calls the identical `generateHtml()`
+  every other command already calls, with no second/parallel rendering
+  path -- so it inherits every existing guarantee that HTML already has:
+  no CDN reference, no bundled/downloaded browser, embedded KaTeX/Mermaid
+  assets, themes, custom CSS, and presenter notes all working exactly as
+  they do today. Because the written file needs nothing beyond a static
+  file server (or no server at all -- it opens correctly straight off
+  disk via a `file://` URL) to be viewed, deploying a deck now needs zero
+  server-side code: drop `index.html` on any static host and it works.
+  Structured as a sibling of `pdf`/`png` -- same `<file> [output]`
+  positional shape, same frontmatter/theme/direction/notes resolution --
+  not as a new `render` mode; `--transition` is the one option `build`
+  shares with `render` rather than `pdf`/`png`, since `build`'s output
+  stays the same interactive, presentable document `render` serves,
+  unlike a flattened PDF page or PNG screenshot. A default output
+  directory (`<name>-site/`) is derived from the input filename when none
+  is given, mirroring how `pdf`/`png` already derive their own default
+  output paths.
+- **Presentation mode and hash-based slide addressing already work
+  against static `build` output, with zero additional code written for
+  either.** Verified directly against a real `file://` static output, not
+  assumed: `?present` on the built `index.html`'s URL, plus a `#N`
+  hash to jump straight to slide N, both worked exactly as they do
+  against `render`'s served HTML, because `presentationScript.ts` already
+  drives all of its navigation client-side through `location.hash` and
+  `location.search` -- properties any browser exposes identically whether
+  the document arrived over HTTP or straight off local disk. Nothing
+  about that script assumes a server exists, so it needed no changes at
+  all to keep working here.
+- **True per-slide multi-page static output (one URL per slide, e.g.
+  `slide-2.html`) is an intentional, deliberately deferred fast-follow,
+  not part of this release.** `build` writes exactly one `index.html`
+  containing every slide, the same single-document shape `render`/`pdf`/
+  `png` already produce -- splitting that into one file per slide with
+  working cross-links would be a real, separate piece of work (path
+  rewriting for internal navigation, a shared-asset strategy across
+  files), not a small addition to this release's own scope.
+
 ## [1.9.0] - 2026-09-16
 
 Three authoring/rendering features for decks with real code and visual
@@ -502,6 +554,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.10.0]: https://github.com/sairam0424/nh-deck/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/sairam0424/nh-deck/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/sairam0424/nh-deck/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/sairam0424/nh-deck/compare/v1.6.0...v1.7.0
