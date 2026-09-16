@@ -8,6 +8,7 @@ import {
 	debounce,
 	parseAutoAdvanceSeconds,
 	parsePort,
+	resolveBuildOutputDir,
 	resolveOutputPath,
 	watchFileForChanges,
 } from "../src/cliHelpers.js";
@@ -137,6 +138,30 @@ describe("resolveOutputPath", () => {
 		// this falls through to the append branch and produces a doubled
 		// extension ("deck.MD.pdf") instead of the clean swap ("deck.pdf").
 		expect(resolveOutputPath("deck.MD")).toBe("deck.pdf");
+	});
+});
+
+describe("resolveBuildOutputDir", () => {
+	it("replaces a .md extension with -site when no output is given", () => {
+		expect(resolveBuildOutputDir("deck.md")).toBe("deck-site");
+	});
+
+	it("appends -site instead of no-op'ing when the input has no .md suffix", () => {
+		expect(resolveBuildOutputDir("deck")).toBe("deck-site");
+		expect(resolveBuildOutputDir("deck.markdown")).toBe("deck.markdown-site");
+	});
+
+	it("uses the explicit output path when one is given", () => {
+		expect(resolveBuildOutputDir("deck.md", "custom-dir")).toBe("custom-dir");
+	});
+
+	it("treats a case-insensitive .MD extension as a clean swap, not an append", () => {
+		// Case-insensitive filesystems (macOS, Windows — both in this
+		// project's own CI matrix) allow a source file named with a capital
+		// .MD extension. The extension check must not be case-sensitive, or
+		// this falls through to the append branch and produces a doubled
+		// suffix ("deck.MD-site") instead of the clean swap ("deck-site").
+		expect(resolveBuildOutputDir("deck.MD")).toBe("deck-site");
 	});
 });
 

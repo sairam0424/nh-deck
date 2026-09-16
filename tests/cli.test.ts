@@ -1796,6 +1796,196 @@ describe("CLI: nh-deck png --with-notes", () => {
 	);
 });
 
+describe("CLI: nh-deck build", () => {
+	it(
+		"writes a static site whose index.html is byte-identical to a direct generateHtml() call on the same fixture",
+		async () => {
+			const outputDir = mkdtempSync(path.join(tmpdir(), "nh-deck-build-test-"));
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"build",
+					"fixtures/sample.md",
+					outputDir,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			const indexPath = path.join(outputDir, "index.html");
+			expect(existsSync(indexPath)).toBe(true);
+			expect(stdout).toContain(`Wrote static site to ${indexPath}`);
+			expect(stdout).toContain("complete, deployable static site");
+
+			const written = readFileSync(indexPath, "utf8");
+			expect(written.length).toBeGreaterThan(0);
+
+			// The test that actually proves "build" is not a divergent rendering
+			// path: it must call the exact same generateHtml() every other
+			// command already calls, with the same resolved options -- not a
+			// second/parallel HTML-generation path. fixtures/sample.md has no
+			// frontmatter and no CLI flags were passed here, so the resolved
+			// options are the same plain defaults every other generateHtml()
+			// call site already falls back to (undefined theme/transition/
+			// cssVars, withNotes false). Omitting the direction argument here is
+			// deliberate, not an oversight -- build's own default direction
+			// resolves to "ltr", and generateHtml only ever emits a dir="rtl"
+			// attribute when direction === "rtl" (see src/render.ts), so passing
+			// "ltr" explicitly is byte-identical to omitting it, exactly like the
+			// existing pdf --css combined-features test above already relies on.
+			const fixtureMarkdown = readFileSync(fixturePath, "utf8");
+			const expectedHtml = generateHtml(fixtureMarkdown, "fixtures/sample.md");
+			expect(written).toBe(expectedHtml);
+
+			rmSync(outputDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"derives a default <name>-site/index.html location when no output directory argument is given",
+		async () => {
+			// Nested under repoRoot's own (gitignored) .worktrees/ rather than the
+			// OS tmpdir(), for the same reason the "init" default-filename test
+			// above uses it: `--import tsx` resolves the "tsx" package by walking
+			// up node_modules from the spawned process's own cwd, and a cwd
+			// outside this repo entirely has no ancestor node_modules containing
+			// "tsx".
+			const worktreesDir = path.join(repoRoot, ".worktrees");
+			mkdirSync(worktreesDir, { recursive: true });
+			const tempDir = mkdtempSync(
+				path.join(worktreesDir, "nh-deck-build-default-"),
+			);
+			const deckPath = path.join(tempDir, "deck.md");
+			writeFileSync(deckPath, "# Slide\n\nBody text.\n");
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					path.join(repoRoot, "src", "index.ts"),
+					"build",
+					"deck.md",
+				],
+				{ cwd: tempDir },
+			);
+			activeChild = child;
+
+			let stdout = "";
+			child.stdout?.on("data", (chunk: Buffer) => {
+				stdout += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			const expectedIndexPath = path.join(tempDir, "deck-site", "index.html");
+			expect(stdout).toContain(
+				`Wrote static site to ${path.join("deck-site", "index.html")}`,
+			);
+			expect(existsSync(expectedIndexPath)).toBe(true);
+			expect(readFileSync(expectedIndexPath, "utf8").length).toBeGreaterThan(0);
+
+			rmSync(tempDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"threads --theme through to the written static site, matching render/pdf/png's own --theme wiring",
+		async () => {
+			const outputDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-build-theme-test-"),
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"build",
+					"fixtures/sample.md",
+					outputDir,
+					"--theme",
+					"dark",
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(exitCode).toBe(0);
+			const written = readFileSync(path.join(outputDir, "index.html"), "utf8");
+			// github-dark's bg, per src/themes.ts's THEMES.dark -- the same
+			// assertion the "applies a named theme via the --theme flag on
+			// render" test above makes against a served body.
+			expect(written).toContain("--nh-bg: #0d1117");
+
+			rmSync(outputDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+
+	it(
+		"prints a clean 'could not find file' error and exits non-zero when the file does not exist",
+		async () => {
+			const outputDir = mkdtempSync(
+				path.join(tmpdir(), "nh-deck-build-enoent-test-"),
+			);
+
+			const child = spawn(
+				process.execPath,
+				[
+					"--import",
+					"tsx",
+					"src/index.ts",
+					"build",
+					"does-not-exist.md",
+					outputDir,
+				],
+				{ cwd: repoRoot },
+			);
+			activeChild = child;
+
+			let stderr = "";
+			child.stderr?.on("data", (chunk: Buffer) => {
+				stderr += chunk.toString();
+			});
+
+			const exitCode = await new Promise<number | null>((resolve) => {
+				child.once("exit", (code) => resolve(code));
+			});
+
+			expect(stderr).toBe("nh-deck: could not find file 'does-not-exist.md'\n");
+			expect(exitCode).toBe(1);
+
+			rmSync(outputDir, { recursive: true, force: true });
+		},
+		STARTUP_TIMEOUT_MS,
+	);
+});
+
 describe("CLI: nh-deck render --watch", () => {
 	it(
 		"pushes a reload event over SSE when the watched file changes",

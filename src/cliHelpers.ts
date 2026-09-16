@@ -72,6 +72,24 @@ export function resolveOutputPath(
 }
 
 /**
+ * Derives the output directory for the `build` command. If no explicit
+ * output is given, replaces a trailing .md with `-site`, or appends `-site`
+ * if the input has no .md suffix (never silently returns the unchanged
+ * input path) -- mirrors resolveOutputPath's own default-derivation shape
+ * and case-insensitive .md handling, but for a directory name rather than a
+ * file with a swapped extension, since `build` writes a directory
+ * (`<dir>/index.html`), not a single output file the way pdf/png do.
+ */
+export function resolveBuildOutputDir(file: string, output?: string): string {
+	return (
+		output ??
+		(extname(file).toLowerCase() === ".md"
+			? file.replace(/\.md$/i, "-site")
+			: `${file}-site`)
+	);
+}
+
+/**
  * Wraps fn so rapid-fire calls collapse into a single invocation, delayMs
  * after the last call. Used to smooth out fs.watch's tendency to fire
  * multiple change events for a single logical file save.
