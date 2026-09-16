@@ -5,6 +5,53 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-09-16
+
+Three presentation-mode interactivity features batched into a single
+release: a presenter-facing pacing signal, a viewer-facing zoom mechanic,
+and a self-driving mode for kiosk/unattended presenting. See
+`docs/adr/0011-presentation-interactivity-batch.md` for the design
+decisions behind all three, including two rejected alternatives that were
+not just a matter of taste.
+
+### Added
+
+- **Click-to-zoom on dense content**: Alt+click (Option+click on macOS)
+  an image, a Mermaid diagram, a fenced code block, a table, or a block
+  math expression in presentation mode to zoom it into a full-screen
+  overlay, capped at 90% of the viewport so it never overflows regardless
+  of its natural size. Closes via Escape or a click on the darkened
+  backdrop, restoring the zoomed element to its exact original position in
+  the slide -- including when it is nested several levels deep, e.g.
+  inside a list item inside a two-column layout. Double-click was
+  considered and rejected for this, not just stylistically passed over --
+  see the ADR for why it is a genuinely broken interaction here, not a
+  taste call.
+- **Per-slide pacing indicator in presenter view**: next to the existing
+  elapsed-time display, a presenter with a target duration typed in now
+  sees a live "on pace", "N ahead", or "N behind" readout, derived by
+  comparing the slide index they are actually on against the slide index
+  a simple ratio of elapsed time to target duration says they should be
+  on by now. Updates once a second from the same clock that already
+  drives the timer, plus immediately on every navigation so it never lags
+  a full second behind a real slide change. Entirely opt-in on the same
+  typed target duration the timer already requires -- no duration means
+  no pacing text at all.
+- **Auto-advance / kiosk mode**: a new `--auto-advance <seconds>` flag and
+  matching `auto-advance:` frontmatter key (the flag wins when both are
+  given) make presentation mode advance itself on a timer instead of
+  waiting for manual input, for a kiosk-style loop or a strictly timed
+  self-paced run-through. It advances through a slide's own fragments one
+  at a time first, exactly the way a real arrow-key press already does,
+  only moving to the next slide once nothing is left to reveal on the
+  current one. Any real manual navigation -- arrows, click, jump-to-slide,
+  a grid-overview thumbnail -- resets the countdown back to full, so
+  stepping in by hand mid-countdown does not get immediately overridden by
+  the timer. Looping back to slide 1 after the last slide is deliberately
+  not supported yet: the timer simply stops once the last slide has
+  nothing left to reveal, rather than wrapping around -- see the ADR for
+  what looping would have cost to do correctly in this same pass.
+
 ## [1.7.0] - 2026-09-15
 
 Housekeeping plus real accessibility work: closing out Node 20 now that its
@@ -381,6 +428,7 @@ up to this release, not just changes since a prior tag (none existed before now)
   was added. No CDN reference in rendered HTML, no bundled/downloaded
   browser, no telemetry, no accounts.
 
+[1.8.0]: https://github.com/sairam0424/nh-deck/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/sairam0424/nh-deck/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/sairam0424/nh-deck/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/sairam0424/nh-deck/compare/v1.4.1...v1.5.0
