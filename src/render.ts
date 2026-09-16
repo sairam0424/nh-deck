@@ -547,6 +547,48 @@ const JUMP_INDICATOR_STYLE = `
     }`;
 
 /**
+ * The full-screen overlay for presentationScript.ts's Alt+click-to-zoom on
+ * dense content (images, Mermaid SVG diagrams, code blocks, tables, block
+ * math) -- see that file's own module docstring and its openZoom()/
+ * closeZoom() for the full design. `.presentation-zoom-overlay` itself is
+ * always present in the DOM (presentationScript.ts creates it once, empty,
+ * at setup time regardless of whether anything is ever zoomed) but hidden
+ * by the bare rule below; `body.zoom-open` (toggled by openZoom()/
+ * closeZoom()) is what actually shows it, flex-centering whatever real
+ * element openZoom() moved inside it.
+ *
+ * The moved element is capped at `max-width: 90vw`/`max-height: 90vh` --
+ * regardless of its natural size (a wide table, a tall Mermaid diagram, a
+ * long code block) it can never overflow the viewport once zoomed. Scoped
+ * to the overlay's own direct child (`> *`), not the overlay itself, since
+ * the overlay itself needs to stay full-viewport (`inset: 0`) for its own
+ * flex-centering to work.
+ *
+ * Deliberately NOT gated behind `!customCss`, for the same reason
+ * HELP_STYLE/OVERVIEW_STYLE/JUMP_INDICATOR_STYLE above are not: this is
+ * core interactive presentation-mode chrome (the zoom mechanic itself, not
+ * a suppressible decorative flourish), so a custom --css should not be
+ * able to silently break it.
+ */
+const ZOOM_STYLE = `
+    .presentation-zoom-overlay {
+      display: none;
+    }
+    body.zoom-open .presentation-zoom-overlay {
+      display: flex;
+      position: fixed;
+      inset: 0;
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.8);
+    }
+    .presentation-zoom-overlay > * {
+      max-width: 90vw;
+      max-height: 90vh;
+    }`;
+
+/**
  * The presenter-console layout for a genuinely separate presenter-view
  * window -- the SAME served document, opened at the SAME URL with one
  * added query flag (`&presenter`), rendering this layout instead of the
@@ -710,6 +752,24 @@ const PRESENTER_VIEW_STYLE = `
       font-size: 0.75rem;
       padding: 0.1rem 0.3rem;
       cursor: text;
+    }
+    /* Per-slide pacing indicator (presentationScript.ts's own
+       updatePacingDisplay()) -- sits inside .presenter-timer's own flex row,
+       right after the duration input, so it needs no positioning rule of
+       its own. Neutral/muted by default (ahead-of-pace and on-pace are both
+       "nothing to worry about" states); behind-pace reuses the exact same
+       #dc2626 warning-red .presenter-timer.is-over-target already uses
+       above, since running behind schedule is that same "you need to speed
+       up" signal, just derived from slide position instead of elapsed time.
+       There is deliberately no amber "near-behind" state to mirror
+       is-near-target -- unlike a countdown timer, pacing has no natural
+       halfway-warning point, only "ahead", "on pace", or "behind". */
+    .presenter-pacing {
+      font-size: 0.75rem;
+      color: var(--nh-muted);
+    }
+    .presenter-pacing.is-behind {
+      color: #dc2626;
     }
     body.presenter-view .presenter-preview .slide {
       display: block !important;
@@ -1169,6 +1229,27 @@ marked.use({
  * ArrowLeft/ArrowRight's navigation semantics or reposition any
  * presentation-mode chrome, and Mermaid diagrams stay LTR-oriented
  * regardless (see directions.ts's own docstring).
+ *
+ * `autoAdvanceSeconds`, when given, emits a `data-auto-advance-ms` attribute
+ * on `<body>` -- the number of seconds converted to milliseconds, since a
+ * client-side `setInterval` (presentationScript.ts's own auto-advance timer)
+ * wants milliseconds, not seconds. Appended as the LAST parameter,
+ * deliberately never inserted earlier in this positional-optional parameter
+ * list, so every existing call site (index.ts's render/pdf/png action
+ * handlers, and every test that calls generateHtml with fewer arguments)
+ * keeps working unchanged. Omitted entirely when `undefined` (the default),
+ * so a deck/invocation that never opts in renders byte-identical to before
+ * this parameter existed -- matching direction/themeColors/transitionName's
+ * own "opt-in, absent by default" precedent. Presentation-mode-only, like
+ * `?present`/`?notes` themselves -- only ever read by
+ * presentationScript.ts's own `?present`-gated script, so a value passed
+ * here has no effect at all on the continuous-scroll view or the PDF/PNG
+ * export path (neither of which is driven by this script). Unlike
+ * themeColors/transitionName, this is never suppressed by a custom --css:
+ * it is a `<body>` HTML attribute, not part of the `<style>` block --css
+ * replaces, so there is nothing for --css to conflict with -- the same
+ * reasoning `direction`'s own `dir="rtl"` attribute above already
+ * establishes for itself.
  */
 export function generateHtml(
 	markdown: string,
@@ -1179,6 +1260,7 @@ export function generateHtml(
 	cssVars?: string,
 	withNotes = false,
 	direction?: DirectionName,
+	autoAdvanceSeconds?: number,
 ): string {
 	currentMermaidColors = themeColors;
 	mermaidDiagramCounter = 0;
@@ -1288,6 +1370,14 @@ export function generateHtml(
 	// for why this (unlike themeOverride/layoutOverride/transitionStyle) is
 	// never gated by customCss.
 	const dirAttribute = direction === "rtl" ? ' dir="rtl"' : "";
+	// Omitted entirely when autoAdvanceSeconds is undefined -- see
+	// generateHtml's own docstring for why this <body> attribute (unlike
+	// themeOverride/layoutOverride/transitionStyle) is never gated by
+	// customCss either.
+	const autoAdvanceAttribute =
+		autoAdvanceSeconds !== undefined
+			? ` data-auto-advance-ms="${autoAdvanceSeconds * 1000}"`
+			: "";
 
 	return `<!DOCTYPE html>
 <html lang="en"${dirAttribute}>
@@ -1424,6 +1514,7 @@ ${
     ${OVERVIEW_STYLE}
     ${HELP_STYLE}
     ${JUMP_INDICATOR_STYLE}
+    ${ZOOM_STYLE}
     ${PRESENTER_VIEW_STYLE}
     ${progressStyle}
     ${FRAGMENT_STYLE}
@@ -1432,7 +1523,7 @@ ${
     ${transitionStyle}
   </style>
 </head>
-<body>
+<body${autoAdvanceAttribute}>
 ${slidesHtml}
   <div id="nh-deck-live-region" class="sr-only" aria-live="polite" aria-atomic="true"></div>
   <script>

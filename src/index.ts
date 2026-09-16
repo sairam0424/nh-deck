@@ -8,6 +8,7 @@ import open from "open";
 import {
 	closeWatcherOnServerClose,
 	debounce,
+	parseAutoAdvanceSeconds,
 	parsePort,
 	resolveOutputPath,
 	runWatchedRerender,
@@ -250,6 +251,55 @@ function computeEffectiveDirection(
 }
 
 /**
+ * Computes the effective auto-advance duration (in seconds) for a `render`
+ * invocation, handling frontmatter/--auto-advance precedence -- mirrors
+ * computeEffectiveDirection's exact "flag wins over frontmatter" shape, but
+ * differs in one deliberate way: auto-advance has no fixed value set to
+ * validate against (unlike direction's ltr/rtl or theme's 4 named themes),
+ * so there is no `resolveAutoAdvanceSeconds` module to delegate to the way
+ * resolveDirectionName/resolveThemeName are -- this is plain numeric
+ * parsing, done inline, leaning on the exact same positive-finite-number
+ * rule parseAutoAdvanceSeconds (cliHelpers.ts) already enforces for the
+ * flag.
+ *
+ * `flagAutoAdvance` arrives here already validated -- Commander's own
+ * custom-parser (parseAutoAdvanceSeconds) rejected any bad `--auto-advance`
+ * value before the action handler ever ran, so it is trusted as-is.
+ * `frontmatterAutoAdvance`, by contrast, is arbitrary user-typed text from a
+ * deck's own frontmatter block, never run through Commander at all -- an
+ * invalid value there (a typo, an empty string, a negative number) warns to
+ * stderr and falls back to "disabled" (`seconds: undefined`) rather than
+ * throwing, since throwing would crash the entire render over a typo in a
+ * purely opt-in feature. Absent entirely (no flag, no frontmatter key, or a
+ * frontmatter key present but blank) also resolves to "disabled" -- but
+ * silently, with no warning, since "nothing was requested" is not an error
+ * (matching resolveDirectionName's own identical convention for a missing
+ * value).
+ */
+function computeEffectiveAutoAdvance(
+	frontmatterAutoAdvance: string | undefined,
+	flagAutoAdvance: number | undefined,
+): { seconds: number | undefined; message?: string } {
+	if (flagAutoAdvance !== undefined) {
+		return { seconds: flagAutoAdvance };
+	}
+	if (
+		frontmatterAutoAdvance === undefined ||
+		frontmatterAutoAdvance.trim().length === 0
+	) {
+		return { seconds: undefined };
+	}
+	const seconds = Number(frontmatterAutoAdvance);
+	if (!Number.isFinite(seconds) || seconds <= 0) {
+		return {
+			seconds: undefined,
+			message: `nh-deck: warning: invalid auto-advance value '${frontmatterAutoAdvance}' in frontmatter; auto-advance is disabled. It must be a positive number of seconds (e.g. "7.5").\n`,
+		};
+	}
+	return { seconds };
+}
+
+/**
  * Computes the effective --css-vars overlay content for a render/pdf/png
  * invocation, handling --css mutual exclusivity -- mirrors
  * computeEffectiveTheme/computeEffectiveTransition's exact shape (a pure
@@ -400,6 +450,11 @@ program
 		"--dir <name>",
 		`text direction for the deck's own authored content (${DIRECTIONS.join(", ")}); overrides a deck's own frontmatter "dir:" value`,
 	)
+	.option(
+		"--auto-advance <seconds>",
+		`seconds between automatic slide advances in presentation mode; overrides a deck's own frontmatter "auto-advance:" value`,
+		parseAutoAdvanceSeconds,
+	)
 	.action(
 		async (
 			file: string,
@@ -412,6 +467,7 @@ program
 				theme?: string;
 				transition?: string;
 				dir?: string;
+				autoAdvance?: number;
 			},
 		) => {
 			try {
@@ -450,6 +506,14 @@ program
 				if (directionMessage) {
 					process.stderr.write(directionMessage);
 				}
+				const { seconds: autoAdvanceSeconds, message: autoAdvanceMessage } =
+					computeEffectiveAutoAdvance(
+						frontmatter["auto-advance"],
+						options.autoAdvance,
+					);
+				if (autoAdvanceMessage) {
+					process.stderr.write(autoAdvanceMessage);
+				}
 				const html = generateHtml(
 					markdown,
 					file,
@@ -459,6 +523,7 @@ program
 					effectiveCssVars,
 					undefined,
 					directionName,
+					autoAdvanceSeconds,
 				);
 
 				// Set by a theme-preview click (wired up below via
@@ -552,6 +617,16 @@ program
 								if (updatedDirectionMessage) {
 									process.stderr.write(updatedDirectionMessage);
 								}
+								const {
+									seconds: updatedAutoAdvanceSeconds,
+									message: updatedAutoAdvanceMessage,
+								} = computeEffectiveAutoAdvance(
+									updatedFrontmatter["auto-advance"],
+									options.autoAdvance,
+								);
+								if (updatedAutoAdvanceMessage) {
+									process.stderr.write(updatedAutoAdvanceMessage);
+								}
 								updateHtml(
 									generateHtml(
 										updatedMarkdown,
@@ -562,6 +637,7 @@ program
 										effectiveCssVars,
 										undefined,
 										updatedDirectionName,
+										updatedAutoAdvanceSeconds,
 									),
 								);
 							},

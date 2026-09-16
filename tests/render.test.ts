@@ -703,6 +703,83 @@ describe("generateHtml — text direction (opt-in RTL)", () => {
 	});
 });
 
+describe("generateHtml — auto-advance (opt-in presentation-mode timer)", () => {
+	it("produces byte-identical output with no auto-advance argument (regression guard)", () => {
+		const withoutArg = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		);
+		const withUndefinedAutoAdvance = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+		);
+
+		expect(withUndefinedAutoAdvance).toBe(withoutArg);
+		expect(withoutArg).not.toContain("data-auto-advance-ms");
+	});
+
+	it("omits the data-auto-advance-ms attribute entirely when no value is given, matching the no-argument output exactly", () => {
+		expect(generateHtml(fixtureMarkdown, "sample")).toBe(
+			generateHtml(
+				fixtureMarkdown,
+				"sample",
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+				undefined,
+			),
+		);
+	});
+
+	it("emits data-auto-advance-ms on <body>, converting seconds to milliseconds", () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			5,
+		);
+
+		expect(html).toContain('<body data-auto-advance-ms="5000">');
+	});
+
+	it("converts fractional seconds to milliseconds correctly, not just whole ones", () => {
+		const html = generateHtml(
+			fixtureMarkdown,
+			"sample",
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			2.5,
+		);
+
+		expect(html).toContain('<body data-auto-advance-ms="2500">');
+	});
+});
+
 describe("generateHtml — RTL logical-property resolution (real browser)", () => {
 	// A string assertion on the CSS source (the describe block above) proves
 	// the property NAME changed to a logical one; it cannot prove that

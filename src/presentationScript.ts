@@ -209,6 +209,49 @@
  * own small, most tightly-scoped modal state, layered on top of (never a
  * replacement for) the plain-presenting/overview/help precedence this file
  * already establishes above.
+ *
+ * Alt+click (also Option+click on macOS -- altKey is true for either
+ * physical key there automatically, with no extra detection needed) zooms
+ * in on dense content -- an image, a Mermaid diagram (raw <svg>), a fenced
+ * code block, a table, or a block-math element (.katex-display) -- via
+ * openZoom()/closeZoom() below. Deliberately NOT double-click: a real
+ * double-click fires two ordinary "click" events before the browser's own
+ * "dblclick" event, and each of those would independently trigger
+ * advance() before zoom even had a chance to intervene, making
+ * double-click-to-zoom a genuinely broken interaction rather than a
+ * stylistic alternative -- a held-modifier check evaluated on the click
+ * event itself has no such ordering problem. The click listener's own
+ * altKey branch (see below) resolves the actual zoom target via
+ * event.target.closest() against a fixed selector list, checked as the
+ * LAST guard before the plain fallthrough advance() call, so an ordinary
+ * (non-Alt) click still advances exactly as before this feature existed --
+ * and returns unconditionally once altKey is true, target found or not, so
+ * an Alt+click that misses every zoomable target is a silent no-op rather
+ * than an accidental slide advance.
+ *
+ * openZoom() moves the REAL clicked element (never a clone) into a
+ * full-screen overlay -- cloning is unsafe here specifically because a
+ * Mermaid diagram renders as raw <svg> with document-wide-unique ids (a
+ * marker with id="arrowhead", say), and a clone would duplicate that id,
+ * letting markers/references leak between the original and the clone (the
+ * exact same hazard updatePresenterConsole() above already avoids, for the
+ * identical reason). Before moving it, a placeholder Comment node is
+ * inserted at the element's exact original position (insertBefore on its
+ * own parent, using the element itself as the reference node), so
+ * closeZoom() can restore it there later via Comment.replaceWith(element)
+ * -- necessary because a zoomable element can be arbitrarily nested (inside
+ * a list item inside a two-column layout, say), not just a direct child of
+ * its own slide.
+ *
+ * Closing works two ways: a click on the overlay's own backdrop (a
+ * dedicated listener on the overlay element itself, which stops the click
+ * from also reaching the document-level listener below -- otherwise the
+ * same click that closes the zoom would fall straight through to advance()
+ * too, one click doing two things at once), and Escape -- folded into the
+ * keydown listener's existing Escape branch as its new FIRST,
+ * highest-precedence case, ahead of even isJumpPending(), so an open zoom
+ * overlay always closes first, before any other Escape behavior (closing
+ * help/overview, or exiting presentation mode) gets a chance to fire.
  */
 export const PRESENTATION_SCRIPT = `<script>
 (() => {
@@ -234,6 +277,25 @@ export const PRESENTATION_SCRIPT = `<script>
   if (slides.length === 0) {
     return;
   }
+
+  // Parses the 1-indexed slide number out of location.hash (e.g. "#3" ->
+  // index 2), falling back to slide 0 for a missing/invalid/out-of-range
+  // hash. Declared here, immediately after slides itself -- moved up from
+  // further down in this file (where the rest of "current"'s startup
+  // logic still lives, below the isPresenterView block) specifically so
+  // the pacing-display logic added to that block can read "current"
+  // synchronously, from its own initial render call, the same way
+  // updateTimerDisplay() already does for the timer. A "let current"
+  // declared AFTER that block would leave "current" in the temporal dead
+  // zone at the point that synchronous call needs to read it. Nothing
+  // between here and the isPresenterView block reads "current" itself, so
+  // this reordering is behavior-neutral on its own.
+  const parseHashIndex = () => {
+    const n = parseInt(location.hash.slice(1), 10);
+    return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
+  };
+
+  let current = parseHashIndex();
 
   // Grabbed once, here, at setup time -- render.ts's own generateHtml()
   // always emits this div in <body> unconditionally, regardless of
@@ -336,6 +398,18 @@ export const PRESENTATION_SCRIPT = `<script>
   // can move focus into it without a fresh querySelector on every open.
   const helpPanel = help.querySelector(".presentation-help-panel");
 
+  // Full-screen overlay for Alt+click-to-zoom on dense content -- see this
+  // file's own module docstring for the full design. Created once, empty,
+  // here; openZoom()/closeZoom() further down move the REAL clicked
+  // element in and out of it (never cloning it -- see their own
+  // docstrings for why that matters specifically for Mermaid's raw <svg>
+  // output). Its own backdrop-click close-trigger listener is registered
+  // separately, right after the main document click listener below (see
+  // that listener's own comment for why the ordering matters).
+  const zoomOverlay = document.createElement("div");
+  zoomOverlay.className = "presentation-zoom-overlay";
+  document.body.appendChild(zoomOverlay);
+
   // Presenter-console DOM refs -- only ever assigned (and only ever read by
   // updatePresenterConsole() below) when isPresenterView is true; see the
   // isPresenterView block immediately below, which is the only place that
@@ -346,6 +420,32 @@ export const PRESENTATION_SCRIPT = `<script>
   let currentPreview;
   let nextPreview;
   let notesPanel;
+
+  // The per-slide pacing indicator's own render function -- same "only ever
+  // assigned when isPresenterView is true" treatment as currentPreview/
+  // nextPreview/notesPanel above, and for the same reason: render() below
+  // calls it (guarded by the same isPresenterView check that already guards
+  // its updatePresenterConsole() call) regardless of where in this file the
+  // real assignment happens to live.
+  let updatePacingDisplay;
+
+  // Auto-advance (see this file's own module docstring's presentation-mode
+  // section for the general "any real navigation resets the timer" design):
+  // autoAdvanceTimer holds the current setInterval handle (undefined once
+  // stopped or before auto-advance is ever enabled), and
+  // startAutoAdvanceTimer is the function that (re)starts it. Both forward-
+  // declared here, at the outer scope, for the same reason
+  // currentPreview/nextPreview/notesPanel/updatePacingDisplay above are:
+  // goTo() -- defined further down this file, but reachable from every
+  // navigation input (arrows, click, jump-to-slide, a grid-overview
+  // thumbnail click) -- needs to read/clear autoAdvanceTimer and call
+  // startAutoAdvanceTimer() to reset the countdown on every real navigation,
+  // but the actual function value (and the very first interval it starts)
+  // is only ever assigned much further down, by the auto-advance guard near
+  // the end of this script's setup -- and only when that guard confirms the
+  // feature is actually enabled for this window at all.
+  let autoAdvanceTimer;
+  let startAutoAdvanceTimer;
 
   // Presenter-console UI: the current slide (scaled down), a preview
   // of the next slide (scaled down further), the current slide's own
@@ -431,6 +531,18 @@ export const PRESENTATION_SCRIPT = `<script>
     }
     timerEl.appendChild(durationInput);
 
+    // A per-slide pacing indicator, sitting right next to the timer/
+    // duration-input pair it depends on -- inheriting timerEl's own flex
+    // row layout for free rather than needing its own positioning rule.
+    // Entirely text (never innerHTML), and rendered/updated by
+    // updatePacingDisplay() below, which -- like updateTimerDisplay() above
+    // it -- is opt-in on the exact same typed target duration: no duration
+    // typed in means no pacing text at all, matching the timer's own
+    // color-coding opt-out.
+    const pacingEl = document.createElement("div");
+    pacingEl.className = "presenter-pacing";
+    timerEl.appendChild(pacingEl);
+
     const timerStartMs = Date.now();
     let pausedAtMs = null;
     let accumulatedPausedMs = 0;
@@ -458,8 +570,50 @@ export const PRESENTATION_SCRIPT = `<script>
       timerEl.classList.toggle("is-over-target", isOverTarget);
       timerEl.classList.toggle("is-near-target", isNearTarget);
     };
+
+    // Compares where the presenter SHOULD be by now (expectedIndex, derived
+    // from elapsed time against the same typed target duration
+    // updateTimerDisplay() above already reads) against where they ACTUALLY
+    // are (current, the shared navigation-index variable -- see this file's
+    // own module docstring for why that had to move above the
+    // isPresenterView block for exactly this read). delta > 0 means fewer
+    // slides than expected have gone by, i.e. running ahead of pace; delta <
+    // 0 means behind. Same opt-in-only convention as updateTimerDisplay():
+    // no target duration typed in means no pacing text at all, cleared via
+    // an early return rather than showing a number derived from a target
+    // that does not exist.
+    updatePacingDisplay = () => {
+      const targetMinutes = Number(durationInput.value);
+      const hasTarget = Number.isFinite(targetMinutes) && targetMinutes > 0;
+      if (!hasTarget) {
+        pacingEl.textContent = "";
+        pacingEl.classList.remove("is-ahead", "is-behind", "is-on-pace");
+        return;
+      }
+      const expectedIndex =
+        (elapsedMs() / (targetMinutes * 60_000)) * slides.length;
+      const delta = Math.round(current - expectedIndex);
+      pacingEl.classList.toggle("is-ahead", delta > 0);
+      pacingEl.classList.toggle("is-behind", delta < 0);
+      pacingEl.classList.toggle("is-on-pace", delta === 0);
+      if (delta > 0) {
+        pacingEl.textContent = "+" + delta + " ahead";
+      } else if (delta < 0) {
+        pacingEl.textContent = Math.abs(delta) + " behind";
+      } else {
+        pacingEl.textContent = "on pace";
+      }
+    };
+
     updateTimerDisplay();
-    setInterval(updateTimerDisplay, 1000);
+    updatePacingDisplay();
+    // One shared interval ticks both the timer and the pacing indicator --
+    // pacing depends on the same elapsed-time clock the timer already polls
+    // once a second, so there is no reason to run a second timer for it.
+    setInterval(() => {
+      updateTimerDisplay();
+      updatePacingDisplay();
+    }, 1000);
 
     // The pause-toggle click listener lives on timerDisplay (the mm:ss
     // button) specifically, not the whole flex-laid-out timerEl container --
@@ -514,13 +668,6 @@ export const PRESENTATION_SCRIPT = `<script>
       }
     });
   }
-
-  const parseHashIndex = () => {
-    const n = parseInt(location.hash.slice(1), 10);
-    return Number.isInteger(n) && n >= 1 && n <= slides.length ? n - 1 : 0;
-  };
-
-  let current = parseHashIndex();
 
   // A presenter-view window opened or reloaded AFTER navigation has already
   // happened in the main window has no hash of its own to resume from --
@@ -591,6 +738,16 @@ export const PRESENTATION_SCRIPT = `<script>
   // exactly as typed rather than being silently coerced by a numeric type
   // before Enter is even pressed.
   let jumpDigits = null;
+
+  // Alt+click-to-zoom state -- see this file's own module docstring for the
+  // full design. "null" means zoom is not open; openZoom() below sets this
+  // to the placeholder Comment node it left behind at the zoomed element's
+  // original position, and closeZoom() reads it to restore that position
+  // before resetting it back to null. Doubles as the single source of
+  // truth for "is zoom open" via isZoomOpen() below -- no separate boolean
+  // flag needed, since this is only ever non-null between an openZoom()
+  // call and its matching closeZoom().
+  let zoomPlaceholder = null;
 
   // Fragment (incremental reveal) helpers -- see this file's own module
   // docstring above for the full state-machine explanation. Fragments are
@@ -743,6 +900,11 @@ export const PRESENTATION_SCRIPT = `<script>
     location.hash = String(current + 1);
     if (isPresenterView) {
       updatePresenterConsole();
+      // Refreshes the pacing indicator on every real navigation, not just
+      // once a second from the setInterval in the isPresenterView block
+      // above -- without this, pacing would lag up to a full second behind
+      // an actual slide change instead of updating the instant current does.
+      updatePacingDisplay();
     }
     // Screen-reader slide-change announcement + slide-focus management --
     // both gated the same way: MAIN presenting window only (a
@@ -812,6 +974,25 @@ export const PRESENTATION_SCRIPT = `<script>
     // window alone.
     localStorage.setItem(CURRENT_SLIDE_STORAGE_KEY, String(current));
     presenterChannel.postMessage({ type: "slide", index: current });
+    // Auto-advance timer reset: ANY real navigation, from ANY input source
+    // (arrows, click, jump-to-slide, a grid-overview thumbnail click) --
+    // every one of them already funnels through this one shared function --
+    // restarts the countdown from full, so navigating manually mid-countdown
+    // gets a full fresh interval before auto-advance fires again, rather
+    // than firing almost immediately on whatever was left of the old one.
+    // Only ever set (autoAdvanceTimer truthy) once auto-advance's own
+    // enablement guard near the end of this script has actually started it
+    // once already -- a no-op otherwise, so this line does nothing at all
+    // for a window that never opted into auto-advance in the first place.
+    // Deliberately NOT reachable from a fragment-only reveal step
+    // (revealNextFragment/concealLastFragment) -- see advance()/retreat()
+    // just below, neither of which calls goTo() at all when a fragment was
+    // revealed/concealed -- so a fragment-only step does NOT reset this
+    // timer; a documented simplification, not a bug.
+    if (autoAdvanceTimer) {
+      clearInterval(autoAdvanceTimer);
+      startAutoAdvanceTimer();
+    }
   };
 
   // Forward navigation: reveal the current slide's next fragment (if any
@@ -1028,6 +1209,51 @@ export const PRESENTATION_SCRIPT = `<script>
     window.open(presenterUrl, PRESENTER_WINDOW_NAME);
   };
 
+  // True while the zoom overlay holds a moved element -- see
+  // zoomPlaceholder's own declaration comment above for why this reads
+  // that variable directly rather than a separate boolean flag.
+  const isZoomOpen = () => zoomPlaceholder !== null;
+
+  // Moves the REAL zoomed element (never a clone) into the full-screen zoom
+  // overlay -- see this file's own module docstring for why cloning is
+  // unsafe here specifically: a Mermaid diagram renders as raw <svg> with
+  // document-wide-unique ids (a marker with id="arrowhead", say), and a
+  // clone would duplicate that id, letting markers/references leak between
+  // the original and the clone. A placeholder Comment node is inserted at
+  // element's exact original position FIRST -- via insertBefore on its own
+  // parent, using element itself as the reference node -- so closeZoom()
+  // below can restore element to that exact position later, however deeply
+  // nested it started out (e.g. inside a list item inside a two-column
+  // layout), not just as a direct child of its own slide.
+  const openZoom = (element) => {
+    zoomPlaceholder = document.createComment("nh-deck-zoom-placeholder");
+    element.parentNode.insertBefore(zoomPlaceholder, element);
+    zoomOverlay.appendChild(element);
+    document.body.classList.add("zoom-open");
+  };
+
+  // Restores the zoomed element to its exact original position by
+  // replacing the placeholder Comment node openZoom() left behind with it
+  // -- Comment.replaceWith() both removes element from the overlay (its
+  // current parent) and reinserts it exactly where the placeholder was, in
+  // one step. A no-op when zoom is not actually open (zoomPlaceholder is
+  // null), since both the overlay's own backdrop-click listener above and
+  // the keydown listener's Escape branch below can reach this even when
+  // nothing is currently zoomed.
+  const closeZoom = () => {
+    if (!zoomPlaceholder) {
+      return;
+    }
+    const element = zoomOverlay.firstChild;
+    if (element) {
+      zoomPlaceholder.replaceWith(element);
+    } else {
+      zoomPlaceholder.remove();
+    }
+    document.body.classList.remove("zoom-open");
+    zoomPlaceholder = null;
+  };
+
   // True while a slide-jump's digits are being typed -- one named check
   // shared by the keydown, click, and touchend listeners below (each needs
   // to suppress its own normal behavior while a jump is pending, the same
@@ -1167,8 +1393,23 @@ export const PRESENTATION_SCRIPT = `<script>
     // of this listener) -- but the ordering is written defensively anyway,
     // matching how carefully this file already orders every other
     // precedence decision here.
+    //
+    // Layered on top of even that jump-pending state is the zoom overlay
+    // (Alt+click-to-zoom on dense content -- see this file's own module
+    // docstring, and openZoom()/closeZoom() above): closeZoom() is folded
+    // into this very Escape branch as its new FIRST, highest-precedence
+    // case, ahead of isJumpPending() itself, since closing an open zoom
+    // must never also cancel a jump/close help/close overview/exit
+    // presentation mode in the same keypress. In practice jumpDigits is
+    // always null whenever zoom is open -- Alt+click only ever fires from
+    // the click listener's own final guard below, itself unreachable while
+    // a jump is pending (see that listener's own isJumpPending() early
+    // return) -- but, as with every other precedence decision in this
+    // file, the ordering is still written defensively.
     if (event.key === "Escape") {
-      if (isJumpPending()) {
+      if (isZoomOpen()) {
+        closeZoom();
+      } else if (isJumpPending()) {
         cancelJump();
       } else if (helpOpen) {
         closeHelp();
@@ -1266,6 +1507,14 @@ export const PRESENTATION_SCRIPT = `<script>
     }
   });
 
+  // Alt+click-to-zoom's own fixed target list -- see this file's own
+  // module docstring for the full design. Matched via Element.closest()
+  // against the actual click target inside the click listener's own altKey
+  // branch below, so a click anywhere inside one of these (not just on its
+  // exact outermost element) still resolves to the right ancestor-or-self
+  // to zoom.
+  const ZOOM_TARGET_SELECTOR = "img, svg, pre, table, .katex-display";
+
   document.addEventListener("click", (event) => {
     // Same "inert once exitPresentationMode() has removed body.presenting"
     // guard as the keydown listener above -- without it, clicking anywhere
@@ -1336,7 +1585,48 @@ export const PRESENTATION_SCRIPT = `<script>
     if (event.target.closest("a")) {
       return;
     }
+    // Alt+click (Option+click on macOS -- altKey is true for either
+    // physical key there) zooms in on whichever zoomable element (image,
+    // Mermaid SVG diagram, code block, table, or block math) is closest to
+    // the actual click target -- see this file's own module docstring for
+    // the full design. Checked here, as the LAST guard before the plain
+    // fallthrough advance() call below, so an ordinary (non-Alt) click
+    // still advances exactly as before this feature existed. Always
+    // returns once altKey is true, target found or not -- an Alt+click
+    // that misses every zoomable target is a silent no-op, never an
+    // accidental slide advance.
+    if (event.altKey) {
+      const zoomTarget = event.target.closest(ZOOM_TARGET_SELECTOR);
+      if (zoomTarget) {
+        event.preventDefault();
+        openZoom(zoomTarget);
+      }
+      return;
+    }
     advance();
+  });
+
+  // The zoom overlay's own backdrop-click close trigger (see openZoom()/
+  // closeZoom()'s own docstrings above for the other close trigger,
+  // Escape). Registered here, on the overlay element itself rather than
+  // folded into the document-level click listener above, and
+  // event.stopPropagation() is required, not optional: without it this
+  // same click would keep bubbling up to that document-level listener,
+  // which -- having no idea a zoom overlay even exists -- would fall
+  // straight through to advance(), silently advancing the slide underneath
+  // the very click that just closed the zoom. Checking
+  // event.target === zoomOverlay (rather than just "any click reaching
+  // this listener") is what tells an actual backdrop click apart from a
+  // click ON the zoomed content itself sitting on top of it -- event.target
+  // stays the real clicked descendant even while this listener runs during
+  // bubbling, so clicking the zoomed image/diagram/etc. leaves the zoom
+  // open (and, thanks to the same stopPropagation() above, still never
+  // reaches advance() either).
+  zoomOverlay.addEventListener("click", (event) => {
+    event.stopPropagation();
+    if (event.target === zoomOverlay) {
+      closeZoom();
+    }
   });
 
   // Touch swipe navigation, for presenting from a phone/tablet with no
@@ -1405,6 +1695,63 @@ export const PRESENTATION_SCRIPT = `<script>
       retreat();
     }
   });
+
+  // Auto-advance: on a timer, moves forward through the deck exactly the way
+  // arrow-key/click navigation already does -- via advance(), never a raw
+  // goTo() jump -- so a fragment-bearing slide still reveals its fragments
+  // one at a time under auto-advance instead of skipping straight past
+  // them. Read from the auto-advance dataset attribute render.ts's own
+  // generateHtml conditionally emits on <body> (see that function's own
+  // docstring): absent entirely unless a deck's "auto-advance:" frontmatter
+  // key or a --auto-advance flag actually opted in, in which case
+  // Number(undefined) is NaN and the guard below stays false -- matching
+  // every other opt-in presentation-mode feature's own
+  // "byte-identical/inert when unused" discipline. Deliberately NOT spelled
+  // out here as a literal HTML attribute name -- see this file's own PRESENTATION_SCRIPT
+  // constant, which is embedded verbatim into EVERY rendered document
+  // regardless of whether auto-advance was ever requested, so writing that
+  // exact string in a comment here would itself defeat the very
+  // byte-identical-when-unused guarantee this feature is built to keep.
+  //
+  // Scoped to the MAIN presenting window only, never a presenter-view
+  // window -- see this file's own module docstring's presenter-view
+  // section: a presenter-view window never calls goTo()/advance() itself
+  // (its own keydown/click/touchend listeners all bail out first), and
+  // auto-advancing that read-only mirror on its own independent timer,
+  // rather than simply receiving the main window's broadcasts like every
+  // other piece of navigation state, would desync the two immediately.
+  const autoAdvanceMs = Number(document.body.dataset.autoAdvanceMs);
+  if (!isPresenterView && Number.isFinite(autoAdvanceMs) && autoAdvanceMs > 0) {
+    startAutoAdvanceTimer = () => {
+      autoAdvanceTimer = setInterval(() => {
+        // fragmentsInSlide -- the exact same fragment-lookup helper
+        // revealNextFragment/concealLastFragment/setFragmentsRevealed
+        // already share (see this file's own module docstring: fragments
+        // are looked up fresh from the live DOM every time, never tracked
+        // via a second, parallel JS counter) -- tells us, WITHOUT revealing
+        // anything itself, whether the current slide still has an
+        // unrevealed fragment left. Checked directly (rather than via
+        // revealNextFragment's own return value) specifically so this tick
+        // never double-reveals: advance() below already calls
+        // revealNextFragment itself when it runs, so this check must stay
+        // read-only.
+        const hasUnrevealedFragment = fragmentsInSlide(slides[current]).some(
+          (fragment) => !fragment.classList.contains("is-revealed"),
+        );
+        // No looping in this version -- a deliberate, documented scope
+        // limit, not an oversight: reaching the last slide with nothing
+        // left to reveal stops the timer outright rather than wrapping
+        // back around to slide 1.
+        if (current === slides.length - 1 && !hasUnrevealedFragment) {
+          clearInterval(autoAdvanceTimer);
+          autoAdvanceTimer = undefined;
+          return;
+        }
+        advance();
+      }, autoAdvanceMs);
+    };
+    startAutoAdvanceTimer();
+  }
 
   render();
 })();

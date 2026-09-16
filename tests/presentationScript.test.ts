@@ -170,7 +170,13 @@ describe("PRESENTATION_SCRIPT — accessibility: live region + focus management"
 		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
 		const renderBody = PRESENTATION_SCRIPT.slice(
 			renderIndex,
-			renderIndex + 2200,
+			// Widened from the render() function's own pre-pacing-indicator size
+			// so this window still comfortably covers the whole function body
+			// now that the isPresenterView branch also calls
+			// updatePacingDisplay() -- see the pacing-specific test right after
+			// the presenter-view describe block below for that call's own
+			// assertion.
+			renderIndex + 2600,
 		);
 		expect(renderBody).toContain("!isPresenterView && hasNavigated");
 	});
@@ -185,7 +191,8 @@ describe("PRESENTATION_SCRIPT — accessibility: live region + focus management"
 		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
 		const renderBody = PRESENTATION_SCRIPT.slice(
 			renderIndex,
-			renderIndex + 2200,
+			// Widened for the same reason as the window above.
+			renderIndex + 2600,
 		);
 		expect(renderBody).toContain(
 			'previouslyFocusedSlide.removeAttribute("tabindex")',
@@ -387,9 +394,6 @@ describe("PRESENTATION_SCRIPT — presenter view", () => {
 	it("runs a pausable count-up timer via setInterval and Date.now(), with an opt-in target-duration color coding, not a fixed elapsed-time threshold", () => {
 		expect(PRESENTATION_SCRIPT).toContain("presenter-timer");
 		expect(PRESENTATION_SCRIPT).toContain(
-			"setInterval(updateTimerDisplay, 1000)",
-		);
-		expect(PRESENTATION_SCRIPT).toContain(
 			"(pausedAtMs ?? Date.now()) - timerStartMs - accumulatedPausedMs",
 		);
 		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-paused"');
@@ -407,6 +411,64 @@ describe("PRESENTATION_SCRIPT — presenter view", () => {
 
 	it("never references an external CDN from the presenter-view feature either (local-first constraint)", () => {
 		expect(PRESENTATION_SCRIPT).not.toMatch(/https?:\/\/cdn\./i);
+	});
+
+	it("ticks the timer and the pacing indicator off a single shared setInterval, not two independent ones", () => {
+		const setIntervalIndex = PRESENTATION_SCRIPT.indexOf("setInterval(() => {");
+		expect(setIntervalIndex).toBeGreaterThan(-1);
+		const intervalBody = PRESENTATION_SCRIPT.slice(
+			setIntervalIndex,
+			PRESENTATION_SCRIPT.indexOf("}, 1000);", setIntervalIndex),
+		);
+		expect(intervalBody).toContain("updateTimerDisplay();");
+		expect(intervalBody).toContain("updatePacingDisplay();");
+	});
+
+	it("computes the per-slide pacing indicator from expected vs actual slide index, and renders ahead/behind/on-pace text and classes", () => {
+		expect(PRESENTATION_SCRIPT).toContain("presenter-pacing");
+		expect(PRESENTATION_SCRIPT).toContain(
+			"(elapsedMs() / (targetMinutes * 60_000)) * slides.length",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"Math.round(current - expectedIndex)",
+		);
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-ahead"');
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-behind"');
+		expect(PRESENTATION_SCRIPT).toContain('classList.toggle("is-on-pace"');
+		expect(PRESENTATION_SCRIPT).toContain('"+" + delta + " ahead"');
+		expect(PRESENTATION_SCRIPT).toContain('Math.abs(delta) + " behind"');
+		expect(PRESENTATION_SCRIPT).toContain('"on pace"');
+	});
+
+	it("shows no pacing text or classes at all when no target duration is set, mirroring the timer's own opt-in color coding", () => {
+		const pacingFnIndex = PRESENTATION_SCRIPT.indexOf(
+			"updatePacingDisplay = () =>",
+		);
+		expect(pacingFnIndex).toBeGreaterThan(-1);
+		const pacingFnBody = PRESENTATION_SCRIPT.slice(
+			pacingFnIndex,
+			pacingFnIndex + 500,
+		);
+		expect(pacingFnBody).toContain("if (!hasTarget) {");
+		expect(pacingFnBody).toContain('pacingEl.textContent = "";');
+		expect(pacingFnBody).toContain(
+			'pacingEl.classList.remove("is-ahead", "is-behind", "is-on-pace");',
+		);
+	});
+
+	it("refreshes the pacing indicator inside render()'s own isPresenterView branch, right alongside updatePresenterConsole(), not only once a second", () => {
+		const renderIndex = PRESENTATION_SCRIPT.indexOf("const render = () =>");
+		const renderBody = PRESENTATION_SCRIPT.slice(
+			renderIndex,
+			renderIndex + 1500,
+		);
+		const presenterConsoleCallIndex = renderBody.indexOf(
+			"updatePresenterConsole();",
+		);
+		const pacingCallIndex = renderBody.indexOf("updatePacingDisplay();");
+		expect(presenterConsoleCallIndex).toBeGreaterThan(-1);
+		expect(pacingCallIndex).toBeGreaterThan(-1);
+		expect(pacingCallIndex).toBeGreaterThan(presenterConsoleCallIndex);
 	});
 });
 
@@ -568,5 +630,184 @@ describe('PRESENTATION_SCRIPT — jump to slide ("g" + digits + Enter)', () => {
 
 	it("never uses a backtick inside the client-side script text (a stray backtick would prematurely terminate the outer template literal)", () => {
 		expect(PRESENTATION_SCRIPT).not.toContain("`");
+	});
+});
+
+describe("PRESENTATION_SCRIPT — Alt+click-to-zoom", () => {
+	it("checks event.altKey as the very last guard in the click listener, after the link exclusion and before the plain fallthrough advance() call", () => {
+		// Deliberately "document.addEventListener", not the bare
+		// 'addEventListener("click"' -- the timerDisplay pause-toggle listener
+		// and the zoom overlay's own backdrop-click listener both also match
+		// that bare string, elsewhere in this file, so anchoring on it here
+		// would risk landing on the wrong one.
+		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'document.addEventListener("click"',
+		);
+		const linkExclusionIndex = PRESENTATION_SCRIPT.indexOf(
+			'closest("a")',
+			clickListenerStart,
+		);
+		const altKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			"event.altKey",
+			clickListenerStart,
+		);
+		const advanceIndex = PRESENTATION_SCRIPT.indexOf(
+			"advance();",
+			clickListenerStart,
+		);
+		expect(linkExclusionIndex).toBeGreaterThan(-1);
+		expect(altKeyIndex).toBeGreaterThan(-1);
+		expect(linkExclusionIndex).toBeLessThan(altKeyIndex);
+		expect(altKeyIndex).toBeLessThan(advanceIndex);
+	});
+
+	it("resolves the actual zoom target via closest() against the fixed selector list (images, Mermaid SVGs, code blocks, tables, block math)", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			'"img, svg, pre, table, .katex-display"',
+		);
+		expect(PRESENTATION_SCRIPT).toContain("event.target.closest(");
+	});
+
+	it("returns unconditionally once altKey is true, whether or not a zoom target was found -- a miss must never fall through to advance()", () => {
+		const clickListenerStart = PRESENTATION_SCRIPT.indexOf(
+			'addEventListener("click"',
+		);
+		const altKeyIndex = PRESENTATION_SCRIPT.indexOf(
+			"event.altKey",
+			clickListenerStart,
+		);
+		const altKeyBranch = PRESENTATION_SCRIPT.slice(
+			altKeyIndex,
+			altKeyIndex + 350,
+		);
+		expect(altKeyBranch).toContain("openZoom");
+		expect(altKeyBranch).toContain("event.preventDefault();");
+		expect(altKeyBranch).toContain("return;");
+	});
+
+	it("moves the real clicked element into a dedicated zoom overlay (never cloning it) via openZoom/closeZoom", () => {
+		expect(PRESENTATION_SCRIPT).toContain("const openZoom = (element)");
+		expect(PRESENTATION_SCRIPT).toContain("const closeZoom = ()");
+		expect(PRESENTATION_SCRIPT).toContain("presentation-zoom-overlay");
+	});
+
+	it("inserts a placeholder Comment node at the zoomed element's exact original position before moving it, so closeZoom can restore it there via Comment.replaceWith", () => {
+		const openZoomIndex = PRESENTATION_SCRIPT.indexOf(
+			"const openZoom = (element)",
+		);
+		const openZoomBody = PRESENTATION_SCRIPT.slice(
+			openZoomIndex,
+			openZoomIndex + 500,
+		);
+		expect(openZoomBody).toContain("document.createComment(");
+		expect(openZoomBody).toContain(
+			"element.parentNode.insertBefore(zoomPlaceholder, element)",
+		);
+
+		const closeZoomIndex = PRESENTATION_SCRIPT.indexOf("const closeZoom = ()");
+		const closeZoomBody = PRESENTATION_SCRIPT.slice(
+			closeZoomIndex,
+			closeZoomIndex + 500,
+		);
+		expect(closeZoomBody).toContain("zoomPlaceholder.replaceWith(");
+	});
+
+	it("closes the zoom overlay via a dedicated click listener on the overlay backdrop itself, stopping propagation so the same click never also advances the slide underneath it", () => {
+		const overlayListenerIndex = PRESENTATION_SCRIPT.indexOf(
+			'zoomOverlay.addEventListener("click"',
+		);
+		expect(overlayListenerIndex).toBeGreaterThan(-1);
+		const overlayListenerBody = PRESENTATION_SCRIPT.slice(
+			overlayListenerIndex,
+			overlayListenerIndex + 400,
+		);
+		expect(overlayListenerBody).toContain("event.stopPropagation();");
+		expect(overlayListenerBody).toContain("event.target === zoomOverlay");
+		expect(overlayListenerBody).toContain("closeZoom();");
+	});
+
+	it("gives the zoom overlay the new HIGHEST precedence in the keydown listener's Escape branch, ahead of even isJumpPending()", () => {
+		const escapeIndex = PRESENTATION_SCRIPT.indexOf('event.key === "Escape"');
+		const escapeBranch = PRESENTATION_SCRIPT.slice(
+			escapeIndex,
+			PRESENTATION_SCRIPT.indexOf('event.key === "?"'),
+		);
+		expect(escapeBranch).toContain("isZoomOpen()");
+		expect(escapeBranch).toContain("closeZoom();");
+		expect(escapeBranch.indexOf("isZoomOpen()")).toBeLessThan(
+			escapeBranch.indexOf("isJumpPending()"),
+		);
+	});
+});
+
+describe("PRESENTATION_SCRIPT — auto-advance timer", () => {
+	it("forward-declares the interval handle and the startAutoAdvanceTimer function before goTo() is defined, mirroring updatePacingDisplay's own forward-declaration pattern", () => {
+		const autoAdvanceTimerDeclIndex = PRESENTATION_SCRIPT.indexOf(
+			"let autoAdvanceTimer;",
+		);
+		const startAutoAdvanceTimerDeclIndex = PRESENTATION_SCRIPT.indexOf(
+			"let startAutoAdvanceTimer;",
+		);
+		const goToDefIndex = PRESENTATION_SCRIPT.indexOf(
+			"const goTo = (index, isBackward)",
+		);
+		expect(autoAdvanceTimerDeclIndex).toBeGreaterThan(-1);
+		expect(startAutoAdvanceTimerDeclIndex).toBeGreaterThan(-1);
+		expect(goToDefIndex).toBeGreaterThan(-1);
+		expect(autoAdvanceTimerDeclIndex).toBeLessThan(goToDefIndex);
+		expect(startAutoAdvanceTimerDeclIndex).toBeLessThan(goToDefIndex);
+	});
+
+	it("reads the auto-advance duration from body.dataset.autoAdvanceMs, gated on being finite, positive, and never for a presenter-view window", () => {
+		expect(PRESENTATION_SCRIPT).toContain(
+			"const autoAdvanceMs = Number(document.body.dataset.autoAdvanceMs);",
+		);
+		expect(PRESENTATION_SCRIPT).toContain(
+			"if (!isPresenterView && Number.isFinite(autoAdvanceMs) && autoAdvanceMs > 0)",
+		);
+	});
+
+	it("calls startAutoAdvanceTimer() once, unconditionally, right after the enablement guard -- and before the final initial render() call", () => {
+		const guardIndex = PRESENTATION_SCRIPT.indexOf(
+			"if (!isPresenterView && Number.isFinite(autoAdvanceMs) && autoAdvanceMs > 0)",
+		);
+		expect(guardIndex).toBeGreaterThan(-1);
+		const finalRenderIndex = PRESENTATION_SCRIPT.lastIndexOf("render();");
+		expect(finalRenderIndex).toBeGreaterThan(guardIndex);
+		const guardBody = PRESENTATION_SCRIPT.slice(guardIndex, finalRenderIndex);
+		expect(guardBody).toContain("startAutoAdvanceTimer();");
+	});
+
+	it("on each tick, stops (via clearInterval) without looping once the current slide is the last slide with no more fragments left to reveal -- otherwise falls through to the fragment-aware advance() function, never a raw goTo() jump", () => {
+		const startFnIndex = PRESENTATION_SCRIPT.indexOf(
+			"startAutoAdvanceTimer = ()",
+		);
+		expect(startFnIndex).toBeGreaterThan(-1);
+		const startFnBody = PRESENTATION_SCRIPT.slice(
+			startFnIndex,
+			startFnIndex + 2000,
+		);
+		expect(startFnBody).toContain("setInterval(");
+		expect(startFnBody).toContain("current === slides.length - 1");
+		// Reuses fragmentsInSlide -- the exact same fragment-lookup helper
+		// revealNextFragment/concealLastFragment/setFragmentsRevealed already
+		// share -- rather than tracking reveal state a second, parallel way.
+		expect(startFnBody).toContain("fragmentsInSlide(slides[current])");
+		expect(startFnBody).toContain("clearInterval(autoAdvanceTimer)");
+		expect(startFnBody).toContain("advance();");
+		expect(startFnBody).not.toContain("goTo(current + 1");
+	});
+
+	it("resets the auto-advance timer inside the single shared navigation function (goTo), on any real navigation from any input source", () => {
+		const goToIndex = PRESENTATION_SCRIPT.indexOf(
+			"const goTo = (index, isBackward)",
+		);
+		const advanceIndex = PRESENTATION_SCRIPT.indexOf("const advance = ()");
+		expect(goToIndex).toBeGreaterThan(-1);
+		expect(advanceIndex).toBeGreaterThan(goToIndex);
+		const goToBody = PRESENTATION_SCRIPT.slice(goToIndex, advanceIndex);
+		expect(goToBody).toContain("if (autoAdvanceTimer)");
+		expect(goToBody).toContain("clearInterval(autoAdvanceTimer)");
+		expect(goToBody).toContain("startAutoAdvanceTimer();");
 	});
 });

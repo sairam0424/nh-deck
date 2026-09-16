@@ -18,6 +18,33 @@ export function parsePort(value: string): number {
 }
 
 /**
+ * Commander custom option-parser for --auto-advance. Validates before the
+ * action handler runs at all, so an invalid value never reaches
+ * generateHtml() -- mirrors parsePort's own "throw InvalidArgumentError up
+ * front" shape. Unlike --port, there is no fixed value set to validate
+ * against here -- this only ever needs to accept a positive, finite number
+ * of seconds. Fractional values are genuinely supported (e.g. "7.5"), not
+ * just permitted by an oversight -- a short auto-advance interval is
+ * legitimate for a kiosk-style loop, matching this project's own existing
+ * precedent for a fractional presenter-timer target duration
+ * (presentationScript.ts's duration input). Zero, negative, non-numeric, and
+ * non-finite ("Infinity"/"NaN" as literal typed text) input all throw --
+ * this flag has no meaningful "off" value of its own (the feature is already
+ * off by default whenever the flag/frontmatter key is absent entirely, see
+ * index.ts's computeEffectiveAutoAdvance), so there is no reason to special-
+ * case zero as anything other than invalid input.
+ */
+export function parseAutoAdvanceSeconds(value: string): number {
+	const seconds = Number(value);
+	if (!Number.isFinite(seconds) || seconds <= 0) {
+		throw new InvalidArgumentError(
+			"auto-advance must be a positive number of seconds.",
+		);
+	}
+	return seconds;
+}
+
+/**
  * Derives the output path for an export command (`pdf`, `png`, ...). If no
  * explicit output is given, replaces a trailing .md with `.${extension}`, or
  * appends `.${extension}` if the input has no .md suffix (never silently

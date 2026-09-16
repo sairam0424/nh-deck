@@ -1766,6 +1766,100 @@ describe("presentation mode — presenter view (separate window)", () => {
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
+
+	it(
+		"shows no pacing text or classes at all when no target duration has been typed in",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			const pacingState = await presenterPage.evaluate(() => {
+				const el = document.querySelector(".presenter-pacing");
+				return {
+					exists: el !== null,
+					text: el?.textContent ?? "",
+					classes: Array.from(el?.classList ?? []),
+				};
+			});
+			expect(pacingState.exists).toBe(true);
+			expect(pacingState.text).toBe("");
+			expect(pacingState.classes).not.toContain("is-ahead");
+			expect(pacingState.classes).not.toContain("is-behind");
+			expect(pacingState.classes).not.toContain("is-on-pace");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows an ahead-of-pace indicator when navigating through several slides well faster than a generous typed target implies",
+		async () => {
+			// A deliberately generous target (10 minutes) so expectedIndex stays
+			// close to zero for the whole real-time span this test runs in --
+			// navigating forward at all, this quickly, must always read as
+			// running ahead of THAT pace, regardless of exact test timing.
+			const SIX_SLIDE_DECK = buildDeck(6);
+			const mainPage = await openPresentationPage(generateHtml(SIX_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			await presenterPage.click(".presenter-timer-duration");
+			await presenterPage.type(".presenter-timer-duration", "10");
+			await presenterPage.keyboard.press("Tab");
+
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			await mainPage.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(mainPage)).toBe("Slide 5");
+
+			await presenterPage.waitForFunction(() =>
+				document
+					.querySelector(".presenter-pacing")
+					?.classList.contains("is-ahead"),
+			);
+
+			const pacingText = await presenterPage.evaluate(
+				() => document.querySelector(".presenter-pacing")?.textContent ?? "",
+			);
+			expect(pacingText).toMatch(/^\+\d+ ahead$/);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"shows a behind-pace indicator when a short typed target elapses with no navigation at all",
+		async () => {
+			await openPresentationPage(generateHtml(THREE_SLIDE_DECK));
+			const presenterPage = await openSecondPresentationPage(
+				"/?present&presenter",
+			);
+
+			// A tiny target (0.1 minutes = 6s), matching the established margin
+			// the timer's own near/over-target tests already use -- long enough
+			// to leave real margin against the click/type/Tab setup above, short
+			// enough to cross into "behind" without a slow, unbudgeted real wait.
+			await presenterPage.click(".presenter-timer-duration");
+			await presenterPage.type(".presenter-timer-duration", "0.1");
+			await presenterPage.keyboard.press("Tab");
+
+			await presenterPage.waitForFunction(
+				() =>
+					document
+						.querySelector(".presenter-pacing")
+						?.classList.contains("is-behind"),
+				{ timeout: 8000 },
+			);
+
+			const pacingText = await presenterPage.evaluate(
+				() => document.querySelector(".presenter-pacing")?.textContent ?? "",
+			);
+			expect(pacingText).toMatch(/^\d+ behind$/);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
 });
 
 describe('presentation mode — jump to slide ("g" + digits + Enter)', () => {
@@ -2048,6 +2142,263 @@ describe("presentation mode — accessibility: live region + focus management", 
 				() => document.activeElement === document.body,
 			);
 			expect(focusRestoredToBody).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("presentation mode — Alt+click-to-zoom", () => {
+	// A real image (a well-known, valid 1x1 transparent GIF data URI -- no
+	// network fetch, matching this project's own local-first testing
+	// convention) plus a fenced code block, so both of ZOOM_TARGET_SELECTOR's
+	// listed element kinds are exercised by a single deck.
+	const ZOOMABLE_DECK =
+		"# Slide 1\n\n" +
+		"![test image](data:image/gif;base64,R0lGODlhAQABAAAAACwAAAAAAQABAAACAUwAOw==)\n\n" +
+		"```js\nconsole.log('hi');\n```\n\n" +
+		"---\n\n# Slide 2\n\nSecond.";
+
+	async function isZoomOpen(
+		page: Awaited<ReturnType<typeof openPresentationPage>>,
+	) {
+		return page.evaluate(() => document.body.classList.contains("zoom-open"));
+	}
+
+	it(
+		"Alt+click on a code block moves it into the zoom overlay and marks body with zoom-open, without also advancing the slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active pre");
+			await page.keyboard.up("Alt");
+
+			expect(await isZoomOpen(page)).toBe(true);
+			const overlayHasPre = await page.evaluate(
+				() => document.querySelector(".presentation-zoom-overlay pre") !== null,
+			);
+			expect(overlayHasPre).toBe(true);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"Alt+click on an image moves it into the zoom overlay too, not just code blocks",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active img");
+			await page.keyboard.up("Alt");
+
+			expect(await isZoomOpen(page)).toBe(true);
+			const overlayHasImg = await page.evaluate(
+				() => document.querySelector(".presentation-zoom-overlay img") !== null,
+			);
+			expect(overlayHasImg).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"an Alt+click that misses every zoomable target is a silent no-op -- it neither opens the zoom overlay nor advances the slide",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active h1");
+			await page.keyboard.up("Alt");
+
+			expect(await isZoomOpen(page)).toBe(false);
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"clicking the overlay backdrop restores the zoomed element to its exact original DOM position (compared by live reference, not just by appearance)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			// Captures the real parentElement/previousSibling references live in
+			// the page's own context (never serialized across the Puppeteer
+			// boundary), so the later comparison is a genuine reference-equality
+			// check, not a superficial "looks the same" one.
+			await page.evaluate(() => {
+				const pre = document.querySelector(".slide.is-active pre");
+				const globals = window as unknown as Record<string, unknown>;
+				globals.__nhDeckOriginalParent = pre?.parentElement;
+				globals.__nhDeckOriginalPreviousSibling = pre?.previousSibling;
+			});
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active pre");
+			await page.keyboard.up("Alt");
+			expect(await isZoomOpen(page)).toBe(true);
+
+			// Clicks the backdrop itself, well away from the moved <pre> (which
+			// sits centered, away from this corner), so this click cannot land
+			// on the moved content instead of the overlay behind it.
+			await page.mouse.click(5, 5);
+
+			expect(await isZoomOpen(page)).toBe(false);
+
+			const restoredExactly = await page.evaluate(() => {
+				const pre = document.querySelector(".slide.is-active pre");
+				const globals = window as unknown as Record<string, unknown>;
+				return {
+					sameParent: pre?.parentElement === globals.__nhDeckOriginalParent,
+					samePreviousSibling:
+						pre?.previousSibling === globals.__nhDeckOriginalPreviousSibling,
+					stillInOverlay:
+						document.querySelector(".presentation-zoom-overlay pre") !== null,
+				};
+			});
+			expect(restoredExactly.sameParent).toBe(true);
+			expect(restoredExactly.samePreviousSibling).toBe(true);
+			expect(restoredExactly.stillInOverlay).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"Escape closes the zoom overlay as its highest-precedence case, without also exiting presentation mode in the same keypress",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.keyboard.down("Alt");
+			await page.click(".slide.is-active pre");
+			await page.keyboard.up("Alt");
+			expect(await isZoomOpen(page)).toBe(true);
+
+			await page.keyboard.press("Escape");
+
+			expect(await isZoomOpen(page)).toBe(false);
+			const isPresenting = await page.evaluate(() =>
+				document.body.classList.contains("presenting"),
+			);
+			expect(isPresenting).toBe(true);
+			const hasPresentParam = await page.evaluate(() =>
+				new URLSearchParams(location.search).has("present"),
+			);
+			expect(hasPresentParam).toBe(true);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"a plain click (no Alt) on the same zoomable element still advances the slide exactly as before this feature existed (regression guard)",
+		async () => {
+			const page = await openPresentationPage(generateHtml(ZOOMABLE_DECK));
+
+			await page.click(".slide.is-active pre");
+
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+			expect(await isZoomOpen(page)).toBe(false);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+});
+
+describe("presentation mode — auto-advance", () => {
+	// Calls generateHtml directly with the new trailing autoAdvanceSeconds
+	// argument, rather than going through the CLI -- matching this file's
+	// own established pattern (e.g. the transition-effect describe block
+	// above, which calls generateHtml with a transitionName argument
+	// directly) for exercising a generateHtml-level opt-in without spinning
+	// up the whole Commander parsing path.
+	function generateHtmlWithAutoAdvance(markdown: string, seconds: number) {
+		return generateHtml(
+			markdown,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			undefined,
+			seconds,
+		);
+	}
+
+	it(
+		"auto-advances to the next slide on its own, with no simulated input, within a bounded time window",
+		async () => {
+			const page = await openPresentationPage(
+				generateHtmlWithAutoAdvance(THREE_SLIDE_DECK, 1),
+			);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			await page.waitForFunction(
+				() =>
+					document.querySelector(".slide.is-active h1")?.textContent ===
+					"Slide 2",
+				{ timeout: 5000 },
+			);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"resets the countdown on a manual navigation mid-countdown -- auto-advance does not fire again until a full fresh interval has elapsed after that press",
+		async () => {
+			const page = await openPresentationPage(
+				generateHtmlWithAutoAdvance(THREE_SLIDE_DECK, 2.5),
+			);
+
+			expect(await activeSlideHeading(page)).toBe("Slide 1");
+
+			// Presses well before the UN-RESET 2500ms deadline (from page load)
+			// would fire on its own.
+			await new Promise((resolve) => setTimeout(resolve, 1000));
+			await page.keyboard.press("ArrowRight");
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			// The un-reset timer would have fired at 2500ms after page load (i.e.
+			// 1500ms after this press). Waiting well past that point, but still
+			// comfortably before the RESET timer's own fresh 2500ms-from-the-press
+			// deadline (3500ms after load, 2500ms after the press), proves the
+			// countdown genuinely restarted rather than continuing on its old
+			// schedule.
+			await new Promise((resolve) => setTimeout(resolve, 2000));
+			expect(await activeSlideHeading(page)).toBe("Slide 2");
+
+			// ...and it does still eventually fire again, proving the timer was
+			// reset -- not stopped outright.
+			await page.waitForFunction(
+				() =>
+					document.querySelector(".slide.is-active h1")?.textContent ===
+					"Slide 3",
+				{ timeout: 5000 },
+			);
+		},
+		PRESENTATION_TEST_TIMEOUT_MS,
+	);
+
+	it(
+		"stops the timer without looping back to slide 1 once already on the last (and only) slide with no fragments left",
+		async () => {
+			const ONE_SLIDE_DECK = "# Only slide\n\nNo fragments here.";
+			const page = await openPresentationPage(
+				generateHtmlWithAutoAdvance(ONE_SLIDE_DECK, 1),
+			);
+
+			const pageErrors: string[] = [];
+			page.on("pageerror", (error) => pageErrors.push(String(error)));
+
+			expect(await activeSlideHeading(page)).toBe("Only slide");
+
+			// Comfortably past several would-be tick intervals -- if the timer
+			// looped back to slide 1 (a bug) or threw inside its own callback,
+			// this window is generous enough to catch it.
+			await new Promise((resolve) => setTimeout(resolve, 3500));
+
+			expect(await activeSlideHeading(page)).toBe("Only slide");
+			expect(pageErrors).toHaveLength(0);
 		},
 		PRESENTATION_TEST_TIMEOUT_MS,
 	);
