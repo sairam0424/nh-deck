@@ -55,7 +55,7 @@
 		"svgo": "^4.1.0"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "2.5.13",
+		"@biomejs/biome": "2.5.14",
 		"@types/node": "^26.5.1",
 		"@types/pngjs": "^6.0.5",
 		"axe-core": "^4.13.0",
