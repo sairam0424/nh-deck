@@ -1,15 +1,13 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { PNG } from "pngjs";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { exportToPng } from "../src/pngExport.js";
 import { generateHtml } from "../src/render.js";
 
-// pngjs is already a devDependency used the same way
-// (`PNG.sync.read(buffer).width`/`.height`) in
-// scripts/check-pdf-fidelity.mjs's cross-browser pixel comparison -- reused
-// here rather than hand-parsing PNG's IHDR chunk.
+// A PNG stores its width and height as two big-endian 32-bit integers at bytes
+// 16-23 (the IHDR chunk). Reading them directly avoids pngjs's sync decoder,
+// which calls zlib.Inflate without `new` and throws on the newest Node.
 
 describe("exportToPng", () => {
 	let dir: string;
@@ -91,8 +89,8 @@ describe("exportToPng", () => {
 
 		expect(written).toHaveLength(4);
 		const dimensions = written.map((path) => {
-			const png = PNG.sync.read(readFileSync(path));
-			return { width: png.width, height: png.height };
+			const png = readFileSync(path);
+			return { width: png.readUInt32BE(16), height: png.readUInt32BE(20) };
 		});
 		for (const dimension of dimensions) {
 			expect(dimension).toEqual(dimensions[0]);
